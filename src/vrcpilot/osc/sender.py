@@ -1,0 +1,108 @@
+"""VRChat OSC send-side client.
+
+Wraps a single ``python-osc`` :class:`SimpleUDPClient` and provides the
+typed low-level send primitives plus factories for the higher-level
+``InputController`` / ``AvatarParameters`` views (which delegate back
+into the same sender to keep one socket and one validation path).
+"""
+
+from __future__ import annotations
+
+from typing import Any, Protocol, SupportsFloat, SupportsInt, runtime_checkable
+
+from pythonosc.udp_client import SimpleUDPClient
+
+from vrcpilot.process import OscConfig
+
+from . import avatar, controller
+
+#: Inclusive ``[lo, hi]`` range accepted by :meth:`OscSender.send_int`.
+INT_RANGE: tuple[int, int] = (0, 255)
+
+#: Inclusive ``[lo, hi]`` range accepted by :meth:`OscSender.send_float`.
+FLOAT_RANGE: tuple[float, float] = (-1.0, 1.0)
+
+
+@runtime_checkable
+class SupportsBool(Protocol):
+    """Anything whose truthiness is well-defined via ``__bool__``."""
+
+    def __bool__(self) -> bool: ...
+
+
+class OscSender:
+    """Single-socket OSC client for VRChat.
+
+    Construct directly when host/port are known, or via
+    :meth:`from_config` to inherit the inbound port from
+    :class:`vrcpilot.process.OscConfig`. Inject ``client`` to bypass
+    UDP construction in tests.
+    """
+
+    def __init__(
+        self,
+        host: str = "127.0.0.1",
+        port: int = 9000,
+        *,
+        client: SimpleUDPClient | None = None,
+    ) -> None:
+        self._client = client if client is not None else SimpleUDPClient(host, port)
+        self._host = host
+        self._port = port
+
+    @property
+    def host(self) -> str:
+        """Configured remote host (informational; ``client=`` overrides)."""
+        return self._host
+
+    @property
+    def port(self) -> int:
+        """Configured remote port (informational; ``client=`` overrides)."""
+        return self._port
+
+    # -- Low-level send -------------------------------------------------
+
+    def send(self, address: str, value: Any) -> None:
+        """Pass-through to ``python-osc`` with no normalization."""
+        self._client.send_message(address, value)
+
+    def send_bool(self, address: str, value: SupportsBool) -> None:
+        """Send ``int(bool(value))`` (VRChat's 0/1 integer convention)."""
+        self._client.send_message(address, int(bool(value)))
+
+    def send_int(self, address: str, value: SupportsInt) -> None:
+        """Send an int in :data:`INT_RANGE`; raise ``ValueError`` otherwise."""
+        v = int(value)
+        lo, hi = INT_RANGE
+        if not lo <= v <= hi:
+            raise ValueError(f"int value must be in [{lo}, {hi}], got {v}")
+        self._client.send_message(address, v)
+
+    def send_float(self, address: str, value: SupportsFloat) -> None:
+        """Send a float in :data:`FLOAT_RANGE`; raise ``ValueError``
+        otherwise."""
+        v = float(value)
+        lo, hi = FLOAT_RANGE
+        if not lo <= v <= hi:
+            raise ValueError(f"float value must be in [{lo}, {hi}], got {v}")
+        self._client.send_message(address, v)
+
+    # -- High-level views (fresh instance per call) ---------------------
+
+    def controller(self, *, button_hold: float = 0.05) -> controller.InputController:
+        """Return a new :class:`InputController` bound to this sender."""
+        return controller.InputController(self, button_hold=button_hold)
+
+    def avatar_parameters(self) -> avatar.AvatarParameters:
+        """Return a new :class:`AvatarParameters` bound to this sender."""
+        return avatar.AvatarParameters(self)
+
+    @classmethod
+    def from_config(cls, config: OscConfig) -> OscSender:
+        """Build a sender for a local VRChat described by ``config``.
+
+        Host is fixed to ``127.0.0.1`` because :class:`OscConfig` does
+        not carry a remote-host field; use the constructor directly for
+        non-localhost targets.
+        """
+        return cls(host="127.0.0.1", port=config.in_port)
