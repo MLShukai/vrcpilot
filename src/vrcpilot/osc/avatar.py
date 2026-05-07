@@ -1,17 +1,52 @@
-"""Stub for :class:`AvatarParameters` - real implementation lands later.
+"""VRChat OSC ``/avatar/parameters/*`` send-side view.
 
-Placeholder so :meth:`vrcpilot.osc.sender.OscSender.avatar_parameters`
-has a resolvable return-type annotation while the full avatar
-parameter view is built in a follow-up commit.
+Thin wrapper over :class:`vrcpilot.osc.sender.OscSender` that maps
+parameter *names* to the ``/avatar/parameters/<name>`` address space and
+delegates the typed send to the same sender. Range validation lives on
+:class:`OscSender` (``[0, 255]`` for ints / ``[-1.0, 1.0]`` for floats);
+custom avatars that need values outside those ranges should bypass via
+``sender.send("/avatar/parameters/Foo", value)``.
 """
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Final, SupportsFloat, SupportsInt
+
 from . import sender
+
+if TYPE_CHECKING:
+    from .sender import SupportsBool
+
+#: Common prefix prepended to every avatar parameter name.
+AVATAR_PARAMETER_PREFIX: Final[str] = "/avatar/parameters/"
 
 
 class AvatarParameters:
-    """Placeholder for the OSC avatar-parameter view (TBD)."""
+    """View bound to an :class:`OscSender` for avatar-parameter writes.
+
+    Each method takes a parameter *name* (no slashes, non-empty) and
+    forwards to the sender's typed primitive. Range validation is
+    deferred to :class:`OscSender` so the validation path stays single.
+    """
 
     def __init__(self, sender: sender.OscSender) -> None:
         self._sender = sender
+
+    def send_bool(self, name: str, value: SupportsBool) -> None:
+        """Send a boolean parameter as VRChat's 0/1 integer convention."""
+        self._sender.send_bool(self._address(name), value)
+
+    def send_int(self, name: str, value: SupportsInt) -> None:
+        """Send an integer parameter; range-checked by :class:`OscSender`."""
+        self._sender.send_int(self._address(name), value)
+
+    def send_float(self, name: str, value: SupportsFloat) -> None:
+        """Send a float parameter; range-checked by :class:`OscSender`."""
+        self._sender.send_float(self._address(name), value)
+
+    @staticmethod
+    def _address(name: str) -> str:
+        """Return ``/avatar/parameters/<name>`` after rejecting bad names."""
+        if not name or "/" in name:
+            raise ValueError(f"invalid avatar parameter name: {name!r}")
+        return AVATAR_PARAMETER_PREFIX + name
