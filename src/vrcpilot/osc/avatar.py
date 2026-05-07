@@ -19,26 +19,28 @@ AVATAR_PARAMETER_PREFIX: Final[str] = "/avatar/parameters/"
 
 
 class AvatarParameters:
-    """View bound to an :class:`OscSender` for avatar-parameter writes.
+    """OSC view bound to an :class:`OscSender` for avatar-parameter writes.
 
-    Each method takes a parameter *name* (no slashes, non-empty) and
-    forwards to the sender's typed primitive. Range validation is
-    deferred to :class:`OscSender` so the validation path stays single.
+    Each method takes a bare parameter *name* (no slashes, non-empty);
+    the ``/avatar/parameters/`` prefix and range validation live on the
+    sender so there is one validation path.
     """
 
     def __init__(self, sender: sender.OscSender) -> None:
         self._sender = sender
 
     def send_bool(self, name: str, value: bool) -> None:
-        """Send a boolean parameter as VRChat's 0/1 integer convention."""
+        """Write ``name`` as a bool avatar parameter."""
         self._sender.send_bool(self._address(name), value)
 
     def send_int(self, name: str, value: int) -> None:
-        """Send an integer parameter; range-checked by :class:`OscSender`."""
+        """Write ``name`` as an int avatar parameter (range-checked
+        upstream)."""
         self._sender.send_int(self._address(name), value)
 
     def send_float(self, name: str, value: float) -> None:
-        """Send a float parameter; range-checked by :class:`OscSender`."""
+        """Write ``name`` as a float avatar parameter (range-checked
+        upstream)."""
         self._sender.send_float(self._address(name), value)
 
     @staticmethod

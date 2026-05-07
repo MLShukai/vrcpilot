@@ -30,6 +30,12 @@ class OscSender:
     :meth:`from_config` to inherit the inbound port from
     :class:`vrcpilot.process.OscConfig`. Inject ``client`` to bypass
     UDP construction in tests.
+
+    Typical usage::
+
+        sender = vrcpilot.OscSender()
+        sender.controller().jump()
+        sender.avatar_parameters().send_bool("MyParam", True)
     """
 
     def __init__(
