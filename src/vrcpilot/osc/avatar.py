@@ -10,12 +10,9 @@ custom avatars that need values outside those ranges should bypass via
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Final, SupportsFloat, SupportsInt
+from typing import Final
 
 from . import sender
-
-if TYPE_CHECKING:
-    from .sender import SupportsBool
 
 #: Common prefix prepended to every avatar parameter name.
 AVATAR_PARAMETER_PREFIX: Final[str] = "/avatar/parameters/"
@@ -32,15 +29,15 @@ class AvatarParameters:
     def __init__(self, sender: sender.OscSender) -> None:
         self._sender = sender
 
-    def send_bool(self, name: str, value: SupportsBool) -> None:
+    def send_bool(self, name: str, value: bool) -> None:
         """Send a boolean parameter as VRChat's 0/1 integer convention."""
         self._sender.send_bool(self._address(name), value)
 
-    def send_int(self, name: str, value: SupportsInt) -> None:
+    def send_int(self, name: str, value: int) -> None:
         """Send an integer parameter; range-checked by :class:`OscSender`."""
         self._sender.send_int(self._address(name), value)
 
-    def send_float(self, name: str, value: SupportsFloat) -> None:
+    def send_float(self, name: str, value: float) -> None:
         """Send a float parameter; range-checked by :class:`OscSender`."""
         self._sender.send_float(self._address(name), value)
 
