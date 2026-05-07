@@ -32,6 +32,7 @@ from vrcpilot.detect import (
 # so ``vrcpilot.ocr(shot)`` calls the function; submodule imports still
 # resolve via ``sys.modules``. Pinned by ``test_init.py``.
 from vrcpilot.ocr import OCREngine, OCRResult, OCRWord, RapidOCREngine, ocr
+from vrcpilot.osc import AvatarParameters, InputController, OscSender
 from vrcpilot.process import (
     OscConfig,
     find_pid,
@@ -48,6 +49,7 @@ __version__ = metadata.version(__name__.replace("_", "-"))
 
 __all__ = [
     "__version__",
+    "AvatarParameters",
     "Capture",
     "CaptureLoop",
     "clipboard",
@@ -58,6 +60,7 @@ __all__ = [
     "ensure_target",
     "find_pid",
     "focus",
+    "InputController",
     "is_foreground",
     "Key",
     "keyboard",
@@ -69,6 +72,7 @@ __all__ = [
     "OCRResult",
     "OCRWord",
     "OscConfig",
+    "OscSender",
     "RapidOCREngine",
     "Screenshot",
     "SteamNotFoundError",

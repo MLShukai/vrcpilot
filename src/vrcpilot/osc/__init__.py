@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from .avatar import AvatarParameters
+from .controller import InputController
 from .sender import OscSender, SupportsBool
 
 __all__ = [
+    "AvatarParameters",
+    "InputController",
     "OscSender",
     "SupportsBool",
 ]
