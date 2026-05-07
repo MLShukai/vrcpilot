@@ -1,14 +1,22 @@
 # Python API Reference
 
-This document is a hand-curated reference for every symbol exposed at `vrcpilot.<name>`. For runnable narratives see [`usage.md`](usage.md); for the equivalent CLI see [`cli.md`](cli.md). Function signatures match the source as of `0.1.0a1`.
+This is a hand-curated reference for every symbol exposed at `vrcpilot.<name>`. For runnable examples see [`usage.md`](usage.md); for the equivalent CLI see [`cli.md`](cli.md). Function signatures match the source as of `0.1.0a1`.
 
 ## Conventions
 
 - All `vrcpilot.<name>` symbols are listed in [`src/vrcpilot/__init__.py::__all__`](../src/vrcpilot/__init__.py).
-- Submodules `vrcpilot.keyboard`, `vrcpilot.mouse`, and `vrcpilot.clipboard` are also part of the public surface.
-- Most call sites that send synthetic input or talk to the VRChat window expect VRChat to be **running and focused** — that requirement is enforced by [`ensure_target()`](#ensure_target) and is called for you by the high-level helpers. The relevant exceptions (`VRChatNotRunningError`, `VRChatNotFocusedError`) are re-raised so callers can recover.
-- All coordinate-bearing types (`Screenshot`, `OCRWord`, `OCRResult`, `Detection`, `DetectResult`) carry both window-local (`pos*`) and desktop-absolute (`display_pos*`) views. Always feed `display_pos.bbox` into `mouse.move()` — see [coordinate system](cli.md#coordinate-system).
+- Module attributes `vrcpilot.keyboard`, `vrcpilot.mouse`, and `vrcpilot.clipboard` are also part of the public surface.
+- Most call sites that send synthetic input or interact with the VRChat window expect VRChat to be **running and focused**. That requirement is enforced by [`ensure_target()`](#ensure_target), and the high-level helpers call it for you. The relevant exceptions (`VRChatNotRunningError`, `VRChatNotFocusedError`) are re-raised so callers can recover.
+- Coordinate-bearing types (`Screenshot`, `OCRWord`, `OCRResult`, `Detection`, `DetectResult`) keep both window-local (`pos*`) and desktop-absolute (`display_pos*`) views. Always feed `display_pos.bbox` into `mouse.move()` — see [coordinate system](cli.md#coordinate-system).
 - Code blocks use `...` as the body of every signature so they paste back cleanly into a Python REPL or stub file.
+
+______________________________________________________________________
+
+## Package metadata
+
+### `vrcpilot.__version__`
+
+Resolved from installed distribution metadata via `importlib.metadata`, so it stays in sync with the package version in `pyproject.toml`.
 
 ______________________________________________________________________
 
@@ -31,11 +39,11 @@ def launch(
 ) -> int | None: ...
 ```
 
-Start VRChat through Steam. The new process is detached from the calling process group. After spawning Steam, polls [`find_pid()`](#vrcpilotfind_pid) for up to `wait_timeout` seconds (default 30s) and returns the observed PID. Pass `wait_timeout=0` (or any non-positive value) to skip the wait and return immediately — useful for "fire and forget" launches where you intend to poll later yourself.
+Start VRChat through Steam. The new process is detached from the calling process group. After spawning Steam, `launch()` polls [`find_pid()`](#vrcpilotfind_pid) for up to `wait_timeout` seconds (default 30s) and returns the observed PID. Pass `wait_timeout=0` (or any non-positive value) to skip the wait and return immediately. This is useful for "fire and forget" launches where you intend to poll later yourself.
 
 **Returns**: the PID once VRChat is observed, or `None` if `wait_timeout <= 0` or the timeout is exceeded. A `None` return on a positive timeout is *not* an exception — branch on the return value if you need a stricter signal.
 
-`app_id` defaults to VRChat's Steam app id. If you need to reference the constant directly (e.g. when building a custom launch wrapper), import it from the implementation module: `from vrcpilot.process import VRCHAT_STEAM_APP_ID`.
+`app_id` defaults to VRChat's Steam app id. If you need to reference the constant directly, for example when building a custom launch wrapper, import it from the implementation module: `from vrcpilot.process import VRCHAT_STEAM_APP_ID`.
 
 **Raises**: `SteamNotFoundError` when no Steam executable is found.
 
@@ -247,7 +255,7 @@ class RapidOCREngine(OCREngine):
     def __init__(self, *, params: dict[str, Any] | None = None) -> None: ...
 ```
 
-Default backend (PP-OCRv4 via `rapidocr`). Lazy-imports `rapidocr` in the constructor so the rest of the package is usable without the `ocr` extra installed.
+Default backend (PP-OCRv4 via `rapidocr`). It lazy-imports `rapidocr` in the constructor, so the rest of the package remains usable without the `ocr` extra installed.
 
 **Raises**: `ImportError` when `rapidocr` is not installed.
 
@@ -347,7 +355,7 @@ ______________________________________________________________________
 
 ## Synthetic input
 
-The `keyboard` and `mouse` modules are thin objects (not classes) — call methods on them directly. All methods accept `focus: bool = True` to opt out of the VRChat focus guard; leave it `True` unless you have a reason. The signatures below are written as `def`s for paste-friendliness; in practice you call them as `vrcpilot.keyboard.press(...)` and so on.
+The `keyboard` and `mouse` modules expose thin singleton objects rather than classes. Call methods on them directly. All methods accept `focus: bool = True`; leave it `True` unless you deliberately want to bypass the VRChat focus guard. The signatures below are written as `def`s for paste-friendliness; in practice you call them as `vrcpilot.keyboard.press(...)` and so on.
 
 ### `vrcpilot.Key`
 
@@ -371,7 +379,7 @@ def up(*keys: Key, focus: bool = True) -> None: ...
 
 `press` is a chord-tap: keys are pressed left-to-right, held for `duration` seconds, then released right-to-left. Do not lower `duration` below `0.1` — VRChat / Unity drops shorter taps.
 
-`down` and `up` are paired half-actions. They are intentionally only useful within a single Python process; the synthetic input device is released by the kernel when the process exits, so down/up cannot be paired across CLI invocations.
+`down` and `up` are paired half-actions. They are intentionally useful only within a single Python process; the synthetic input device is released by the kernel when the process exits, so down/up cannot be paired across CLI invocations.
 
 **Raises**: `TypeError` when `keys` is empty; `VRChatNotRunningError` / `VRChatNotFocusedError` from the focus guard.
 
@@ -389,11 +397,11 @@ def press(*buttons: MouseButton, focus: bool = True) -> None: ...
 def release(*buttons: MouseButton, focus: bool = True) -> None: ...
 ```
 
-`move(x, y)` defaults to pixels in the virtual-desktop bounding box (`mss.MSS().monitors[0]` on Linux, the Win32 virtual screen on Windows). On standard left-origin monitor layouts this matches "desktop-absolute pixels" and round-trips with the `display_pos.bbox` from OCR / detect; on layouts where another monitor extends leftward of the primary the origin shifts accordingly. With `relative=True`, `(x, y)` is added to the current cursor position.
+`move(x, y)` defaults to pixels in the virtual-desktop bounding box (`mss.MSS().monitors[0]` on Linux, the Win32 virtual screen on Windows). On standard left-origin monitor layouts this matches "desktop-absolute pixels" and round-trips with `display_pos.bbox` from OCR / detect. If another monitor extends left of the primary, the origin shifts accordingly. With `relative=True`, `(x, y)` is added to the current cursor position.
 
 `click()` falls back to `LEFT` when called with no buttons. `count > 1` repeats the press/release pair. `duration > 0` holds each click for that many seconds.
 
-`press` / `release` are paired half-actions for chord clicks. As with `keyboard.down` / `up`, they are only meaningful within a single Python process.
+`press` / `release` are paired half-actions for chord clicks. As with `keyboard.down` / `up`, they are meaningful only within a single Python process.
 
 ### `vrcpilot.ensure_target`
 
@@ -419,7 +427,7 @@ ______________________________________________________________________
 def paste(text: str, *, focus: bool = True) -> None: ...
 ```
 
-Copy `text` to the OS clipboard, then send Ctrl+V to VRChat. Use this for non-ASCII content (Japanese, emoji, …) — scancode-based `keyboard.press` cannot type those directly.
+Copy `text` to the OS clipboard, then send Ctrl+V to VRChat. Use this for non-ASCII content (Japanese, emoji, etc.) — scancode-based `keyboard.press` cannot type those directly.
 
 **Raises**: `pyperclip.PyperclipException` when no clipboard backend is available (e.g. Linux without `xclip` or `xsel` installed); the focus-guard exceptions when `focus=True`.
 
@@ -449,17 +457,17 @@ from time import sleep
 
 import vrcpilot
 
-# launch() now waits up to wait_timeout seconds for VRChat's PID and
-# returns it. None means the timeout expired before VRChat appeared.
+# launch() waits up to wait_timeout seconds for VRChat's PID.
+# None means the timeout expired before VRChat appeared.
 pid = vrcpilot.launch(no_vr=True, screen_width=1280, screen_height=720)
 if pid is None:
     raise RuntimeError("VRChat did not start before launch() timed out")
-sleep(45)  # extra warm up: shaders, avatar load, network sync
+sleep(45)  # extra warm-up wait: shaders / avatar loading / network sync
 
 try:
     shot = vrcpilot.take_screenshot()
     if shot is None:
-        raise RuntimeError("could not capture VRChat")
+        raise RuntimeError("could not capture the VRChat screen")
 
     result = vrcpilot.ocr(shot)
     for word in result.words:

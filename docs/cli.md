@@ -1,35 +1,35 @@
 # CLI Reference
 
-This document is the flag-by-flag reference for the `vrcpilot` command. For task-oriented walkthroughs see [`usage.md`](usage.md); for the equivalent Python API see [`python-api.md`](python-api.md).
+This is the flag-by-flag reference for the `vrcpilot` command. For task-oriented walkthroughs see [`usage.md`](usage.md); for the equivalent Python API see [`python-api.md`](python-api.md).
 
 `vrcpilot --help` and `vrcpilot <subcommand> --help` print the same content at runtime.
 
 ## Conventions
 
-- All subcommands return exit code `0` on success and `1` on a recoverable failure (with a one-line `vrcpilot: <message>` on stderr). A few commands also use `2` for an input-shape error; those are noted explicitly below.
+- Subcommands return exit code `0` on success and `1` on recoverable failure, with a one-line `vrcpilot: <message>` on stderr. A few commands also use `2` for input-shape errors; those cases are called out below.
 - `vrcpilot --version` prints the resolved package version (read via `importlib.metadata` so it stays in sync with `pyproject.toml`).
-- The CLI is `argcomplete`-aware (`PYTHON_ARGCOMPLETE_OK` marker is in [`src/vrcpilot/cli/__init__.py`](../src/vrcpilot/cli/__init__.py)). See [`README.md`](../README.md#shell-completion) for setup.
+- The CLI is `argcomplete`-aware (`PYTHON_ARGCOMPLETE_OK` is declared in [`src/vrcpilot/cli/__init__.py`](../src/vrcpilot/cli/__init__.py)). See [`README.md`](../README.md#shell-completion) for setup.
 
 ### `Screenshot` YAML hand-off
 
-`ocr` and `detect` do not capture the screen themselves. They consume a `Screenshot` YAML produced by `vrcpilot screenshot`, resolved by [`cli/_common.py::resolve_screenshot`](../src/vrcpilot/cli/_common.py) in this order:
+`ocr` and `detect` do not capture the screen themselves. They consume a `Screenshot` YAML produced by `vrcpilot screenshot`. [`cli/_common.py::resolve_screenshot`](../src/vrcpilot/cli/_common.py) resolves that input in this order:
 
 1. `-s` / `--screenshot <path>` if the flag is set. The file always wins; stdin is not even read in this branch.
 2. Stdin, if stdin is **not** a TTY (i.e. piped from `vrcpilot screenshot ...`).
 3. Otherwise: print a usage message to stderr and exit `1`.
 
-Both forms are first-class — pipe a fresh capture or hand in a previously-saved file as you please.
+Both forms are first-class: pipe a fresh capture, or pass a previously saved YAML file.
 
 ### Coordinate system
 
-OCR and detect output two coordinate spaces per match:
+OCR and detect emit two coordinate spaces per match:
 
 - `pos.{polygon,bbox}` — window-local, origin at the VRChat window's top-left.
 - `display_pos.{polygon,bbox}` — desktop-absolute, already shifted by `window.x` / `window.y`.
 
-When feeding coordinates back into `vrcpilot mouse move`, **always use `display_pos.bbox`**. Window-local `pos` will land in the wrong place on multi-monitor setups or when the VRChat window is not at `(0, 0)`.
+When feeding coordinates back into `vrcpilot mouse move`, **always use `display_pos.bbox`**. Window-local `pos` will land in the wrong place on multi-monitor setups or whenever the VRChat window is not at `(0, 0)`.
 
-The shared frame for both screenshot geometry and `mouse move` is the **virtual-desktop bounding box** — `mss.MSS().monitors[0]` on Linux, the Win32 virtual screen on Windows. On standard left-origin monitor layouts that bounding box starts at `(0, 0)` and matches the everyday "desktop-absolute pixels" intuition; on layouts where a secondary monitor extends leftward of the primary the origin shifts accordingly. Both OCR / detect output and `mouse move` use the same frame, so coordinates round-trip without manual translation.
+The shared frame for screenshot geometry and `mouse move` is the **virtual-desktop bounding box**: `mss.MSS().monitors[0]` on Linux, and the Win32 virtual screen on Windows. On standard left-origin monitor layouts that box starts at `(0, 0)` and matches the usual "desktop-absolute pixels" intuition. If a secondary monitor extends left of the primary, the origin shifts accordingly. OCR / detect output and `mouse move` use the same frame, so coordinates round-trip without manual translation.
 
 ______________________________________________________________________
 
@@ -56,17 +56,17 @@ vrcpilot launch [--app-id INT] [--steam-path PATH] [--no-vr]
 | `--osc-out-port N`       | `9001`      | OSC outbound port (only meaningful with `--osc-in-port`).                                 |
 | `--wait-timeout SECONDS` | `30`        | How long to wait for the VRChat PID to appear. `0` returns immediately without waiting.   |
 
-**Output**: when `--wait-timeout > 0` and a PID is observed, the PID is printed on stdout (one line). On Steam-not-found or wait timeout, `vrcpilot: <message>` is written to stderr.
+**Output**: when `--wait-timeout > 0` and a PID is observed, that PID is printed on stdout (one line). On Steam-not-found or wait timeout, `vrcpilot: <message>` is written to stderr.
 
 **Exit codes**: `0` on success, `1` on wait-timeout, `2` if Steam cannot be located.
 
-**Side effects**: starts Steam (if not already running) and launches the requested app.
+**Side effects**: starts Steam if it is not already running, then launches the requested app.
 
 ______________________________________________________________________
 
 ## pid
 
-List currently-running VRChat process IDs.
+List currently running VRChat process IDs.
 
 ```
 vrcpilot pid
@@ -82,7 +82,7 @@ ______________________________________________________________________
 
 ## terminate
 
-Kill all running VRChat processes. Idempotent — safe to call when nothing is running.
+Terminate all running VRChat processes. Idempotent — safe to call when nothing is running.
 
 ```
 vrcpilot terminate
@@ -92,7 +92,7 @@ vrcpilot terminate
 
 **Exit codes**: always `0`.
 
-**Side effects**: sends a force-kill signal to every matching process.
+**Side effects**: sends a force-kill signal to each matching process.
 
 ______________________________________________________________________
 
@@ -149,7 +149,7 @@ vrcpilot screenshot [-o PATH]
 
 **Exit codes**: `0` on success, `1` if capture fails.
 
-**Side effects**: writes a PNG to disk only when `-o` is set. The parent directory of `-o PATH` must already exist; a missing parent surfaces as a `FileNotFoundError` traceback rather than a clean exit-1.
+**Side effects**: writes a PNG to disk only when `-o` is set. The parent directory of `-o PATH` must already exist; a missing parent currently surfaces as a `FileNotFoundError` traceback rather than a clean exit-1.
 
 ______________________________________________________________________
 
@@ -170,7 +170,7 @@ vrcpilot capture [-o PATH] [--fps FLOAT] [--duration SECONDS]
 **Output**:
 
 - File mode: progress is logged to stderr; on completion, the absolute output path is printed once on stdout.
-- Pipe mode: a binary y4m stream on stdout. Progress on stderr.
+- Pipe mode: a binary y4m stream is written to stdout; progress is logged to stderr.
 
 **Exit codes**: `0` on success, `1` if no frames were captured or pipe mode is requested while stdout is a TTY.
 
@@ -215,11 +215,11 @@ vrcpilot mouse scroll AMOUNT
 | -------- | ------------------------------------------------------------------ |
 | `AMOUNT` | Vertical scroll units. Positive scrolls down, negative scrolls up. |
 
-**Exit codes** (all `mouse` subcommands): `0` on success, `1` if VRChat is not running or not focused.
+**Exit codes** (all `mouse` subcommands): `0` on success, `1` if VRChat is not running or is not focused.
 
 **Side effects**: synthesizes input via [`pydirectinput`](https://github.com/learncodebygaming/pydirectinput) (Windows) or [`inputtino`](https://github.com/games-on-whales/inputtino) (Linux uinput).
 
-> `mouse press` / `mouse release` are intentionally not exposed — buttons released by the kernel when a CLI process exits cannot be paired across separate invocations. For paired down/up, drive the input from a single Python process via [`vrcpilot.mouse.press` / `vrcpilot.mouse.release`](python-api.md#mouse).
+> `mouse press` / `mouse release` are intentionally not exposed. The kernel releases buttons when the CLI process exits, so down/up cannot be paired across separate invocations. For paired down/up actions, drive input from a single Python process via [`vrcpilot.mouse.press` / `vrcpilot.mouse.release`](python-api.md#mouse).
 
 ______________________________________________________________________
 
@@ -238,17 +238,17 @@ vrcpilot keyboard press KEY [KEY ...] [--duration SECONDS]
 
 Valid `KEY` values: `a`–`z`, `0`–`9`, `f1`–`f12`, modifiers (`shift` / `shiftleft` / `shiftright`, `ctrl` / `ctrlleft` / `ctrlright`, `alt` / `altleft` / `altright`, `win` / `winleft` / `winright`), navigation (`up`, `down`, `left`, `right`, `home`, `end`, `pageup`, `pagedown`), editing (`backspace`, `delete`, `insert`, `tab`, `enter`, `escape`, `space`), punctuation (`minus`, `equals`, `lbracket`, `rbracket`, `backslash`, `semicolon`, `quote`, `comma`, `period`, `slash`, `backtick`).
 
-**Exit codes**: `0` on success, `1` if VRChat is not running or not focused.
+**Exit codes**: `0` on success, `1` if VRChat is not running or is not focused.
 
 **Side effects**: synthesizes input as above.
 
-> `keyboard down` / `keyboard up` are intentionally not exposed; same rationale as `mouse press` / `mouse release`.
+> `keyboard down` / `keyboard up` are intentionally not exposed, for the same reason as `mouse press` / `mouse release`.
 
 ______________________________________________________________________
 
 ## paste
 
-Inject arbitrary Unicode text via clipboard + Ctrl+V. Use this for non-ASCII content (Japanese, emoji, …) that scancode-based `keyboard press` cannot type directly.
+Inject arbitrary Unicode text via clipboard + Ctrl+V. Use this for non-ASCII content (Japanese, emoji, etc.) that scancode-based `keyboard press` cannot type directly.
 
 ```
 vrcpilot paste [TEXT]
@@ -258,7 +258,7 @@ vrcpilot paste [TEXT]
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `TEXT` (positional) | The text to paste. Optional. If omitted and stdin is piped, the text is read from stdin; if omitted and stdin is a TTY, the command exits `2` rather than blocking on input. |
 
-**Exit codes**: `0` on success, `1` on a VRChat focus-guard failure or a clipboard backend error, `2` if `TEXT` is omitted and stdin is a TTY.
+**Exit codes**: `0` on success, `1` on a VRChat focus-guard failure or clipboard backend error, `2` if `TEXT` is omitted and stdin is a TTY.
 
 **Side effects**: writes to the OS clipboard, then sends Ctrl+V.
 

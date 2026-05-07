@@ -1,6 +1,6 @@
 # Usage Guide
 
-This is the task-oriented walkthrough for driving VRChat with `vrcpilot`. For flag-by-flag details see [`cli.md`](cli.md); for the equivalent Python surface see [`python-api.md`](python-api.md).
+This guide walks through the practical loop for driving VRChat with `vrcpilot`: launch, observe, act, and verify. For flag-by-flag details see [`cli.md`](cli.md); for the equivalent Python API see [`python-api.md`](python-api.md).
 
 The examples target Linux with X11 (or XWayland). The same flow works on Windows after dropping the `.env` setup in [Section 1](#1-load-environment-once-per-shell).
 
@@ -11,14 +11,15 @@ ______________________________________________________________________
 - **VRChat is installed via Steam**, and Steam is logged in.
 - **The desktop session is X11 or XWayland.** Run `loginctl show-session "$XDG_SESSION_ID" -p Type` to confirm `Type=x11`. Wayland-native sessions are not supported — `focus()` / `unfocus()` warn and return `False`, and synthetic input cannot reach the window.
 - **Steam is already running.** If Steam is not running, `vrcpilot launch` will spend its 30-second wait on Steam's startup screen and then fail with `VRChat PID was not observed before timeout`. Bring Steam up first.
-- **Linux only — write access to `/dev/uinput`.** Synthetic input goes through [`inputtino`](https://github.com/games-on-whales/inputtino), which writes to `/dev/uinput`. `sudo usermod -aG input $USER`, then log out and back in. Confirm with `groups` showing `input`.
+- **Linux only — `inputtino-python` is installed before `vrcpilot`.** The Linux input backend comes from [`inputtino`](https://github.com/games-on-whales/inputtino). Install the native build prerequisites first, then install `inputtino-python` into the same Python environment as `vrcpilot`; see [`README.md` Installation](../README.md#installation).
+- **Linux only — write access to `/dev/uinput`.** Synthetic input writes through `/dev/uinput`. Run `sudo usermod -aG input "$USER"`, then log out and back in. Confirm with `groups` showing `input`.
 - **The screen is not locked.** Window operations are unstable while the screen is locked.
 
 ______________________________________________________________________
 
 ## 1. Load environment once per shell
 
-Over SSH, the login shell does not have `DISPLAY` or `XAUTHORITY` set. Source them from a `.env` file in the project root for every CLI session:
+Over SSH, the login shell usually does not have `DISPLAY` or `XAUTHORITY` set. Source them from a `.env` file in the project root for each CLI session:
 
 ```bash
 set -a && . ./.env && set +a
@@ -31,7 +32,7 @@ DISPLAY=:0
 XAUTHORITY=/home/<you>/.Xauthority
 ```
 
-The `VIRTUAL_ENV=/usr does not match ... will be ignored` warning emitted by `uv run` is harmless — `uv run` always uses the project `.venv`.
+The `VIRTUAL_ENV=/usr does not match ... will be ignored` warning from `uv run` is harmless — `uv run` still uses the project `.venv`.
 
 On Windows, no `.env` is needed; the desktop session and the SSH / RDP / local terminal share the same display by default.
 
@@ -45,14 +46,14 @@ vrcpilot launch --no-vr --screen-width 1280 --screen-height 720 --wait-timeout 6
 
 - `--no-vr` forces desktop mode. Always pass it on machines without an HMD.
 - `--wait-timeout 60` blocks until the VRChat PID is observed, then prints it on stdout. Exit code `0` confirms launch.
-- Right after launch, VRChat shows the **Launch Pad** load screen with a rotating `01`–`04` icon. This is the menu, not a loading indicator — VRChat may still be busy compiling shaders.
+- Right after launch, VRChat shows the **Launch Pad** screen with a rotating `01`–`04` icon. This is the menu, not a loading indicator — VRChat may still be busy compiling shaders.
 - Allow **about 45 seconds** before sending input. Earlier inputs may race with shader compilation or avatar load.
 
 ______________________________________________________________________
 
 ## 3. Observe — screenshot, OCR, detect
 
-VRChat is opaque from the outside; observe before and after every action.
+VRChat is opaque from the outside, so observe before and after every action.
 
 ### 3.1 Screenshot
 
@@ -84,9 +85,9 @@ Each `words[i]` carries:
 - `pos.{polygon,bbox}` — window-local.
 - `display_pos.{polygon,bbox}` — desktop-absolute, already shifted by `window.x` / `window.y`.
 
-When passing coordinates to `vrcpilot mouse move`, **always use `display_pos.bbox`**. Window-local `pos` will land in the wrong place under multi-monitor or non-origin window placements. Both OCR / detect output and `mouse move` share the same virtual-desktop frame, so coordinates round-trip without manual translation; see [`cli.md` Coordinate system](cli.md#coordinate-system) for the full story.
+When passing coordinates to `vrcpilot mouse move`, **always use `display_pos.bbox`**. Window-local `pos` will land in the wrong place on multi-monitor setups or when the VRChat window is not at the desktop origin. Both OCR / detect output and `mouse move` share the same virtual-desktop frame, so coordinates round-trip without manual translation; see [`cli.md` Coordinate system](cli.md#coordinate-system) for the full story.
 
-`--viz [PATH]` produces a PNG with the polygons drawn over the screenshot. Useful to sanity-check OCR output by eye.
+`--viz [PATH]` produces a PNG with the polygons drawn over the screenshot. Use it to sanity-check OCR output by eye.
 
 ### 3.3 Image-template detect
 
@@ -98,22 +99,22 @@ vrcpilot screenshot | vrcpilot detect -q assets/launch-pad.png --threshold 0.85 
 
 `detections[i]` carries `confidence`, `scale`, `rotation`, `pos.*`, and `display_pos.*`.
 
-`TM_CCOEFF_NORMED` works best for pixel-perfect crops of static UI elements. For text, prefer OCR.
+`TM_CCOEFF_NORMED` works best with pixel-perfect crops of static UI elements. For text, prefer OCR.
 
 ______________________________________________________________________
 
 ## 4. Move and click
 
 ```bash
-# Replace 1183 / 514 with the centre of an OCR/detect display_pos.bbox you obtained above.
+# Replace 1183 / 514 with the center of an OCR/detect display_pos.bbox you obtained above.
 vrcpilot mouse move 1183 514
 vrcpilot mouse click left
 ```
 
-- Coordinates default to the virtual-desktop frame (the same one OCR / detect emit under `display_pos`). `--rel` switches to a delta from the current position.
+- Coordinates default to the virtual-desktop frame (the same one OCR / detect emit under `display_pos`). `--rel` switches to a delta from the current cursor position.
 - `vrcpilot mouse click` defaults to `left` and `--count 1`. Use `--count 2` for double-click; `--duration 0.05` to hold the button briefly.
 
-For paired down/up (e.g. drag), drive the input from a single Python process — the synthetic input device is released by the kernel when the CLI process exits, so `mouse press` followed by another `mouse release` invocation cannot keep the button held across them.
+For paired down/up actions such as dragging, use a single Python process. The synthetic input device is released by the kernel when the CLI process exits, so `mouse press` followed by a separate `mouse release` invocation cannot keep the button held between commands.
 
 ______________________________________________________________________
 
@@ -126,7 +127,7 @@ vrcpilot keyboard press escape                     # close the topmost dialog
 ```
 
 - `--duration 0.1` is the lower bound that VRChat reliably sees. Do not lower it further.
-- Multiple keys form a chord (down all → sleep → up reversed). `shift w` above is "hold shift, then tap w, then release both".
+- Multiple keys form a chord (down all -> sleep -> up reversed). `shift w` above means "hold shift, tap w, then release both".
 - Movement scales with `--duration`. Tune per world.
 - Each invocation is a separate process. To hold a key while doing something else, use the Python API: `vrcpilot.keyboard.down(...)` and `vrcpilot.keyboard.up(...)` from the same process.
 
@@ -134,7 +135,7 @@ ______________________________________________________________________
 
 ## 6. Non-ASCII text
 
-Scancode-based keyboards cannot type Japanese, emoji, etc. Use `paste`, which copies to the OS clipboard and then sends Ctrl+V:
+Scancode-based keyboard input cannot type Japanese, emoji, and similar text directly. Use `paste`, which copies to the OS clipboard and then sends Ctrl+V:
 
 ```bash
 vrcpilot paste "こんにちは、VRChat！"
@@ -143,7 +144,7 @@ vrcpilot paste "こんにちは、VRChat！"
 cat msg.txt | vrcpilot paste
 ```
 
-Click into a text field first so it has keyboard focus, then `paste`. On Linux without `xclip` / `xsel` you may see a `pyperclip.PyperclipException`; install one of them.
+Click into a text field first so it has keyboard focus, then run `paste`. On Linux without `xclip` / `xsel`, you may see a `pyperclip.PyperclipException`; install one of them.
 
 ______________________________________________________________________
 
@@ -156,7 +157,7 @@ vrcpilot mouse move 200 0 --rel        # turn right ~200 px worth
 vrcpilot mouse move 0 -100 --rel       # look up ~100 px worth
 ```
 
-When a menu is open, the cursor returns to "click around the UI" mode.
+When a menu is open, the cursor returns to UI-click mode.
 
 ______________________________________________________________________
 
@@ -177,7 +178,7 @@ vrcpilot screenshot -o /tmp/vrc_after.png
 
 ### OCR-driven click
 
-Pipe a screenshot through `ocr`, pick the first match for a word, click its centre. The example uses [mikefarah/yq](https://github.com/mikefarah/yq) v4; with `jq` you would replace the filter with `'.words[] | select(.text == "Worlds") | .display_pos.bbox | @tsv'`.
+Pipe a screenshot through `ocr`, pick the first match for a word, and click its center. The example uses [mikefarah/yq](https://github.com/mikefarah/yq) v4; with `jq`, replace the filter with `'.words[] | select(.text == "Worlds") | .display_pos.bbox | @tsv'`.
 
 ```bash
 read -r x y w h < <(
@@ -250,4 +251,4 @@ finally:
     vrcpilot.terminate()
 ```
 
-Hold a key or a button across multiple actions by using `keyboard.down` / `up` and `mouse.press` / `release` from one Python process — half-action APIs that the CLI cannot expose because each invocation is its own process.
+Hold a key or button across multiple actions by using `keyboard.down` / `up` and `mouse.press` / `release` from one Python process. These half-action APIs are intentionally absent from the CLI because each CLI invocation is its own process.
