@@ -98,13 +98,15 @@ def _open_osc_debug_panel() -> None:
     gear_cy = gy + gh // 2
     _helpers.log(f"gear icon -> click ({gear_cx}, {gear_cy})")
     mouse.move(gear_cx, gear_cy)
-    # First click focuses the gear, second click activates it; with no
-    # gap between them VRChat collapses the pair into a single click
-    # and never opens the full settings screen. 0.4s is the smallest
-    # gap that has reliably registered as two distinct clicks.
-    mouse.click()
-    time.sleep(0.4)
-    mouse.click()
+    # A real double-click (press-release-press-release with no
+    # inter-cycle delay) is required: a single click only opens the
+    # Quick Menu Settings panel, while VRChat treats the second click
+    # as a *double-click* gesture to expand into the full settings
+    # screen that hosts the search field. Two click() calls separated
+    # by sleep(0.4) registered as two separate single-clicks and never
+    # triggered the expansion -- count=2 collapses them into one
+    # double-click event.
+    mouse.click(count=2, duration=0.05)
     time.sleep(1.5)
 
     shot = _shot("02_settings")
