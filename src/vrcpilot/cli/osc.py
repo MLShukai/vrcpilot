@@ -11,24 +11,85 @@ seven actions that map onto the public OSC surface:
 - ``typing`` - chatbox typing indicator only
 - ``avatar`` - :class:`AvatarParameters` send_bool/send_int/send_float
 
-This commit lands the skeleton, the parent ``osc`` parser flags
-(``--host`` / ``--port`` / ``--button-hold``) and the ``send`` action
-only. The remaining six actions are added in follow-up commits.
+This commit lands ``send`` plus the three :class:`InputController`
+wrappers (``axis`` / ``tap`` / ``hold``). ``chatbox`` / ``typing`` /
+``avatar`` are added in the follow-up commit.
 
 The :func:`_make_sender` factory below is the stable patch target for
 tests (mirrors how ``mouse_api`` works in :mod:`vrcpilot.cli.mouse`).
 Tests construct a real :class:`OscSender` with an injected
 :class:`tests.fakes.FakeUDPClient` and patch this factory to return it.
+
+The :data:`_AXIS_NAMES` / :data:`_TAP_NAMES` / :data:`_HOLD_NAMES`
+tuples are the single source of truth for the kebab-case name choices
+exposed to argparse. Each entry maps to an :class:`InputController`
+method via :func:`_to_method` (``-`` -> ``_``); the
+``TestOscChoiceCoverage`` test asserts every entry resolves to a
+callable on a real controller.
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
+from typing import Final
 
 from vrcpilot.osc import OscSender
 
 from ._common import SubParsersAction
+
+#: Axis-style ``/input/*`` inputs (float in ``[-1.0, 1.0]``).
+_AXIS_NAMES: Final[tuple[str, ...]] = (
+    "vertical",
+    "horizontal",
+    "look-horizontal",
+    "use-axis-right",
+    "grab-axis-right",
+    "move-hold-fb",
+    "spin-hold-cw-ccw",
+    "spin-hold-ud",
+    "spin-hold-lr",
+)
+
+#: Tap-style ``/input/*`` buttons (``1`` -> sleep -> ``0``).
+_TAP_NAMES: Final[tuple[str, ...]] = (
+    "jump",
+    "voice",
+    "panic",
+    "quick-menu-toggle-left",
+    "quick-menu-toggle-right",
+    "drop-left",
+    "drop-right",
+    "comfort-left",
+    "comfort-right",
+)
+
+#: Hold-style ``/input/*`` buttons (explicit on/off).
+_HOLD_NAMES: Final[tuple[str, ...]] = (
+    "run",
+    "hold-voice",
+    "move-forward",
+    "move-backward",
+    "move-left",
+    "move-right",
+    "look-left",
+    "look-right",
+    "use-left",
+    "use-right",
+    "grab-left",
+    "grab-right",
+)
+
+
+def _to_method(name: str) -> str:
+    """Convert a CLI kebab-case name to its :class:`InputController` method.
+
+    The mapping is a straight ``-`` -> ``_`` replacement; no other
+    transformations are applied. Caller is responsible for ensuring
+    ``name`` is one of the registered choices (argparse enforces this
+    via ``choices=``).
+    """
+    return name.replace("-", "_")
 
 
 def _make_sender(host: str, port: int) -> OscSender:
@@ -104,6 +165,46 @@ def register(subparsers: SubParsersAction) -> None:
         help="Send as float. Must be in [-1.0, 1.0].",
     )
 
+    axis_parser = actions.add_parser(
+        "axis",
+        help="Set an InputController axis to VALUE (-1.0..1.0).",
+    )
+    axis_parser.add_argument(
+        "name",
+        choices=_AXIS_NAMES,
+        help="Axis name (kebab-case). One of: " + ", ".join(_AXIS_NAMES) + ".",
+    )
+    axis_parser.add_argument(
+        "value",
+        type=float,
+        help="Axis value in [-1.0, 1.0].",
+    )
+
+    tap_parser = actions.add_parser(
+        "tap",
+        help="Tap an InputController button (1 -> sleep --button-hold -> 0).",
+    )
+    tap_parser.add_argument(
+        "name",
+        choices=_TAP_NAMES,
+        help="Tap-button name (kebab-case). One of: " + ", ".join(_TAP_NAMES) + ".",
+    )
+
+    hold_parser = actions.add_parser(
+        "hold",
+        help="Press (on) or release (off) an InputController hold button.",
+    )
+    hold_parser.add_argument(
+        "name",
+        choices=_HOLD_NAMES,
+        help="Hold-button name (kebab-case). One of: " + ", ".join(_HOLD_NAMES) + ".",
+    )
+    hold_parser.add_argument(
+        "state",
+        choices=("on", "off"),
+        help="Press (on) or release (off).",
+    )
+
 
 def run(args: argparse.Namespace) -> int:
     """Execute the ``osc`` subcommand.
@@ -125,6 +226,21 @@ def run(args: argparse.Namespace) -> int:
                     sender.send_int(args.address, args.int_value)
                 else:
                     sender.send_float(args.address, args.float_value)
+            case "axis":
+                controller = _make_sender(args.host, args.port).controller(
+                    button_hold=args.button_hold
+                )
+                getattr(controller, _to_method(args.name))(args.value)
+            case "tap":
+                controller = _make_sender(args.host, args.port).controller(
+                    button_hold=args.button_hold
+                )
+                getattr(controller, _to_method(args.name))()
+            case "hold":
+                controller = _make_sender(args.host, args.port).controller(
+                    button_hold=args.button_hold
+                )
+                getattr(controller, _to_method(args.name))(args.state == "on")
             case _:  # pragma: no cover - argparse required=True prevents this
                 raise AssertionError(f"Unknown osc action: {args.osc_action!r}")
     except ValueError as exc:
