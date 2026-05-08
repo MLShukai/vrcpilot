@@ -1,32 +1,27 @@
 """``vrcpilot osc`` subcommand.
 
-Thin CLI wrapper over :mod:`vrcpilot.osc`. The full subcommand exposes
-seven actions that map onto the public OSC surface:
+Thin CLI wrapper over :mod:`vrcpilot.osc`. Exposes seven actions:
 
-- ``send`` - raw typed send (``OscSender.send_bool/send_int/send_float``)
-- ``axis`` - :class:`InputController` axis inputs (-1.0..1.0)
-- ``tap`` - :class:`InputController` tap buttons (1 -> sleep -> 0)
-- ``hold`` - :class:`InputController` hold buttons (on/off)
-- ``chatbox`` - chatbox text + typing indicator
-- ``typing`` - chatbox typing indicator only
-- ``avatar`` - :class:`AvatarParameters` send_bool/send_int/send_float
+- ``send`` -- raw typed send (``OscSender.send_bool/send_int/send_float``)
+- ``axis`` -- :class:`InputController` axis inputs (-1.0..1.0)
+- ``tap`` -- :class:`InputController` tap buttons (1 -> sleep -> 0)
+- ``hold`` -- :class:`InputController` hold buttons (on/off)
+- ``chatbox`` -- chatbox text + typing indicator
+- ``typing`` -- chatbox typing indicator only
+- ``avatar`` -- :class:`AvatarParameters` send_bool/send_int/send_float
 
-All seven actions are wired in this module: ``send`` plus the three
-:class:`InputController` button/axis wrappers (``axis`` / ``tap`` /
-``hold``) plus ``chatbox`` / ``typing`` plus the
-:class:`AvatarParameters` wrapper (``avatar``).
+Unlike ``mouse`` / ``keyboard`` (which deliberately omit ``press`` /
+``down`` because each CLI invocation owns a separate ``/dev/uinput``
+device), every OSC action is fire-and-forget UDP -- there is no
+held-state shared across processes, so ``hold <name> on`` and a later
+``hold <name> off`` from a fresh invocation work as expected.
 
 The :func:`_make_sender` factory below is the stable patch target for
-tests (mirrors how ``mouse_api`` works in :mod:`vrcpilot.cli.mouse`).
-Tests construct a real :class:`OscSender` with an injected
-:class:`tests.fakes.FakeUDPClient` and patch this factory to return it.
-
-The :data:`_AXIS_NAMES` / :data:`_TAP_NAMES` / :data:`_HOLD_NAMES`
-tuples are the single source of truth for the kebab-case name choices
-exposed to argparse. Each entry maps to an :class:`InputController`
-method via :func:`_to_method` (``-`` -> ``_``); the
-``TestOscChoiceCoverage`` test asserts every entry resolves to a
-callable on a real controller.
+tests (mirrors how ``mouse_api`` works in :mod:`vrcpilot.cli.mouse`):
+tests build a real :class:`OscSender` with an injected
+:class:`tests.fakes.FakeUDPClient` and patch this factory to return it,
+so the real :class:`OscSender` validation path runs end-to-end while
+UDP construction is bypassed.
 """
 
 from __future__ import annotations
@@ -40,7 +35,10 @@ from vrcpilot.osc.controller import InputController
 
 from ._common import SubParsersAction
 
-#: Axis-style ``/input/*`` inputs (float in ``[-1.0, 1.0]``).
+#: Axis-style ``/input/*`` inputs (float in ``[-1.0, 1.0]``). Each
+#: entry maps to the same-named :class:`InputController` method via
+#: :func:`_to_method` (``-`` -> ``_``); ditto for :data:`_TAP_NAMES`
+#: and :data:`_HOLD_NAMES`.
 _AXIS_NAMES: Final[tuple[str, ...]] = (
     "vertical",
     "horizontal",
@@ -88,53 +86,45 @@ _BOOL_CHOICES: Final[tuple[str, ...]] = ("true", "false", "1", "0")
 
 
 def _to_method(name: str) -> str:
-    """Convert a CLI kebab-case name to its :class:`InputController` method.
-
-    The mapping is a straight ``-`` -> ``_`` replacement; no other
-    transformations are applied. Caller is responsible for ensuring
-    ``name`` is one of the registered choices (argparse enforces this
-    via ``choices=``).
-    """
+    """Map a kebab-case CLI choice to its :class:`InputController` method."""
     return name.replace("-", "_")
 
 
 def _parse_bool_str(value: str) -> bool:
-    """Convert one of :data:`_BOOL_CHOICES` to a Python ``bool``.
-
-    Used by the shared ``--bool`` flag on ``send`` and ``avatar``.
-    Argparse's ``choices=`` already constrains the input to the four
-    accepted strings, so this helper is total over its domain.
-    """
+    """Convert one of :data:`_BOOL_CHOICES` to a ``bool`` (``send`` /
+    ``avatar``)."""
     return value in ("true", "1")
 
 
 def _make_sender(host: str, port: int) -> OscSender:
-    """Construct an :class:`OscSender` for ``run()`` to use.
+    """Construct the :class:`OscSender` that ``run()`` dispatches through.
 
-    Stable patch target. Tests bind an :class:`OscSender` with a
-    :class:`tests.fakes.FakeUDPClient` injected via ``client=`` and
-    patch this function to return that pre-built sender, so the real
-    :class:`OscSender` validation / dispatch logic runs end-to-end
-    while UDP construction is bypassed.
+    Stable patch target: tests pre-build an :class:`OscSender` with a
+    :class:`tests.fakes.FakeUDPClient` injected via ``client=`` and patch
+    this function to return it, so real validation runs end-to-end while
+    UDP socket construction is skipped.
     """
     return OscSender(host=host, port=port)
 
 
 def _make_controller(args: argparse.Namespace) -> InputController:
-    """Build an :class:`InputController` from the shared osc-level flags.
+    """Build an :class:`InputController` from the shared ``osc``-level flags.
 
-    All five ``InputController``-backed actions (axis / tap / hold /
-    chatbox / typing) want the same construction: take ``--host`` /
-    ``--port`` / ``--button-hold`` off the parent parser, build a sender
-    via :func:`_make_sender` (the test patch target), and ask it for a
-    fresh controller view. Centralising this keeps the dispatch in
-    :func:`run` to one line per action.
+    Threads ``--host`` / ``--port`` / ``--button-hold`` off the parent
+    parser into :func:`_make_sender` and yields a fresh controller view;
+    the shared dispatch helper for ``axis`` / ``tap`` / ``hold`` /
+    ``chatbox`` / ``typing``.
     """
     return _make_sender(args.host, args.port).controller(button_hold=args.button_hold)
 
 
 def register(subparsers: SubParsersAction) -> None:
-    """Add the ``osc`` subparser plus its action sub-subcommands."""
+    """Add the ``osc`` parent subparser plus its seven action sub-subcommands.
+
+    The kebab-case name choices for ``axis`` / ``tap`` / ``hold`` come
+    from :data:`_AXIS_NAMES` / :data:`_TAP_NAMES` / :data:`_HOLD_NAMES`
+    respectively; those tuples are the single source of truth.
+    """
     parser = subparsers.add_parser(
         "osc",
         help="Send VRChat OSC messages (raw send, plus high-level "
@@ -307,15 +297,14 @@ def register(subparsers: SubParsersAction) -> None:
 def run(args: argparse.Namespace) -> int:
     """Execute the ``osc`` subcommand.
 
-    Silent on success. Validation failures (``OscSender`` int / float
-    range checks, :class:`AvatarParameters` name validation, chatbox
-    length cap) print a single ``vrcpilot: <message>`` line to stderr
-    and return exit 1. ``chatbox`` with no text on a tty returns exit
-    2 (mirrors :mod:`vrcpilot.cli.paste`).
-
-    Returns:
-        ``0`` on success, ``1`` on validation failure, ``2`` if
-        ``chatbox`` is invoked without text and stdin is a tty.
+    Silent on success (exit 0). Any ``ValueError`` raised by the
+    underlying :class:`OscSender` / :class:`InputController` /
+    :class:`AvatarParameters` (int / float range checks, parameter-name
+    validation, chatbox length cap) is caught and reported as a single
+    ``vrcpilot: <message>`` line on stderr with exit 1. ``chatbox``
+    with no text and a tty stdin returns exit 2 (mirrors
+    :mod:`vrcpilot.cli.paste`). Argparse handles malformed usage
+    upstream and exits non-zero on its own before ``run`` is reached.
     """
     try:
         match args.osc_action:
