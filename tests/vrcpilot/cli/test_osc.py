@@ -19,7 +19,7 @@ from pytest_mock import MockerFixture
 
 from tests.fakes import FakeUDPClient
 from vrcpilot.cli import main
-from vrcpilot.cli.osc import _AXIS_NAMES, _HOLD_NAMES, _TAP_NAMES, _to_method
+from vrcpilot.cli.osc import AXIS_NAMES, HOLD_NAMES, TAP_NAMES
 from vrcpilot.osc import OscSender
 from vrcpilot.osc.controller import InputController
 
@@ -355,29 +355,29 @@ class TestOscChoiceCoverage:
     """Forward-direction safety net: every CLI choice must resolve to a
     callable on a real :class:`InputController`.
 
-    Catches kebab-case typos in :data:`_AXIS_NAMES` /
-    :data:`_TAP_NAMES` / :data:`_HOLD_NAMES` and method renames /
+    Catches kebab-case typos in :data:`AXIS_NAMES` /
+    :data:`TAP_NAMES` / :data:`HOLD_NAMES` and method renames /
     deletions on :class:`InputController`. The reverse direction
     (``InputController`` methods without a CLI choice) is intentionally
     NOT asserted -- chatbox / typing live outside axis/tap/hold.
     """
 
-    @pytest.mark.parametrize("name", _AXIS_NAMES)
+    @pytest.mark.parametrize("name", AXIS_NAMES)
     def test_axis_name_resolves_to_callable(self, name: str):
         controller = InputController(OscSender(client=FakeUDPClient()))
-        method = getattr(controller, _to_method(name))
+        method = getattr(controller, name.replace("-", "_"))
         assert callable(method)
 
-    @pytest.mark.parametrize("name", _TAP_NAMES)
+    @pytest.mark.parametrize("name", TAP_NAMES)
     def test_tap_name_resolves_to_callable(self, name: str):
         controller = InputController(OscSender(client=FakeUDPClient()))
-        method = getattr(controller, _to_method(name))
+        method = getattr(controller, name.replace("-", "_"))
         assert callable(method)
 
-    @pytest.mark.parametrize("name", _HOLD_NAMES)
+    @pytest.mark.parametrize("name", HOLD_NAMES)
     def test_hold_name_resolves_to_callable(self, name: str):
         controller = InputController(OscSender(client=FakeUDPClient()))
-        method = getattr(controller, _to_method(name))
+        method = getattr(controller, name.replace("-", "_"))
         assert callable(method)
 
 

@@ -37,9 +37,9 @@ from ._common import SubParsersAction
 
 #: Axis-style ``/input/*`` inputs (float in ``[-1.0, 1.0]``). Each
 #: entry maps to the same-named :class:`InputController` method via
-#: :func:`_to_method` (``-`` -> ``_``); ditto for :data:`_TAP_NAMES`
-#: and :data:`_HOLD_NAMES`.
-_AXIS_NAMES: Final[tuple[str, ...]] = (
+#: :func:`_to_method` (``-`` -> ``_``); ditto for :data:`TAP_NAMES`
+#: and :data:`HOLD_NAMES`.
+AXIS_NAMES: Final[tuple[str, ...]] = (
     "vertical",
     "horizontal",
     "look-horizontal",
@@ -52,7 +52,7 @@ _AXIS_NAMES: Final[tuple[str, ...]] = (
 )
 
 #: Tap-style ``/input/*`` buttons (``1`` -> sleep -> ``0``).
-_TAP_NAMES: Final[tuple[str, ...]] = (
+TAP_NAMES: Final[tuple[str, ...]] = (
     "jump",
     "voice",
     "panic",
@@ -65,7 +65,7 @@ _TAP_NAMES: Final[tuple[str, ...]] = (
 )
 
 #: Hold-style ``/input/*`` buttons (explicit on/off).
-_HOLD_NAMES: Final[tuple[str, ...]] = (
+HOLD_NAMES: Final[tuple[str, ...]] = (
     "run",
     "hold-voice",
     "move-forward",
@@ -122,7 +122,7 @@ def register(subparsers: SubParsersAction) -> None:
     """Add the ``osc`` parent subparser plus its seven action sub-subcommands.
 
     The kebab-case name choices for ``axis`` / ``tap`` / ``hold`` come
-    from :data:`_AXIS_NAMES` / :data:`_TAP_NAMES` / :data:`_HOLD_NAMES`
+    from :data:`AXIS_NAMES` / :data:`TAP_NAMES` / :data:`HOLD_NAMES`
     respectively; those tuples are the single source of truth.
     """
     parser = subparsers.add_parser(
@@ -190,8 +190,8 @@ def register(subparsers: SubParsersAction) -> None:
     )
     axis_parser.add_argument(
         "name",
-        choices=_AXIS_NAMES,
-        help="Axis name (kebab-case). One of: " + ", ".join(_AXIS_NAMES) + ".",
+        choices=AXIS_NAMES,
+        help="Axis name (kebab-case). One of: " + ", ".join(AXIS_NAMES) + ".",
     )
     axis_parser.add_argument(
         "value",
@@ -205,8 +205,8 @@ def register(subparsers: SubParsersAction) -> None:
     )
     tap_parser.add_argument(
         "name",
-        choices=_TAP_NAMES,
-        help="Tap-button name (kebab-case). One of: " + ", ".join(_TAP_NAMES) + ".",
+        choices=TAP_NAMES,
+        help="Tap-button name (kebab-case). One of: " + ", ".join(TAP_NAMES) + ".",
     )
 
     hold_parser = actions.add_parser(
@@ -215,8 +215,8 @@ def register(subparsers: SubParsersAction) -> None:
     )
     hold_parser.add_argument(
         "name",
-        choices=_HOLD_NAMES,
-        help="Hold-button name (kebab-case). One of: " + ", ".join(_HOLD_NAMES) + ".",
+        choices=HOLD_NAMES,
+        help="Hold-button name (kebab-case). One of: " + ", ".join(HOLD_NAMES) + ".",
     )
     hold_parser.add_argument(
         "state",
