@@ -28,6 +28,7 @@ from .capture import (
 )
 from .inputtino import FakeInputtinoKeyboard, FakeInputtinoMouse, FakeMouseButton
 from .ocr import FakeOCREngine
+from .osc import FakeUDPClient
 from .process import FakePopen, FakeProcess
 from .pydirectinput import FakePyDirectInput
 from .screenshot import patch_stdin_with_screenshot, write_screenshot_payload
@@ -54,6 +55,7 @@ __all__ = [
     "FakePopen",
     "FakeProcess",
     "FakePyDirectInput",
+    "FakeUDPClient",
     "FakeWindowsCapture",
     "FakeWindowsCaptureControl",
     "FakeWindowsFrame",

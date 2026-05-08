@@ -23,6 +23,7 @@ from . import (
     launch,
     mouse,
     ocr,
+    osc,
     paste,
     pid,
     screenshot,
@@ -42,6 +43,7 @@ _COMMANDS = {
     "keyboard": keyboard,
     "paste": paste,
     "ocr": ocr,
+    "osc": osc,
     "detect": detect,
 }
 
