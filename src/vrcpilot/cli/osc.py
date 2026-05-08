@@ -36,6 +36,7 @@ import sys
 from typing import Final
 
 from vrcpilot.osc import OscSender
+from vrcpilot.osc.controller import InputController
 
 from ._common import SubParsersAction
 
@@ -117,6 +118,19 @@ def _make_sender(host: str, port: int) -> OscSender:
     while UDP construction is bypassed.
     """
     return OscSender(host=host, port=port)
+
+
+def _make_controller(args: argparse.Namespace) -> InputController:
+    """Build an :class:`InputController` from the shared osc-level flags.
+
+    All five ``InputController``-backed actions (axis / tap / hold /
+    chatbox / typing) want the same construction: take ``--host`` /
+    ``--port`` / ``--button-hold`` off the parent parser, build a sender
+    via :func:`_make_sender` (the test patch target), and ask it for a
+    fresh controller view. Centralising this keeps the dispatch in
+    :func:`run` to one line per action.
+    """
+    return _make_sender(args.host, args.port).controller(button_hold=args.button_hold)
 
 
 def register(subparsers: SubParsersAction) -> None:
@@ -314,41 +328,30 @@ def run(args: argparse.Namespace) -> int:
                 else:
                     sender.send_float(args.address, args.float_value)
             case "axis":
-                controller = _make_sender(args.host, args.port).controller(
-                    button_hold=args.button_hold
-                )
-                getattr(controller, _to_method(args.name))(args.value)
+                getattr(_make_controller(args), _to_method(args.name))(args.value)
             case "tap":
-                controller = _make_sender(args.host, args.port).controller(
-                    button_hold=args.button_hold
-                )
-                getattr(controller, _to_method(args.name))()
+                getattr(_make_controller(args), _to_method(args.name))()
             case "hold":
-                controller = _make_sender(args.host, args.port).controller(
-                    button_hold=args.button_hold
+                getattr(_make_controller(args), _to_method(args.name))(
+                    args.state == "on"
                 )
-                getattr(controller, _to_method(args.name))(args.state == "on")
             case "chatbox":
                 raw: str | None = args.text
                 if raw is None:
                     if sys.stdin.isatty():
                         print(
-                            "vrcpilot: chatbox text required " "(positional or stdin)",
+                            "vrcpilot: chatbox text required (positional or stdin)",
                             file=sys.stderr,
                         )
                         return 2
                     text = sys.stdin.read()
                 else:
                     text = raw
-                controller = _make_sender(args.host, args.port).controller(
-                    button_hold=args.button_hold
+                _make_controller(args).chatbox(
+                    text, send=not args.no_send, sfx=not args.no_sfx
                 )
-                controller.chatbox(text, send=not args.no_send, sfx=not args.no_sfx)
             case "typing":
-                controller = _make_sender(args.host, args.port).controller(
-                    button_hold=args.button_hold
-                )
-                controller.typing(args.state == "on")
+                _make_controller(args).typing(args.state == "on")
             case "avatar":
                 avatar_params = _make_sender(args.host, args.port).avatar_parameters()
                 if args.bool_value is not None:
