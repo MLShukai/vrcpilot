@@ -1,4 +1,5 @@
-"""Tests for :mod:`vrcpilot.cli.osc` (send / axis / tap / hold).
+"""Tests for :mod:`vrcpilot.cli.osc` (send / axis / tap / hold / chatbox /
+typing / avatar).
 
 The CLI calls into :mod:`vrcpilot.osc` via the
 :func:`vrcpilot.cli.osc._make_sender` factory. Patching that factory
@@ -10,6 +11,8 @@ boundary fake for this suite.
 """
 
 from __future__ import annotations
+
+import io
 
 import pytest
 from pytest_mock import MockerFixture
@@ -376,3 +379,183 @@ class TestOscChoiceCoverage:
         controller = InputController(OscSender(client=FakeUDPClient()))
         method = getattr(controller, _to_method(name))
         assert callable(method)
+
+
+class TestOscChatbox:
+    def test_positional_text_dispatches(self, fake_client: FakeUDPClient):
+        exit_code = main(["osc", "chatbox", "hello world"])
+
+        assert exit_code == 0
+        assert fake_client.sent == [("/chatbox/input", ["hello world", True, True])]
+
+    def test_no_send_and_no_sfx_flip_flags(self, fake_client: FakeUDPClient):
+        exit_code = main(["osc", "chatbox", "hi", "--no-send", "--no-sfx"])
+
+        assert exit_code == 0
+        assert fake_client.sent == [("/chatbox/input", ["hi", False, False])]
+
+    def test_text_too_long_returns_1(
+        self,
+        fake_client: FakeUDPClient,
+        capsys: pytest.CaptureFixture[str],
+    ):
+        del fake_client
+
+        exit_code = main(["osc", "chatbox", "x" * 145])
+
+        assert exit_code == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "vrcpilot:" in captured.err
+
+    def test_stdin_text_when_no_positional(
+        self, fake_client: FakeUDPClient, mocker: MockerFixture
+    ):
+        # Piped stdin: not a tty (StringIO.isatty() returns False), so
+        # the CLI consumes stdin verbatim (no strip).
+        mocker.patch(
+            "vrcpilot.cli.osc.sys.stdin",
+            new=io.StringIO("from stdin"),
+        )
+
+        exit_code = main(["osc", "chatbox"])
+
+        assert exit_code == 0
+        assert fake_client.sent == [("/chatbox/input", ["from stdin", True, True])]
+
+    def test_no_text_and_tty_returns_2(
+        self,
+        fake_client: FakeUDPClient,
+        capsys: pytest.CaptureFixture[str],
+    ):
+        del fake_client  # the autouse conftest fixture already pins isatty=True
+
+        exit_code = main(["osc", "chatbox"])
+
+        assert exit_code == 2
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err != ""
+
+
+class TestOscTyping:
+    def test_typing_on_sends_one(self, fake_client: FakeUDPClient):
+        exit_code = main(["osc", "typing", "on"])
+
+        assert exit_code == 0
+        assert fake_client.sent == [("/chatbox/typing", 1)]
+
+    def test_typing_off_sends_zero(self, fake_client: FakeUDPClient):
+        exit_code = main(["osc", "typing", "off"])
+
+        assert exit_code == 0
+        assert fake_client.sent == [("/chatbox/typing", 0)]
+
+    def test_typing_state_required_argparse_error(
+        self, capsys: pytest.CaptureFixture[str]
+    ):
+        with pytest.raises(SystemExit) as excinfo:
+            main(["osc", "typing"])
+
+        assert excinfo.value.code != 0
+        captured = capsys.readouterr()
+        assert captured.err != ""
+
+
+class TestOscAvatar:
+    @pytest.mark.parametrize(
+        ("flag_value", "expected"),
+        [("true", 1), ("1", 1), ("false", 0), ("0", 0)],
+    )
+    def test_avatar_send_bool(
+        self,
+        fake_client: FakeUDPClient,
+        flag_value: str,
+        expected: int,
+    ):
+        exit_code = main(["osc", "avatar", "MyParam", "--bool", flag_value])
+
+        assert exit_code == 0
+        assert fake_client.sent == [("/avatar/parameters/MyParam", expected)]
+
+    def test_avatar_send_int(self, fake_client: FakeUDPClient):
+        exit_code = main(["osc", "avatar", "MyParam", "--int", "42"])
+
+        assert exit_code == 0
+        assert fake_client.sent == [("/avatar/parameters/MyParam", 42)]
+
+    def test_avatar_send_int_out_of_range_returns_1(
+        self,
+        fake_client: FakeUDPClient,
+        capsys: pytest.CaptureFixture[str],
+    ):
+        del fake_client
+
+        exit_code = main(["osc", "avatar", "MyParam", "--int", "256"])
+
+        assert exit_code == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "vrcpilot:" in captured.err
+
+    def test_avatar_send_float(self, fake_client: FakeUDPClient):
+        exit_code = main(["osc", "avatar", "MyParam", "--float", "0.5"])
+
+        assert exit_code == 0
+        assert fake_client.sent == [("/avatar/parameters/MyParam", 0.5)]
+
+    def test_avatar_send_float_out_of_range_returns_1(
+        self,
+        fake_client: FakeUDPClient,
+        capsys: pytest.CaptureFixture[str],
+    ):
+        del fake_client
+
+        exit_code = main(["osc", "avatar", "MyParam", "--float", "2.0"])
+
+        assert exit_code == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "vrcpilot:" in captured.err
+
+    def test_avatar_invalid_name_returns_1(
+        self,
+        fake_client: FakeUDPClient,
+        capsys: pytest.CaptureFixture[str],
+    ):
+        del fake_client
+
+        exit_code = main(["osc", "avatar", "Bad/Name", "--bool", "1"])
+
+        assert exit_code == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "vrcpilot:" in captured.err
+
+    def test_avatar_requires_a_type_flag(
+        self,
+        fake_client: FakeUDPClient,
+        capsys: pytest.CaptureFixture[str],
+    ):
+        del fake_client
+
+        with pytest.raises(SystemExit) as excinfo:
+            main(["osc", "avatar", "MyParam"])
+
+        assert excinfo.value.code != 0
+        captured = capsys.readouterr()
+        assert captured.err != ""
+
+    def test_avatar_rejects_multiple_type_flags(
+        self,
+        fake_client: FakeUDPClient,
+        capsys: pytest.CaptureFixture[str],
+    ):
+        del fake_client
+
+        with pytest.raises(SystemExit) as excinfo:
+            main(["osc", "avatar", "MyParam", "--bool", "1", "--int", "1"])
+
+        assert excinfo.value.code != 0
+        captured = capsys.readouterr()
+        assert captured.err != ""

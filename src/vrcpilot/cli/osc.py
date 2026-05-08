@@ -11,9 +11,10 @@ seven actions that map onto the public OSC surface:
 - ``typing`` - chatbox typing indicator only
 - ``avatar`` - :class:`AvatarParameters` send_bool/send_int/send_float
 
-This commit lands ``send`` plus the three :class:`InputController`
-wrappers (``axis`` / ``tap`` / ``hold``). ``chatbox`` / ``typing`` /
-``avatar`` are added in the follow-up commit.
+All seven actions are wired in this module: ``send`` plus the three
+:class:`InputController` button/axis wrappers (``axis`` / ``tap`` /
+``hold``) plus ``chatbox`` / ``typing`` plus the
+:class:`AvatarParameters` wrapper (``avatar``).
 
 The :func:`_make_sender` factory below is the stable patch target for
 tests (mirrors how ``mouse_api`` works in :mod:`vrcpilot.cli.mouse`).
@@ -81,6 +82,10 @@ _HOLD_NAMES: Final[tuple[str, ...]] = (
 )
 
 
+#: Accepted ``--bool`` choices for ``send`` and ``avatar``.
+_BOOL_CHOICES: Final[tuple[str, ...]] = ("true", "false", "1", "0")
+
+
 def _to_method(name: str) -> str:
     """Convert a CLI kebab-case name to its :class:`InputController` method.
 
@@ -90,6 +95,16 @@ def _to_method(name: str) -> str:
     via ``choices=``).
     """
     return name.replace("-", "_")
+
+
+def _parse_bool_str(value: str) -> bool:
+    """Convert one of :data:`_BOOL_CHOICES` to a Python ``bool``.
+
+    Used by the shared ``--bool`` flag on ``send`` and ``avatar``.
+    Argparse's ``choices=`` already constrains the input to the four
+    accepted strings, so this helper is total over its domain.
+    """
+    return value in ("true", "1")
 
 
 def _make_sender(host: str, port: int) -> OscSender:
@@ -146,7 +161,7 @@ def register(subparsers: SubParsersAction) -> None:
     send_type.add_argument(
         "--bool",
         dest="bool_value",
-        choices=["true", "false", "1", "0"],
+        choices=_BOOL_CHOICES,
         help=(
             "Send as bool. Accepted values: true / false / 1 / 0. "
             "VRChat receives 0 or 1 as an int tag."
@@ -205,23 +220,95 @@ def register(subparsers: SubParsersAction) -> None:
         help="Press (on) or release (off).",
     )
 
+    chatbox_parser = actions.add_parser(
+        "chatbox",
+        help=(
+            "Post text to the in-game chatbox via /chatbox/input. "
+            "Reads from stdin when TEXT is omitted and stdin is piped."
+        ),
+    )
+    chatbox_parser.add_argument(
+        "text",
+        nargs="?",
+        default=None,
+        metavar="TEXT",
+        help=(
+            "Text to post. Omit to read from stdin (only when stdin is "
+            "piped; on a tty this exits with code 2)."
+        ),
+    )
+    chatbox_parser.add_argument(
+        "--no-send",
+        action="store_true",
+        help="Place text in the input field without sending.",
+    )
+    chatbox_parser.add_argument(
+        "--no-sfx",
+        action="store_true",
+        help="Suppress the chatbox notification sound.",
+    )
+
+    typing_parser = actions.add_parser(
+        "typing",
+        help="Set the chatbox typing indicator (on/off).",
+    )
+    typing_parser.add_argument(
+        "state",
+        choices=("on", "off"),
+        help="Show (on) or hide (off) the typing indicator.",
+    )
+
+    avatar_parser = actions.add_parser(
+        "avatar",
+        help=("Write to /avatar/parameters/<name> (--bool / --int / --float)."),
+    )
+    avatar_parser.add_argument(
+        "name",
+        help="Avatar parameter name (no slashes, non-empty).",
+    )
+    avatar_type = avatar_parser.add_mutually_exclusive_group(required=True)
+    avatar_type.add_argument(
+        "--bool",
+        dest="bool_value",
+        choices=_BOOL_CHOICES,
+        help=(
+            "Send as bool. Accepted values: true / false / 1 / 0. "
+            "VRChat receives 0 or 1 as an int tag."
+        ),
+    )
+    avatar_type.add_argument(
+        "--int",
+        dest="int_value",
+        type=int,
+        help="Send as int. Must be in [0, 255].",
+    )
+    avatar_type.add_argument(
+        "--float",
+        dest="float_value",
+        type=float,
+        help="Send as float. Must be in [-1.0, 1.0].",
+    )
+
 
 def run(args: argparse.Namespace) -> int:
     """Execute the ``osc`` subcommand.
 
-    Silent on success. Validation failures from
-    :class:`OscSender` (range checks on int / float) print a single
-    ``vrcpilot: <message>`` line to stderr and return exit 1.
+    Silent on success. Validation failures (``OscSender`` int / float
+    range checks, :class:`AvatarParameters` name validation, chatbox
+    length cap) print a single ``vrcpilot: <message>`` line to stderr
+    and return exit 1. ``chatbox`` with no text on a tty returns exit
+    2 (mirrors :mod:`vrcpilot.cli.paste`).
 
     Returns:
-        ``0`` on success, ``1`` on validation failure.
+        ``0`` on success, ``1`` on validation failure, ``2`` if
+        ``chatbox`` is invoked without text and stdin is a tty.
     """
     try:
         match args.osc_action:
             case "send":
                 sender = _make_sender(args.host, args.port)
                 if args.bool_value is not None:
-                    sender.send_bool(args.address, args.bool_value in ("true", "1"))
+                    sender.send_bool(args.address, _parse_bool_str(args.bool_value))
                 elif args.int_value is not None:
                     sender.send_int(args.address, args.int_value)
                 else:
@@ -241,6 +328,35 @@ def run(args: argparse.Namespace) -> int:
                     button_hold=args.button_hold
                 )
                 getattr(controller, _to_method(args.name))(args.state == "on")
+            case "chatbox":
+                raw: str | None = args.text
+                if raw is None:
+                    if sys.stdin.isatty():
+                        print(
+                            "vrcpilot: chatbox text required " "(positional or stdin)",
+                            file=sys.stderr,
+                        )
+                        return 2
+                    text = sys.stdin.read()
+                else:
+                    text = raw
+                controller = _make_sender(args.host, args.port).controller(
+                    button_hold=args.button_hold
+                )
+                controller.chatbox(text, send=not args.no_send, sfx=not args.no_sfx)
+            case "typing":
+                controller = _make_sender(args.host, args.port).controller(
+                    button_hold=args.button_hold
+                )
+                controller.typing(args.state == "on")
+            case "avatar":
+                avatar_params = _make_sender(args.host, args.port).avatar_parameters()
+                if args.bool_value is not None:
+                    avatar_params.send_bool(args.name, _parse_bool_str(args.bool_value))
+                elif args.int_value is not None:
+                    avatar_params.send_int(args.name, args.int_value)
+                else:
+                    avatar_params.send_float(args.name, args.float_value)
             case _:  # pragma: no cover - argparse required=True prevents this
                 raise AssertionError(f"Unknown osc action: {args.osc_action!r}")
     except ValueError as exc:
