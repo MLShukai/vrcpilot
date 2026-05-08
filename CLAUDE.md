@@ -75,6 +75,7 @@ VRChat を実機で操作する end-to-end な手順は [.claude/memory/feedback
 | `paste`      | クリップボード経由で文字列を Ctrl+V 投入（非 ASCII 用）                                                | 引数 or stdin から読む。tty かつ引数なしは exit 2                                            |
 | `ocr`        | `Screenshot` を入力に RapidOCR を回し、認識単語を YAML で返す                                          | `--viz` で bbox 重ね PNG。**`--screenshot` か stdin pipe が必須**                            |
 | `detect`     | `Screenshot` 内をクエリ画像でテンプレート検索                                                          | `-q <png>` 必須。`--threshold` / `--top-k` / `--viz`。同じく入力 YAML 必須                   |
+| `osc`        | VRChat OSC 送信 (`send` / `axis` / `tap` / `hold` / `chatbox` / `typing` / `avatar` の 7 アクション)   | 成功は無音。range/name 違反で exit 1、`chatbox` は tty かつ引数なしで exit 2                 |
 
 ### 標準パイプライン（重要）
 
@@ -96,6 +97,41 @@ uv run vrcpilot detect -q ./assets/button.png --screenshot /tmp/shot.yaml > /tmp
 
 - `-o <path>` あり: PNG を書き出し、YAML には `path:` で絶対パスを記録（履歴を残す pipeline 向け）
 - `-o` なし（デフォルト）: PNG ファイルは作らず、YAML 内 `image:` に base64 PNG を埋め込む（pipe で消費する想定）
+
+### OSC コマンドの典型例
+
+`vrcpilot osc` は VRChat の OSC API を CLI から叩くための入口。接続パラメータ (`--host` / `--port` / `--button-hold`) は親 `osc` の直後に書き、アクションはその後ろに置く (`vrcpilot osc --host 192.168.1.10 tap jump` の順)。送信専用で listen 系は未提供、`OscSender.send` の任意 Python 値パススルーは Python API 側のエスケープハッチに留めて CLI 非公開（`send` サブアクションは `--bool` / `--int` / `--float` の必須 mutex で型を明示する）。
+
+```bash
+# 入力コントローラ系: tap (1 → sleep --button-hold → 0)
+uv run vrcpilot osc tap jump
+uv run vrcpilot osc tap quick-menu-toggle-left
+
+# axis (-1.0..1.0 連続値)
+uv run vrcpilot osc axis vertical 0.5
+uv run vrcpilot osc axis vertical 0.0          # release
+
+# hold (押下/解放を明示)
+uv run vrcpilot osc hold run on
+uv run vrcpilot osc hold run off
+
+# chatbox: 位置引数 or stdin
+uv run vrcpilot osc chatbox "hello world" --no-sfx
+echo "from pipe" | uv run vrcpilot osc chatbox
+
+# typing インジケータ
+uv run vrcpilot osc typing on && sleep 1 && uv run vrcpilot osc typing off
+
+# avatar parameters (型は --bool / --int / --float の必須 mutex)
+uv run vrcpilot osc avatar MyParam --float 0.7
+uv run vrcpilot osc avatar MyToggle --bool true
+
+# 送信先を変える (例: 異なるホスト/ポートに転送)
+uv run vrcpilot osc --host 192.168.1.10 --port 9100 tap jump
+
+# 低レベル escape hatch (任意 OSC アドレスへ型付き送信)
+uv run vrcpilot osc send /custom/Address --int 42
+```
 
 ### 座標系
 
