@@ -9,7 +9,6 @@ from pythonosc.udp_client import SimpleUDPClient
 from vrcpilot.osc.avatar import AvatarParameters
 from vrcpilot.osc.controller import InputController
 from vrcpilot.osc.sender import FLOAT_RANGE, INT_RANGE, OscSender
-from vrcpilot.process import OscConfig
 
 
 @pytest.fixture
@@ -142,22 +141,3 @@ class TestAvatarParametersFactory:
         a = sender.avatar_parameters()
         b = sender.avatar_parameters()
         assert a is not b
-
-
-class TestFromConfig:
-    def test_uses_in_port_and_localhost(self, mocker: MockerFixture):
-        fake = mocker.Mock(spec=SimpleUDPClient)
-        ctor = mocker.patch("vrcpilot.osc.sender.SimpleUDPClient", return_value=fake)
-        s = OscSender.from_config(OscConfig(in_port=9100))
-        assert s.host == "127.0.0.1"
-        assert s.port == 9100
-        ctor.assert_called_once_with("127.0.0.1", 9100)
-
-    def test_default_port(self, mocker: MockerFixture):
-        mocker.patch(
-            "vrcpilot.osc.sender.SimpleUDPClient",
-            return_value=mocker.Mock(spec=SimpleUDPClient),
-        )
-        s = OscSender.from_config(OscConfig())
-        assert s.host == "127.0.0.1"
-        assert s.port == 9000

@@ -12,8 +12,6 @@ from typing import Any
 
 from pythonosc.udp_client import SimpleUDPClient
 
-from vrcpilot.process import OscConfig
-
 from . import avatar, controller
 
 #: Inclusive ``[lo, hi]`` range accepted by :meth:`OscSender.send_int`.
@@ -26,10 +24,9 @@ FLOAT_RANGE: tuple[float, float] = (-1.0, 1.0)
 class OscSender:
     """Single-socket OSC client for VRChat.
 
-    Construct directly when host/port are known, or via
-    :meth:`from_config` to inherit the inbound port from
-    :class:`vrcpilot.process.OscConfig`. Inject ``client`` to bypass
-    UDP construction in tests.
+    Construct with the host/port VRChat is listening on; defaults match
+    a local VRChat with factory OSC settings. Inject ``client`` to
+    bypass UDP construction in tests.
 
     Typical usage::
 
@@ -99,13 +96,3 @@ class OscSender:
     def avatar_parameters(self) -> avatar.AvatarParameters:
         """Return a new :class:`AvatarParameters` bound to this sender."""
         return avatar.AvatarParameters(self)
-
-    @classmethod
-    def from_config(cls, config: OscConfig) -> OscSender:
-        """Build a sender for a local VRChat described by ``config``.
-
-        Host is fixed to ``127.0.0.1`` because :class:`OscConfig` does
-        not carry a remote-host field; use the constructor directly for
-        non-localhost targets.
-        """
-        return cls(host="127.0.0.1", port=config.in_port)
