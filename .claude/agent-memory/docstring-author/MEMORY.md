@@ -5,3 +5,4 @@
 - [vrcpilot tooling and verification commands](reference_tooling.md) — just format/test/type, docformatter quirks, pyright strict
 - [Capture vs Screenshot API split](project_capture_screenshot_split.md) — streaming vs one-shot pixel surface, Wayland asymmetry, latest-only read
 - [vrcpilot.controls subpackage shape](project_controls_subpackage.md) — template-method ABC, lazy backend singleton, ensure_target Wayland-fail-fast
+- [vrcpilot CLI subcommand docstring conventions](project_cli_subcommand_style.md) — module/patch-target/register/run shape and exit-code prose pattern
