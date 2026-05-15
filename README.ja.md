@@ -34,23 +34,25 @@ pip install "inputtino-python @ git+https://github.com/games-on-whales/inputtino
 ```
 
 ```bash
-# ライブラリ + CLI (alpha 版のため `--pre` が必要)
-pip install --pre vrcpilot
+# ライブラリ + CLI
+pip install vrcpilot
 
 # OCR 機能込みでインストール
-pip install --pre "vrcpilot[ocr]"
+pip install "vrcpilot[ocr]"
 
 # CLI ツールとして隔離環境にインストール
-uv tool install --prerelease=allow vrcpilot
+uv tool install vrcpilot
 
 # Linux で CLI ツールとして隔離環境にインストール
-uv tool install --prerelease=allow --with "inputtino-python @ git+https://github.com/games-on-whales/inputtino.git@stable#subdirectory=bindings/python" vrcpilot
+uv tool install --with "inputtino-python @ git+https://github.com/games-on-whales/inputtino.git@stable#subdirectory=bindings/python" vrcpilot
 
 # 開発用にソースからインストール
 git clone https://github.com/MLShukai/vrcpilot
 cd vrcpilot
 uv sync --all-extras
 ```
+
+> **プリリリース版** (`0.X.Yrc1`、`0.X.Ya1` など) は `pip install` のデフォルトでは選択されません。明示的にインストールするには `pip install --pre vrcpilot` または `uv tool install --prerelease=allow vrcpilot` を使ってください (上記の Linux 向け `uv tool install --with inputtino-python` パターンに対しても同様に `--prerelease=allow` を付与します)。
 
 ## プラットフォームごとの前提条件
 
@@ -180,7 +182,7 @@ finally:
 
 ### 前提条件
 
-- `uv sync` で開発インストールするか、`uv tool install --prerelease=allow vrcpilot` でインストールし、`register-python-argcomplete` を PATH から実行できるようにしておくこと
+- `uv sync` で開発インストールするか、`uv tool install vrcpilot` でインストールし、`register-python-argcomplete` を PATH から実行できるようにしておくこと
 - グローバルな PATH に追加したくない場合は、後述のコマンド中の `register-python-argcomplete ...` を `uv run register-python-argcomplete ...` に置き換えても構いません
 
 ### 一括セットアップ (開発リポジトリ向け)

@@ -1,6 +1,6 @@
 [project]
 name = "vrcpilot"
-version = "0.1.0rc1"
+version = "0.1.0"
 description = "Python automation toolkit for VRChat (Windows / Linux)"
 readme = "README.md"
 authors = [{ name = "MLShukai" }]
@@ -18,7 +18,7 @@ keywords = [
     "x11",
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "Operating System :: Microsoft :: Windows",
