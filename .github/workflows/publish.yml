@@ -1,0 +1,156 @@
+name: Publish
+
+on:
+  push:
+    tags: ["v*"]
+
+env:
+  PYTHON_VERSION: "3.12"
+  UV_VERSION: "0.7.20"
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build distributions
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv and set the python version
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+
+      - name: Verify tag matches pyproject version
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME#v}"
+          PROJ=$(uv run python -c "import tomllib, pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_bytes())['project']['version'])")
+          echo "tag=${TAG} project=${PROJ}"
+          if [ "${TAG}" != "${PROJ}" ]; then
+            echo "::error::tag (${TAG}) does not match pyproject.toml version (${PROJ})"
+            exit 1
+          fi
+
+      - name: Build sdist and wheel
+        run: uv build
+
+      - name: List built artifacts
+        run: ls -la dist/
+
+      - name: Upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish-to-testpypi:
+    name: Publish to Test PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/vrcpilot
+    permissions:
+      id-token: write
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to Test PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-to-pypi:
+    name: Publish to PyPI
+    needs: publish-to-testpypi
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: pypi
+      url: https://pypi.org/p/vrcpilot
+    permissions:
+      id-token: write
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    name: Create GitHub Release
+    needs: publish-to-pypi
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Sign distributions with sigstore
+        uses: sigstore/gh-action-sigstore-python@v3.0.0
+        with:
+          inputs: >-
+            ./dist/*.tar.gz
+            ./dist/*.whl
+
+      - name: Extract changelog section
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const tag = process.env.GITHUB_REF_NAME.replace(/^v/, '');
+            // Escape regex metacharacters in the version string before
+            // interpolating it into the section-header pattern.
+            const escaped = tag.replace(/[.+*?^${}()|[\]\\]/g, '\\$&');
+            const md = fs.readFileSync('CHANGELOG.md', 'utf8');
+            // Match `## [<version>] ...\n` then capture everything up to the
+            // next `## [` header or end-of-string. The `m` flag is intentionally
+            // omitted so `$` only anchors end-of-string (not end-of-line),
+            // otherwise the capture would terminate at the first blank line.
+            const headerRe = new RegExp(
+              '(?:^|\\n)## \\[' + escaped + '\\][^\\n]*\\n([\\s\\S]*?)(?=\\n## \\[|$)',
+            );
+            const match = md.match(headerRe);
+            const body = match ? match[1].trim() : `Release ${tag}`;
+            fs.writeFileSync('notes.md', body);
+            core.info(`Extracted ${body.length} characters of release notes for ${tag}`);
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          PRE=""
+          if [[ "${GITHUB_REF_NAME}" =~ (a|b|rc)[0-9]+$ ]]; then
+            PRE="--prerelease"
+          fi
+          echo "Creating release ${GITHUB_REF_NAME} (prerelease flag: '${PRE}')"
+          # shellcheck disable=SC2086
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file notes.md \
+            ${PRE} \
+            ./dist/*
