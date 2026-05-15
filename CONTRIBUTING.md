@@ -56,6 +56,48 @@ uv run pre-commit install
 - Commit messages follow `<type>(<scope>): <subject>` (Conventional Commits flavor). Keep one logical change per commit.
 - Do not commit directly to `main`; merging is done through pull requests.
 
+### Branching strategy
+
+- `main` is the only long-lived development branch. All feature, fix, refactor, docs, test, and chore work starts from `main` using the `<type>/<YYYYMMDD>/<topic>` convention above.
+- Each minor series gets a long-lived `release/<x.y>` branch (for example `release/0.1`, `release/0.2`, `release/1.0`). These branches are cut from `main` when the first stable of a new minor series ships and are **never deleted** — they remain the home for any subsequent patch releases of that series.
+- We do not maintain a separate `stable` branch. The most recent stable tag on PyPI is the source of truth for "what is stable"; if you need to install the latest stable, install by version or simply `pip install vrcpilot`.
+- Hotfix branches are an exception to the "branch off `main`" rule — see the [Hotfix process](#hotfix-process) below.
+
+### Tag conventions
+
+- Releases are driven entirely by Git tags. Tags use SemVer with a `v` prefix: `v0.1.0`, `v0.2.0`, `v1.0.0`.
+- Pre-release tags follow PEP 440: `v0.1.0a1` (alpha), `v0.1.0b1` (beta), `v0.1.0rc1` (release candidate). The publish workflow detects the `a`/`b`/`rc` suffix and marks the resulting GitHub Release as a pre-release.
+- Pushing any tag matching `v*` triggers the publish workflow (`.github/workflows/publish.yml`), which performs the Test PyPI → PyPI → GitHub Release chain. Do not create `v*` tags casually.
+- The tag and the `version` field in `pyproject.toml` must match exactly (minus the leading `v`); the workflow's build step refuses to proceed otherwise.
+
+### Release process (regular)
+
+For a normal release on `main` (new minor or new stable from an existing series):
+
+1. On a `chore/<YYYYMMDD>/release-vX.Y.Z` branch off `main`, bump `version` in `pyproject.toml`, refresh `uv.lock` (`uv lock`), and update `CHANGELOG.md` with a section for the new version.
+2. Run `just run` and confirm everything passes. Open a PR into `main`.
+3. After the release PR merges into `main`:
+   - If this is the first release of a new minor series (`x.y.0`), create `release/x.y` from the current `main` HEAD. Once created, this branch is permanent.
+   - If this minor series already has a `release/x.y` branch, fast-forward it to include the release commit (or merge `main` into it).
+4. On `release/x.y`, create the annotated tag `vX.Y.Z` and push it. For a brand-new minor series, the `main` and `release/x.y` HEADs may be identical at this point — that is fine; the tag still lives on `release/x.y`.
+5. The publish workflow runs: it verifies the tag matches the project version, builds the sdist and wheel, publishes to Test PyPI, then PyPI, then creates a GitHub Release with the extracted changelog notes.
+
+### Hotfix process
+
+Hotfixes target an already-released minor series and must **not** be developed on `main`:
+
+1. Create `fix/<YYYYMMDD>/<topic>` from the relevant `release/x.y` branch (not from `main`). This isolates the fix from any unreleased work that has since landed on `main`.
+2. Implement and verify with `just run`. Open a PR targeting `release/x.y`.
+3. After the PR merges, bump the patch component on `release/x.y` (update `pyproject.toml`, `uv.lock`, and `CHANGELOG.md`), tag `vX.Y.(Z+1)` on `release/x.y`, and push the tag to trigger publish.
+4. Open a follow-up PR `chore/<YYYYMMDD>/backport-vX.Y.(Z+1)` that cherry-picks the fix (and changelog entry) onto `main` so the fix is not lost in the next minor release.
+5. The hotfix PR description must include a `[ ] cherry-picked to main` checkbox. Do not close the hotfix PR — or consider the hotfix complete — until that box is checked and the backport PR has merged.
+
+### Pre-release tags
+
+- Pre-release tags (`vX.Y.Za1`, `vX.Y.Zb1`, `vX.Y.Zrc1`) may be cut from either `main` or a `release/x.y` branch, depending on what is being validated.
+- They flow through the same workflow path and end up on PyPI just like stable releases, but `pip install vrcpilot` ignores them by default (users opt in with `pip install --pre vrcpilot`), so they are safe to publish without surprising downstream users.
+- Use pre-release tags freely to rehearse the publish pipeline itself — verifying Trusted Publishing, environments, the tag/version guard, and changelog extraction — before committing to a stable tag.
+
 ## Verifying changes
 
 Every PR is expected to pass:
