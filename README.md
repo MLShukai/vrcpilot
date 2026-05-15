@@ -34,23 +34,25 @@ pip install "inputtino-python @ git+https://github.com/games-on-whales/inputtino
 ```
 
 ```bash
-# Library + CLI (alpha release; --pre is required)
-pip install --pre vrcpilot
+# Library + CLI
+pip install vrcpilot
 
 # Install with OCR support
-pip install --pre "vrcpilot[ocr]"
+pip install "vrcpilot[ocr]"
 
 # Install as an isolated CLI tool
-uv tool install --prerelease=allow vrcpilot
+uv tool install vrcpilot
 
 # Install as an isolated CLI tool on Linux
-uv tool install --prerelease=allow --with "inputtino-python @ git+https://github.com/games-on-whales/inputtino.git@stable#subdirectory=bindings/python" vrcpilot
+uv tool install --with "inputtino-python @ git+https://github.com/games-on-whales/inputtino.git@stable#subdirectory=bindings/python" vrcpilot
 
 # Install from source for development
 git clone https://github.com/MLShukai/vrcpilot
 cd vrcpilot
 uv sync --all-extras
 ```
+
+> **Pre-release builds** (`0.X.Yrc1`, `0.X.Ya1`, etc.) are excluded from `pip install` by default. To opt in to a pre-release, use `pip install --pre vrcpilot` or `uv tool install --prerelease=allow vrcpilot` (and the same `--prerelease=allow` flag for the Linux `uv tool install --with inputtino-python` variant above).
 
 ## Platform Requirements
 
@@ -180,7 +182,7 @@ finally:
 
 ### Requirements
 
-- Install for development with `uv sync`, or install with `uv tool install --prerelease=allow vrcpilot`, and make sure `register-python-argcomplete` is available on PATH.
+- Install for development with `uv sync`, or install with `uv tool install vrcpilot`, and make sure `register-python-argcomplete` is available on PATH.
 - If you do not want to add it to your global PATH, replace `register-python-argcomplete ...` in the commands below with `uv run register-python-argcomplete ...`.
 
 ### One-Line Setup (Development Repository)
