@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0rc1] - 2026-05-15
+
+Release-candidate cut used to rehearse the end-to-end publish pipeline before the stable `0.1.0` tag.
+
+### Added
+
+- **Tag-driven PyPI publish workflow** (`.github/workflows/publish.yml`) with a Test PyPI -> PyPI -> GitHub Release chain, Trusted Publishing (OIDC), and sigstore signing of built artifacts.
+- **Release engineering documentation**: `CONTRIBUTING.md` now codifies the branching, release, hotfix, and pre-release tag conventions, and a new `docs/RELEASE.md` runbook documents the procedure for release engineers.
+
+### Changed
+
+- Version bumped from `0.1.0a1` to `0.1.0rc1` to rehearse the publish pipeline before the stable `0.1.0` tag. No API changes since `0.1.0a1`.
+
 ## [0.1.0a1] - 2026-05-06
 
 Initial public alpha release.
@@ -30,4 +43,5 @@ Initial public alpha release.
 - macOS is out of scope.
 
 [0.1.0a1]: https://github.com/MLShukai/vrcpilot/releases/tag/v0.1.0a1
-[unreleased]: https://github.com/MLShukai/vrcpilot/compare/v0.1.0a1...HEAD
+[0.1.0rc1]: https://github.com/MLShukai/vrcpilot/compare/v0.1.0a1...v0.1.0rc1
+[unreleased]: https://github.com/MLShukai/vrcpilot/compare/v0.1.0rc1...HEAD
