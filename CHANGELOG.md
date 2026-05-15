@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-05-15
+
+First stable release. The release pipeline rehearsed in `0.1.0rc1` is now promoted to stable; the Python and CLI surfaces are unchanged from the release candidate.
+
+### Changed
+
+- `Development Status` classifier promoted from `3 - Alpha` to `4 - Beta` (0.x stable, pre-1.0 maturity).
+- README installation instructions now lead with the stable command (`pip install vrcpilot` / `uv tool install vrcpilot`); the pre-release variant (`--pre`) is documented as an opt-in.
+
 ## [0.1.0rc1] - 2026-05-15
 
 First public release candidate. Validates the end-to-end publish pipeline before the stable `0.1.0` tag.
@@ -32,5 +41,6 @@ First public release candidate. Validates the end-to-end publish pipeline before
 - Linux with X11 or XWayland sessions (Wayland-native is unsupported; `focus`/`unfocus` warn and return `False`)
 - macOS is out of scope.
 
+[0.1.0]: https://github.com/MLShukai/vrcpilot/compare/v0.1.0rc1...v0.1.0
 [0.1.0rc1]: https://github.com/MLShukai/vrcpilot/releases/tag/v0.1.0rc1
-[unreleased]: https://github.com/MLShukai/vrcpilot/compare/v0.1.0rc1...HEAD
+[unreleased]: https://github.com/MLShukai/vrcpilot/compare/v0.1.0...HEAD
