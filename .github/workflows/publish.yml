@@ -39,7 +39,7 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME#v}"
-          PROJ=$(uv run python -c "import tomllib, pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_bytes())['project']['version'])")
+          PROJ=$(uv run python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
           echo "tag=${TAG} project=${PROJ}"
           if [ "${TAG}" != "${PROJ}" ]; then
             echo "::error::tag (${TAG}) does not match pyproject.toml version (${PROJ})"
