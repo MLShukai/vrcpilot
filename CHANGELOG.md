@@ -13,12 +13,18 @@ Release-candidate cut used to rehearse the end-to-end publish pipeline before th
 
 ### Added
 
+- **OSC subsystem** (`vrcpilot.osc`): `OscSender`, `InputController`, and `AvatarParameters` for sending VRChat OSC traffic — button inputs, axis values, chatbox text, typing indicator, and avatar parameters.
+- **CLI `osc` subcommand**: `vrcpilot osc {send,axis,tap,hold,chatbox,typing,avatar}` exposes the OSC subsystem from the command line.
 - **Tag-driven PyPI publish workflow** (`.github/workflows/publish.yml`) with a Test PyPI -> PyPI -> GitHub Release chain, Trusted Publishing (OIDC), and sigstore signing of built artifacts.
 - **Release engineering documentation**: `CONTRIBUTING.md` now codifies the branching, release, hotfix, and pre-release tag conventions, and a new `docs/RELEASE.md` runbook documents the procedure for release engineers.
 
+### Removed
+
+- `OscSender.from_config`. Instantiate `OscSender` directly with explicit `host` / `port`. `0.1.0a1` was tagged in this changelog but never published to PyPI, so this affects only developers tracking `main`.
+
 ### Changed
 
-- Version bumped from `0.1.0a1` to `0.1.0rc1` to rehearse the publish pipeline before the stable `0.1.0` tag. No API changes since `0.1.0a1`.
+- Version bumped from `0.1.0a1` to `0.1.0rc1` to rehearse the publish pipeline before the stable `0.1.0` tag. Aside from the OSC additions and the `from_config` removal above, the public surface from `0.1.0a1` is preserved.
 
 ## [0.1.0a1] - 2026-05-06
 
