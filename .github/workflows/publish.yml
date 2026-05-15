@@ -20,6 +20,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # inputtino-python is fetched from git on Linux and built natively
+      # against libevdev. See https://github.com/games-on-whales/inputtino/tree/stable/bindings/python
+      - name: Install inputtino build dependencies (Ubuntu)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake build-essential pkg-config libevdev-dev
+
       - name: Install uv and set the python version
         uses: astral-sh/setup-uv@v4
         with:
