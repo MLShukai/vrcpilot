@@ -6,6 +6,9 @@ Public surface:
 * :class:`SpeakerLoop` -- background-thread driver around :class:`Speaker`.
 * :class:`WavFileSink` -- drop-in sink that writes ``float32 (N, 2)`` chunks
   to a 16-bit PCM WAV file.
+* :class:`RawPcmStdoutSink` -- drop-in sink that writes ``float32 (N, 2)``
+  chunks to a binary stream as headerless ``s16le`` (defaults to
+  ``sys.stdout.buffer`` for CLI pipe mode).
 * :data:`AudioCallback` -- type alias for the chunk callback accepted by
   :class:`SpeakerLoop`.
 
@@ -19,6 +22,12 @@ from __future__ import annotations
 
 from vrcpilot.speaker.loop import AudioCallback, SpeakerLoop
 from vrcpilot.speaker.session import Speaker
-from vrcpilot.speaker.sinks import WavFileSink
+from vrcpilot.speaker.sinks import RawPcmStdoutSink, WavFileSink
 
-__all__ = ["AudioCallback", "Speaker", "SpeakerLoop", "WavFileSink"]
+__all__ = [
+    "AudioCallback",
+    "RawPcmStdoutSink",
+    "Speaker",
+    "SpeakerLoop",
+    "WavFileSink",
+]

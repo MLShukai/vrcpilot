@@ -3,14 +3,21 @@
 :class:`WavFileSink` persists a :class:`SpeakerBackend` float32 PCM
 stream to a 16-bit RIFF/WAV file using the same closed-state /
 context-manager lifecycle as :class:`vrcpilot.capture.sinks.Mp4FrameSink`.
+
+:class:`RawPcmStdoutSink` is the headerless counterpart for the CLI
+``vrcpilot record`` pipe mode: it emits the same ``int16`` PCM payload
+straight to a binary stream (``sys.stdout.buffer`` by default) so
+downstream tools like ``ffmpeg`` can re-encode without an intermediate
+file.
 """
 
 from __future__ import annotations
 
+import sys
 import wave
 from pathlib import Path
 from types import TracebackType
-from typing import Self
+from typing import BinaryIO, Self
 
 import numpy as np
 from numpy.typing import NDArray
@@ -151,6 +158,111 @@ class WavFileSink:
         self._writer = None
         if writer is not None:
             writer.close()
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        del exc_type, exc_val, exc_tb
+        self.close()
+
+
+class RawPcmStdoutSink:
+    """Stream ``float32`` PCM frames as headerless ``s16le`` to a binary
+    stream.
+
+    Designed for the CLI ``vrcpilot record`` command's pipe mode: when
+    the user omits ``-o``, the recording is emitted as raw signed 16-bit
+    little-endian PCM (48 kHz, stereo, interleaved) directly to the
+    stream so downstream tools (``ffmpeg`` etc.) can pick up the audio
+    without an intermediate file.
+
+    The stream is **not self-describing** — there is no header. Consumers
+    must specify the format explicitly, e.g.::
+
+        ffmpeg -f s16le -ar 48000 -ac 2 -i - ...
+
+    :meth:`write` shares the ``(N, CHANNELS) float32`` contract with
+    :class:`WavFileSink`; the same quantisation is applied so the byte
+    stream matches what would have been written to a WAV file (sans
+    RIFF header).
+
+    Args:
+        stream: Destination binary stream. Defaults to
+            ``sys.stdout.buffer`` so the CLI's stdout pipe works without
+            explicit wiring; tests inject :class:`io.BytesIO`.
+
+    The stream is **never** closed by this sink — :meth:`close` only
+    flushes — because the default target (``sys.stdout``) is owned by
+    the interpreter and must outlive the sink for the surrounding
+    process to finish cleanly.
+    """
+
+    _stream: BinaryIO
+    _sample_count: int
+    _closed: bool
+
+    def __init__(self, *, stream: BinaryIO | None = None) -> None:
+        self._stream = stream if stream is not None else sys.stdout.buffer
+        self._sample_count = 0
+        self._closed = False
+
+    @property
+    def sample_count(self) -> int:
+        """Total number of interleaved samples written so far.
+
+        One ``sample`` counts a full ``CHANNELS``-wide frame, matching
+        :attr:`WavFileSink.sample_count` semantics.
+        """
+        return self._sample_count
+
+    def write(self, frame: NDArray[np.float32]) -> None:
+        """Append a chunk of audio to the stream as ``s16le`` bytes.
+
+        Args:
+            frame: ``(N, CHANNELS)`` float32 ndarray; ``N == 0`` is a
+                no-op so backends are free to forward empty reads.
+
+        Raises:
+            RuntimeError: The sink has already been closed.
+            ValueError: ``frame`` does not have shape
+                ``(N, CHANNELS)`` or its dtype is not ``np.float32``.
+        """
+        if self._closed:
+            raise RuntimeError("RawPcmStdoutSink is closed")
+
+        _validate_float32_frame(frame, sink_name="RawPcmStdoutSink")
+
+        n = frame.shape[0]
+        if n == 0:
+            return
+
+        int16 = _float32_to_int16(frame)
+        # ``<i2`` (little-endian int16) is explicit so the byte stream
+        # stays s16le even on a hypothetical big-endian host. ``copy=
+        # False`` avoids a redundant buffer copy when the source array
+        # is already native-endian little-endian (the common case on
+        # x86_64).
+        self._stream.write(int16.astype("<i2", copy=False).tobytes())
+        self._sample_count += n
+
+    def close(self) -> None:
+        """Flush the underlying stream; idempotent and never closes it.
+
+        The default stream is ``sys.stdout.buffer``, which is owned by
+        the interpreter — closing it would break anything written
+        afterwards (e.g. an ``atexit`` log line). Tests pass their own
+        :class:`io.BytesIO` and check it stays open.
+        """
+        if self._closed:
+            return
+        self._closed = True
+        self._stream.flush()
 
     def __enter__(self) -> Self:
         return self
