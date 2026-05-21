@@ -249,3 +249,36 @@ uv run vrcpilot pid; echo "exit=$?"   # exit=1 で何もいないことを確認
 ```
 
 これで「起動 → メニュー開く → 状態取得 → 閉じる → 終了」が再現できる。`screenshot -o` で残した `/tmp/vrc_menu.png`、`ocr --viz` で残した `/tmp/vrc_menu_viz.png`、stdout を流し込んだ `/tmp/vrc_menu.yaml` の 3 つを Read で読めば次の操作（クリック対象の選定など）が組める。
+
+## 11. Python API で VRChat の音を録る
+
+CLI 化はまだないが、`vrcpilot.speaker` の Python API で VRChat の音声のみを抽出して WAV に書き出せる。バックエンドは `proc-tap` (pybind11/C++ 拡張) を経由するプロセス単位ループバックで、システム全体の音ではなく **VRChat.exe からの音だけ** が取れる（Discord や OBS の音は混ざらない）。`proc-tap` がプラットフォーム判定を内部で行い Windows (WASAPI Process Loopback) / Linux (PulseAudio/PipeWire) は stable、macOS (Core Audio) は experimental。
+
+```python
+import time
+from pathlib import Path
+from vrcpilot.speaker import SpeakerLoop, WavFileSink
+
+with (
+    WavFileSink(Path("/tmp/test.wav")) as sink,
+    SpeakerLoop(sink.write, chunk_seconds=0.05) as loop,
+):
+    loop.start()
+    time.sleep(5.0)  # 5 秒間録音
+```
+
+要件と挙動:
+
+- **VRChat が起動済み** であること。未起動なら `Speaker` / `SpeakerLoop` のコンストラクタが `RuntimeError("VRChat is not running")` を投げる
+- 出力は **48 kHz / stereo / 16-bit PCM WAV**。`SAMPLE_RATE` / `CHANNELS` 定数は `vrcpilot.speaker.base` にあり、`WavFileSink` の出力は backend に合わせて固定（proc-tap が float32 で返してきたものを sink 側で int16 に量子化）
+- VRChat が無音の間 (タイトル画面など) は `(0, 2)` の空 ndarray が返るのが正常。`WavFileSink.write` は空フレームを no-op としてスキップする
+- 重ねがけは安全: `loop` を閉じる前にユーザーが Ctrl-C しても `with` で `close()` → 内部 `Speaker.close()` → proc-tap の `stop` + `close` が走る
+
+`SpeakerLoop` を使わず手動で回したい場合は `Speaker` を直接使う:
+
+```python
+with Speaker(read_timeout=1.0) as speaker:
+    chunk = speaker.read()  # numpy.ndarray (N, 2) float32
+```
+
+proc-tap の制限: `INCLUDE_TARGET_PROCESS_TREE` (子プロセス込み) モードは proc-tap 側で未実装なので、現在は対象 PID 単独の音だけが取れる。stock VRChat は子プロセスを使わないので実害なし。

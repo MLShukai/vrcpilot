@@ -40,6 +40,7 @@ from vrcpilot.process import (
     terminate,
 )
 from vrcpilot.screenshot import Screenshot, take_screenshot
+from vrcpilot.speaker import AudioCallback, Speaker, SpeakerLoop, WavFileSink
 from vrcpilot.steam import SteamNotFoundError
 from vrcpilot.window import focus, is_foreground, unfocus
 
@@ -49,6 +50,7 @@ __version__ = metadata.version(__name__.replace("_", "-"))
 
 __all__ = [
     "__version__",
+    "AudioCallback",
     "AvatarParameters",
     "Capture",
     "CaptureLoop",
@@ -75,6 +77,8 @@ __all__ = [
     "OscSender",
     "RapidOCREngine",
     "Screenshot",
+    "Speaker",
+    "SpeakerLoop",
     "SteamNotFoundError",
     "take_screenshot",
     "TemplateDetectEngine",
@@ -82,4 +86,5 @@ __all__ = [
     "unfocus",
     "VRChatNotFocusedError",
     "VRChatNotRunningError",
+    "WavFileSink",
 ]

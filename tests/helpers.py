@@ -21,6 +21,7 @@ from vrcpilot import process
 from vrcpilot.controls.keyboard import Key, Keyboard
 from vrcpilot.controls.mouse import Mouse, MouseButton
 from vrcpilot.detect import DetectEngine, Detection
+from vrcpilot.speaker.base import CHANNELS, SpeakerBackend
 
 #: Skip a test on non-Windows platforms.
 #:
@@ -158,6 +159,33 @@ class ImplKeyboard(Keyboard):
     @override
     def _do_up(self, key: Key) -> None:
         self.calls.append(("_do_up", {"key": key}))
+
+
+class ImplSpeakerBackend(SpeakerBackend):
+    """Concrete :class:`SpeakerBackend` for ABC tests.
+
+    Returns whatever ndarray is set on :attr:`buffer` from
+    :meth:`read` (defaulting to an empty ``(0, CHANNELS)`` buffer so
+    the documented shape contract holds without a real audio source).
+    Tests use this in place of a mock so the real ABC plumbing is
+    exercised end-to-end -- per the project rule that ABC tests use
+    a real impl rather than ``mocker.Mock``.
+    """
+
+    def __init__(self, buffer: NDArray[np.float32] | None = None) -> None:
+        self.buffer: NDArray[np.float32] = (
+            buffer if buffer is not None else np.zeros((0, CHANNELS), dtype=np.float32)
+        )
+
+    @override
+    def read(self) -> NDArray[np.float32]:
+        return self.buffer
+
+    @override
+    def close(self) -> None:
+        # Intentionally a no-op: the ABC only requires idempotence,
+        # which a no-op trivially satisfies.
+        return None
 
 
 class ImplDetectEngine(DetectEngine):

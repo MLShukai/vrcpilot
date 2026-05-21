@@ -6,3 +6,5 @@
 - [pyright ignore の集約・最小化](feedback_pyright_ignore_minimization.md) — stub のない C 拡張は 1 度 Any 化して連鎖する `reportUnknown*` を全部消すのが定石
 - [tests/fakes は production の表面のみミラー](feedback_fakes_mirror_production.md) — ABC メソッド撤去後に fake 側で dead 化したシンボルを必ず grep で剥がす
 - [重複抽出のタイミング](feedback_dedupe_threshold.md) — 2 つ目を見て I/F が固まってから helper 化。extractor 固有 kwarg で肥大しそうなら 3 つ目まで待つ
+- [Shared fakes live in tests/fakes/](feedback_shared_fakes_in_tests_fakes.md) — public collaborator の fake は単一消費者でも tests/fakes/ に置く
+- [sys.platform monkeypatch is allowed for fail-fast branches](feedback_sys_platform_patching.md) — `NotImplementedError` 分岐の検証なら mocker.patch.object(sys, "platform", ...) は許容される

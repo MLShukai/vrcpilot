@@ -16,6 +16,10 @@ fixtures next to each fake; see :mod:`tests.fakes.capture`.)
 
 from __future__ import annotations
 
+from .audio import (
+    FakeProcessAudioCapture,
+    FakeSpeaker,
+)
 from .capture import (
     FakeCapture,
     FakeCaptureLoop,
@@ -54,7 +58,9 @@ __all__ = [
     "FakePixmapImage",
     "FakePopen",
     "FakeProcess",
+    "FakeProcessAudioCapture",
     "FakePyDirectInput",
+    "FakeSpeaker",
     "FakeUDPClient",
     "FakeWindowsCapture",
     "FakeWindowsCaptureControl",
