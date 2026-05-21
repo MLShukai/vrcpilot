@@ -23,8 +23,8 @@
 - **画像検出**: `detect/`（`DetectEngine` ABC + `TemplateDetectEngine`（OpenCV `TM_CCOEFF_NORMED`）実装、`detect()` で `Screenshot` + クエリ画像から座標付き `Detection` 列を返す、`visualize.render` で OCR と同一スキーマの可視化）
 - **入力制御**: `controls/`（VRChat フォーカス保証つきの `keyboard` / `mouse`、`guard`、`errors`）、`clipboard`（pyperclip + Ctrl+V で scancode keyboard の非 ASCII 制限を回避）
 - **OSC**: `osc/`（`OscSender` 低レベル送信、`OscController` ボタン / 軸 / typing / chatbox、`OscAvatar` パラメータ送信。CLI 側は `cli/osc.py` で `send` / `axis` / `tap` / `hold` / `chatbox` / `typing` / `avatar` の 7 アクション）
-- **音声系**: `speaker/`（`Speaker` + `SpeakerLoop` + `WavFileSink`、`proc-tap` 経由のプロセス単位ループバックで VRChat.exe からのみ音声を抽出する Python API。Windows / Linux は stable、macOS は experimental。CLI 化は後続スコープ）
-- **CLI フロントエンド**: `cli/` 配下にサブコマンド毎 1 ファイル（`launch` / `pid` / `terminate` / `focus` / `unfocus` / `screenshot` / `capture` / `mouse` / `keyboard` / `paste` / `ocr` / `detect` / `osc`）、ディスパッチは `cli/__init__.py` の `build_parser` / `main`、共有ヘルパは `cli/_common.py`（`add_screenshot_input_arg` / `resolve_screenshot` で `--screenshot` ↔ stdin pipe の入力解決を集約）
+- **音声系**: `speaker/`（`Speaker` + `SpeakerLoop` + `WavFileSink` + `RawPcmStdoutSink`、`proc-tap` 経由のプロセス単位ループバックで VRChat.exe からのみ音声を抽出する Python API。Windows / Linux は stable、macOS は experimental）
+- **CLI フロントエンド**: `cli/` 配下にサブコマンド毎 1 ファイル（`launch` / `pid` / `terminate` / `focus` / `unfocus` / `screenshot` / `capture` / `record` / `mouse` / `keyboard` / `paste` / `ocr` / `detect` / `osc`）、ディスパッチは `cli/__init__.py` の `build_parser` / `main`、共有ヘルパは `cli/_common.py`（`add_screenshot_input_arg` / `resolve_screenshot` で `--screenshot` ↔ stdin pipe の入力解決を集約）
 
 プラットフォーム抽象は親 `__init__.py` で `sys.platform` ディスパッチして公開する（`__all__` 経由で公開 API を集約）。プラットフォーム固有の低レベル実装（`steam`, `win32`, `x11`, `capture/{win32,x11,sinks}`, `window/{win32,x11}`, `controls/{keyboard,mouse}`）は対応モジュールに配置している。`speaker/` は `proc-tap` (C++ 拡張) がプラットフォーム判定を内部で行うので分岐モジュールを持たない。
 

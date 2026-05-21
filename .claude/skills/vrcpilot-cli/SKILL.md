@@ -1,6 +1,6 @@
 ---
 name: vrcpilot-cli
-description: vrcpilot CLI (uv run vrcpilot ...) のサブコマンド表、screenshot → ocr / detect 標準パイプライン、osc 7 アクションの典型例、OCR/detect の座標系（pos vs display_pos）。CLI を実行する／引数を組み立てる／パイプラインを書く前に読む
+description: vrcpilot CLI (uv run vrcpilot ...) のサブコマンド表、screenshot → ocr / detect 標準パイプライン、record で音声を WAV / s16le stdout pipe する典型例、osc 7 アクションの典型例、OCR/detect の座標系（pos vs display_pos）。CLI を実行する／引数を組み立てる／パイプラインを書く前に読む
 ---
 
 # vrcpilot CLI 参照リファレンス
@@ -19,6 +19,7 @@ description: vrcpilot CLI (uv run vrcpilot ...) のサブコマンド表、scree
 | `unfocus`    | VRChat ウィンドウを z-order 末尾に                                                                     | 同上                                                                                         |
 | `screenshot` | 1 枚撮って `Screenshot` を YAML で吐く                                                                 | `-o <path>` で PNG を書き出し YAML に `path:` を、未指定で base64 PNG を埋め込む（`image:`） |
 | `capture`    | 一定 FPS で録画                                                                                        | `-o <path>` で mp4、未指定で y4m を stdout（TTY なら拒否）                                   |
+| `record`     | VRChat の音声を録音 (`proc-tap` 経由で VRChat.exe の音のみ抽出)                                        | `-o <path>` で WAV、未指定で RAW PCM s16le を stdout（TTY なら拒否）                         |
 | `mouse`      | `move` / `click` / `scroll`（`press` / `release` は意図的に未公開）                                    | guard 失敗で exit 1                                                                          |
 | `keyboard`   | `press` のみ公開（`down` / `up` をプロセスに跨いで持てないため）                                       | `--duration` のデフォルト 0.1（VRChat に届く下限。0.0 にしない）                             |
 | `paste`      | クリップボード経由で文字列を Ctrl+V 投入（非 ASCII 用）                                                | 引数 or stdin から読む。tty かつ引数なしは exit 2                                            |
@@ -48,6 +49,36 @@ uv run vrcpilot detect -q ./assets/button.png --screenshot /tmp/shot.yaml > /tmp
 
 - `-o <path>` あり: PNG を書き出し、YAML には `path:` で絶対パスを記録（履歴を残す pipeline 向け）
 - `-o` なし（デフォルト）: PNG ファイルは作らず、YAML 内 `image:` に base64 PNG を埋め込む（pipe で消費する想定）
+
+## 音声録音 (`record`)
+
+`vrcpilot record` は `proc-tap` 経由で **VRChat.exe からの音だけ** を抽出する
+（Discord / OBS / 他アプリの音は混ざらない）。出力先で挙動が分かれる:
+
+- `-o <path>` あり: 48 kHz / stereo / 16-bit PCM の WAV ファイルに書き出し、
+  完了時に stdout に絶対パスを 1 行
+- `-o` なし: ヘッダ無し RAW PCM s16le (48 kHz / stereo / interleaved /
+  little-endian) を stdout に流す。**自己記述しないので受け側で
+  `-f s16le -ar 48000 -ac 2` の指定必須**。TTY に流そうとすると exit 1
+
+```bash
+# WAV ファイルに 5 秒録音
+uv run vrcpilot record -o /tmp/vrc.wav --duration 5
+
+# ディレクトリ指定 → vrcpilot_record_<UTC>.wav が中に作られる
+uv run vrcpilot record -o /tmp/
+
+# RAW PCM を ffmpeg に投げて好きな形式に再エンコード
+uv run vrcpilot record --duration 5 \
+  | ffmpeg -f s16le -ar 48000 -ac 2 -i - -y /tmp/vrc.opus
+
+# Ctrl+C 停止モード（duration 無し）
+uv run vrcpilot record -o /tmp/vrc.wav
+```
+
+VRChat 未起動なら `vrcpilot: VRChat is not running` を stderr に出して exit 1。
+進捗メッセージは常に stderr で、stdout は WAV モードでは絶対パス 1 行、
+pipe モードでは PCM バイト列だけが流れる（パイプ整合性を担保）。
 
 ## OSC コマンドの典型例
 
