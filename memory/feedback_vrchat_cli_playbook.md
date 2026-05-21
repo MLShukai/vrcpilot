@@ -252,7 +252,7 @@ uv run vrcpilot pid; echo "exit=$?"   # exit=1 で何もいないことを確認
 
 ## 11. Python API で VRChat の音を録る
 
-CLI 化はまだないが、`vrcpilot.speaker` の Python API で VRChat の音声のみを抽出して WAV に書き出せる。バックエンドは `proc-tap` (pybind11/C++ 拡張) を経由するプロセス単位ループバックで、システム全体の音ではなく **VRChat.exe からの音だけ** が取れる（Discord や OBS の音は混ざらない）。`proc-tap` がプラットフォーム判定を内部で行い Windows (WASAPI Process Loopback) / Linux (PulseAudio/PipeWire) は stable、macOS (Core Audio) は experimental。
+`vrcpilot.speaker` の Python API で VRChat の音声のみを抽出して WAV に書き出せる（同等の操作を CLI から行いたいときは §12 を参照）。バックエンドは `proc-tap` (pybind11/C++ 拡張) を経由するプロセス単位ループバックで、システム全体の音ではなく **VRChat.exe からの音だけ** が取れる（Discord や OBS の音は混ざらない）。`proc-tap` がプラットフォーム判定を内部で行い Windows (WASAPI Process Loopback) / Linux (PulseAudio/PipeWire) は stable、macOS (Core Audio) は experimental。
 
 ```python
 import time
@@ -282,3 +282,34 @@ with Speaker(read_timeout=1.0) as speaker:
 ```
 
 proc-tap の制限: `INCLUDE_TARGET_PROCESS_TREE` (子プロセス込み) モードは proc-tap 側で未実装なので、現在は対象 PID 単独の音だけが取れる。stock VRChat は子プロセスを使わないので実害なし。
+
+CLI 用法は §12 を参照。
+
+## 12. CLI で音を録る (`vrcpilot record`)
+
+§11 の Python API と等価な内容を CLI から実行できる。
+
+```bash
+# WAV ファイルに保存（推奨）
+uv run vrcpilot record -o /tmp/vrc.wav --duration 10
+
+# ディレクトリ指定 → vrcpilot_record_<UTC>.wav が中に作られる
+uv run vrcpilot record -o /tmp/ --duration 10
+
+# RAW PCM を stdout に流して ffmpeg で再エンコード
+uv run vrcpilot record --duration 10 \
+  | ffmpeg -f s16le -ar 48000 -ac 2 -i - -y /tmp/vrc.opus
+
+# Ctrl+C 停止
+uv run vrcpilot record -o /tmp/vrc.wav   # 任意のタイミングで Ctrl+C
+```
+
+挙動要約:
+
+- `-o <path>` (ファイル or ディレクトリ) で WAV 出力。48 kHz / stereo / 16-bit PCM。stdout に絶対パス 1 行
+- `-o` 無しで **RAW PCM s16le** (48 kHz / stereo / interleaved / little-endian / ヘッダ無し) を stdout に。**自己記述しないので受け側で `-f s16le -ar 48000 -ac 2` の指定必須**。TTY に流そうとすると exit 1
+- `--duration` 未指定なら Ctrl+C 待ち
+- VRChat 未起動なら exit 1 + `vrcpilot: VRChat is not running` を stderr
+- 録音中の進捗メッセージは全て stderr。stdout は WAV モードでは絶対パス 1 行、pipe モードでは PCM バイト列のみ
+
+`vrcpilot capture` の y4m pipe と違って **音声側は format 自己記述しない**（WAV ヘッダはストリームの先頭で「総サンプル数」を埋める必要があり、ストリーミング pipe では決められないため）。
