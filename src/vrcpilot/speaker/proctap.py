@@ -4,7 +4,8 @@
 per platform and wraps the OS-specific process-loopback API:
 
 * Windows: ``ActivateAudioInterfaceAsync`` + Process Loopback (stable)
-* Linux: PulseAudio / PipeWire (stable)
+* Linux: not used in vrcpilot -- see :mod:`vrcpilot.speaker.pipewire`
+  for the native PipeWire backend.
 * macOS: Core Audio (experimental)
 
 We delegate the OS-specific COM / D-Bus / Core Audio plumbing to
