@@ -52,7 +52,6 @@
       "Bash(uv build *)"
     ],
     "deny": [
-      "Bash(git push:*)",
       "Bash(git -C:*)"
     ]
   }
