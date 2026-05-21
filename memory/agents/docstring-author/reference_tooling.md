@@ -1,27 +1,30 @@
 ---
-name: vrcpilot tooling and verification commands
-description: How to run formatters / tests / type checks for vrcpilot and what they enforce on docstrings.
+name: docformatter and pyright caveats for docstring work
+description: docstring 作業者が踏まえるべき docformatter のリフロー挙動と pyright strict の制約。`just` レシピや pre-commit 集約の一般論は memory/feedback_lint_tooling.md を参照
 type: reference
 ---
 
-vrcpilot uses `uv` + `just` as the entry layer. Verification before committing docstring changes:
-
-- `just format` — runs pre-commit (ruff fix + format, **docformatter**, mdformat, codespell, etc.). Docformatter will rewrite docstrings in place; expect it to re-flow your prose. After it runs, re-stage and re-commit if needed.
-- `just test` — `uv run pytest -v --cov`, with `--doctest-modules` collecting doctests from imported sources too.
-- `just type` — `uv run pyright` in **strict** mode against `./src/`.
-- `just run` — chains format → test → type.
+共有メモリ [`memory/feedback_lint_tooling.md`](../../feedback_lint_tooling.md) が
+`just` レシピと pre-commit 集約のルールを定める。本ファイルは docstring 作業に
+固有の差分のみを記述する。
 
 **Docformatter quirks observed:**
 
-- Wraps prose at line-length 88 and rewrites the summary line to fit on the first line. Avoid summaries that can be split awkwardly.
-- Preserves doctest blocks exactly — safe to include `>>>` lines without docformatter mangling them.
+- Wraps prose at line-length 88 and rewrites the summary line to fit on the
+  first line. Avoid summaries that can be split awkwardly.
+- Preserves doctest blocks exactly — safe to include `>>>` lines without
+  docformatter mangling them.
+- `just format` は内部で docformatter を呼ぶので、書いた docstring が in-place
+  で書き換わる。書き換え後を確認してから再 stage する。
 
-**Pyright strict surface:**
+**Pyright strict surface（docstring 視点）:**
 
-- `./src/` only; `tests/` is excluded.
-- `reportImplicitOverride` enabled, `reportPrivateUsage` set to warning.
-- Docstrings cannot contradict type hints (e.g. don't say "returns `None`" if the signature returns `str`).
+- 対象は `./src/` のみ（`tests/` は除外）。
+- `reportImplicitOverride` 有効、`reportPrivateUsage` は警告。
+- docstring の本文が type hint と矛盾してはいけない（例: シグネチャが `str` を
+  返すのに「returns `None`」と書く等）。
 
-**Commit hooks:**
+**Commit 時の注意:**
 
-- `--no-verify` is discouraged. If docformatter/ruff rewrites files on commit, restage and re-commit.
+- `--no-verify` で hook を skip しない。docformatter / ruff が in-place 書き換え
+  をしたら restage して commit を作り直す（amend ではなく新規コミット）。

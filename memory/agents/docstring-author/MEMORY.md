@@ -2,7 +2,7 @@
 - [vrcpilot project purpose](project_purpose.md) — VRChat automation library; launcher is foundational, document as automation entry points
 - [No shell tool in docstring-author agent](feedback_environment_no_shell.md) — cannot run just/git here; hand verification back to user
 - [pytest --doctest-modules is enabled](reference_pytest_doctest_modules.md) — every `>>>` in src docstrings runs during tests
-- [vrcpilot tooling and verification commands](reference_tooling.md) — just format/test/type, docformatter quirks, pyright strict
+- [docformatter and pyright caveats for docstring work](reference_tooling.md) — docstring 観点の docformatter リフロー挙動と pyright strict 制約。一般論は memory/feedback_lint_tooling.md 参照
 - [Capture vs Screenshot API split](project_capture_screenshot_split.md) — streaming vs one-shot pixel surface, Wayland asymmetry, latest-only read
 - [vrcpilot.controls subpackage shape](project_controls_subpackage.md) — template-method ABC, lazy backend singleton, ensure_target Wayland-fail-fast
 - [vrcpilot CLI subcommand docstring conventions](project_cli_subcommand_style.md) — module/patch-target/register/run shape and exit-code prose pattern
