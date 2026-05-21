@@ -1,3 +1,5 @@
 - [Submodule attribute collision in cli package](feedback_submodule_attribute_collision.md) — re-exports clashing with subcommand submodule names get clobbered; rebind after `_main` import
 - [yaml.safe_load returns Unknown under pyright strict](feedback_yaml_safe_load_pyright_strict.md) — cast to dict\[str, Any\] after isinstance narrow so int()/str() coercions type-check
 - [Factory-method seam for COM/native test substitution](feedback_factory_seam_pattern.md) — COM/WGC や native 拡張 (proc-tap 等) は `_open_session` / `_open_capture` factory + duck-typed fake で差し替え可能にする
+- [ExitStack for partial-init resource unwind](feedback_exitstack_partial_init_cleanup.md) — multi-step backend constructors use ExitStack + pop_all() instead of nested try/except pyramids; rollback helpers double as close() steps
+- [dict.get on isinstance-narrowed Any returns Unknown under pyright strict](feedback_pyright_strict_untyped_dict_get.md) — rebind through `dict[Any, Any]` alias after narrow; annotate LHS as `: Any`
