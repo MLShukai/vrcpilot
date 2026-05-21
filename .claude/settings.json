@@ -155,6 +155,7 @@
       "Bash(man:*)",
       "Bash(info:*)",
       "Bash(help:*)",
+      "Bash(sed -n:*)",
       "Bash(unzip -l:*)",
       "Bash(zipinfo:*)",
       "Bash(tar -t:*)",
