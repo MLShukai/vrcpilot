@@ -20,14 +20,15 @@ Stand-ins mirroring the speaker modality's public surface:
 
 * :class:`FakePulse` / :class:`FakePulseModuleInfo` /
   :class:`FakePulseEventInfo` mirror the slice of the ``pulsectl.Pulse``
-  surface that the upcoming
+  surface that
   :class:`vrcpilot.speaker.pipewire.PipeWireSpeakerBackend` invokes
   (``module_list`` / ``module_load`` / ``module_unload`` /
   ``event_mask_set`` / ``event_callback_set`` / ``event_listen`` /
-  ``close`` / ``connected`` / ``event_listener_running``). Tests patch
-  ``pulsectl.Pulse`` to return a :class:`FakePulse` and use
-  :meth:`FakePulse.emit_event` to synchronously drive the registered
-  callback without standing up a real PulseAudio / PipeWire server.
+  ``event_listen_stop`` / ``close`` / ``connected`` /
+  ``event_listener_running``). Tests patch ``pulsectl.Pulse`` to
+  return a :class:`FakePulse` and use :meth:`FakePulse.emit_event` to
+  synchronously drive the registered callback without standing up a
+  real PulseAudio / PipeWire server.
 
 * :class:`FakePwRecordProcess` mirrors the slice of the
   :class:`subprocess.Popen` surface that the PipeWire backend uses to
@@ -268,27 +269,29 @@ class FakePulse:
         self.event_callback = callback
 
     def event_listen(self) -> None:
-        """Block until :meth:`stop_listening` is called.
+        """Block until :meth:`event_listen_stop` is called.
 
         Real ``pulsectl.Pulse.event_listen`` blocks dispatching events
         to the registered callback until ``event_listener_running`` is
-        cleared. Tests drive the callback synchronously via
-        :meth:`emit_event`, so this method just parks the listener
-        thread on an internal stop event. On entry the
-        :attr:`event_listener_running` flag is set to ``True``; on exit
-        it is left at whatever value the callback (or test) most
-        recently wrote.
+        cleared (typically via :meth:`pulsectl.Pulse.event_listen_stop`).
+        Tests drive the callback synchronously via :meth:`emit_event`,
+        so this method just parks the listener thread on an internal
+        stop event. On entry the :attr:`event_listener_running` flag is
+        set to ``True``; on exit it is left at whatever value the
+        callback (or test) most recently wrote.
         """
         self._check_open()
         self.event_listener_running = True
         self._listen_release.wait()
         self._listen_release.clear()
 
-    def stop_listening(self) -> None:
+    def event_listen_stop(self) -> None:
         """Release a thread parked in :meth:`event_listen`.
 
-        Tests call this from the foreground after assertions are done so
-        the backend's event thread can return and be joined.
+        Mirrors :meth:`pulsectl.Pulse.event_listen_stop`. The backend
+        calls this from its teardown path so the event thread can
+        return and be joined. Tests can also call this from the
+        foreground after assertions are done.
         """
         self.event_listener_running = False
         self._listen_release.set()
