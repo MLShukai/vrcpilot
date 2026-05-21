@@ -252,7 +252,12 @@ uv run vrcpilot pid; echo "exit=$?"   # exit=1 で何もいないことを確認
 
 ## 11. Python API で VRChat の音を録る
 
-`vrcpilot.speaker` の Python API で VRChat の音声のみを抽出して WAV に書き出せる（同等の操作を CLI から行いたいときは §12 を参照）。バックエンドは `proc-tap` (pybind11/C++ 拡張) を経由するプロセス単位ループバックで、システム全体の音ではなく **VRChat.exe からの音だけ** が取れる（Discord や OBS の音は混ざらない）。`proc-tap` がプラットフォーム判定を内部で行い Windows (WASAPI Process Loopback) / Linux (PulseAudio/PipeWire) は stable、macOS (Core Audio) は experimental。
+`vrcpilot.speaker` の Python API で VRChat の音声のみを抽出して WAV に書き出せる（同等の操作を CLI から行いたいときは §12 を参照）。プロセス単位ループバックでシステム全体の音ではなく **VRChat.exe からの音だけ** が取れる（Discord や OBS の音は混ざらない）。バックエンドは `sys.platform` で dispatch される:
+
+- **Linux**: ネイティブ PipeWire バックエンド (`vrcpilot.speaker.pipewire.PipeWireSpeakerBackend`)。`vrcpilot_tap` という null-sink を作って `pw-link` で additive にリンクし、`pw-record` の monitor を読む。**ユーザーは引き続きスピーカーで VRChat 音声を聴ける**。必須 CLI: `pw-record` / `pw-link` / `pw-dump` / `pactl`（`pactl info` で `Server Name: PulseAudio (on PipeWire ...)` であれば前提充足）。制御プレーンは `pulsectl` (Linux 限定 Python 依存)
+- **Windows / macOS**: `proc-tap` (pybind11/C++ 拡張) 経由。Windows は WASAPI Process Loopback で stable、macOS は Core Audio で experimental
+
+Linux backend は `proc-tap` の Linux パスで音が取れなかった (2026-05-21) のを受けて switch した経緯がある。クラッシュ時の null-sink リーク防止用に `$XDG_RUNTIME_DIR/vrcpilot/tap.json` に PID + module id の breadcrumb を残し、起動時に冪等で stale unload する。
 
 ```python
 import time
