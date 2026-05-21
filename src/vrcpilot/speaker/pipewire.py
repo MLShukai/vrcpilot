@@ -27,6 +27,11 @@ non-Linux platforms never need it installed.
 
 from __future__ import annotations
 
+import sys
+
+if sys.platform != "linux":
+    raise RuntimeError("PipeWireSpeakerBackend is Linux-only")
+
 import atexit
 import json
 import logging
