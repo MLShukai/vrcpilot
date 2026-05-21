@@ -20,6 +20,25 @@ class TestPackage:
     @pytest.mark.parametrize(
         "name",
         [
+            "AudioCallback",
+            "Speaker",
+            "SpeakerLoop",
+            "WavFileSink",
+        ],
+    )
+    def test_speaker_modality_re_exported_at_top_level(self, name: str):
+        """Speaker modality symbols must be in :data:`vrcpilot.__all__`.
+
+        Pins the public-API surface the speaker package exposes through
+        the top-level namespace so a refactor cannot quietly drop a re-
+        export.
+        """
+        assert hasattr(vrcpilot, name)
+        assert name in vrcpilot.__all__
+
+    @pytest.mark.parametrize(
+        "name",
+        [
             "VRCHAT_PROCESS_NAME",
             "VRCHAT_STEAM_APP_ID",
             "build_launch_command",
