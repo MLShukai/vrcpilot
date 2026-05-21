@@ -8,3 +8,4 @@
 - [重複抽出のタイミング](feedback_dedupe_threshold.md) — 2 つ目を見て I/F が固まってから helper 化。extractor 固有 kwarg で肥大しそうなら 3 つ目まで待つ
 - [Shared fakes live in tests/fakes/](feedback_shared_fakes_in_tests_fakes.md) — public collaborator の fake は単一消費者でも tests/fakes/ に置く
 - [sys.platform monkeypatch is allowed for fail-fast branches](feedback_sys_platform_patching.md) — `NotImplementedError` 分岐の検証なら mocker.patch.object(sys, "platform", ...) は許容される
+- [Producer/consumer exception planting needs same condition](feedback_producer_consumer_exception_race.md) — drain/listener が exception を slot に積むなら、書き込みは consumer が wait する Condition の内側で。check-then-wait は race
