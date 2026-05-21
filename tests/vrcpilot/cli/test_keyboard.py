@@ -70,7 +70,7 @@ class TestKeyboardPress:
     ):
         # Match the API default in vrcpilot.controls.keyboard.Keyboard.press
         # (Unity / VRChat drops shorter holds - see
-        # .claude/memory/project_keyboard_press_duration.md).
+        # memory/project_keyboard_press_duration.md).
         del fake_keyboard
         sleep_spy = mocker.patch("vrcpilot.controls.keyboard.time.sleep")
 
