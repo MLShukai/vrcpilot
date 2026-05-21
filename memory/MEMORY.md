@@ -13,7 +13,12 @@
 - [e2e は Claude が実行](feedback_e2e_run.md) — `tests/e2e/` は人手作業に残さず Claude 自身が `just e2e-test` で実機検証する
 - [計画ドキュメントは日本語](feedback_planning_doc_language.md) — plan ファイル・設計提示は日本語で書く。コード/識別子/コマンドは英語のまま
 - [vrcpilot CLI で VRChat を操作する playbook](feedback_vrchat_cli_playbook.md) — SSH/.env 環境で起動 → メニュー → OCR → click → 移動 → terminate の実機検証済み手順
+- [許可済みコマンドを優先する](feedback_use_allowed_commands.md) — `.claude/settings.json` の allow に載った形で Bash/Read を組み立てる。確認プロンプトで自走が止まるのを防ぐ
 
 ## project（実装上の固有事情）
 
 - [keyboard.press の duration デフォルト 0.1](project_keyboard_press_duration.md) — VRChat/Unity が短すぎる keypress を取りこぼすので 0.0 に戻さない
+
+## reference（外部ツール・パス）
+
+- [gh CLI は絶対パスで呼ぶ](reference_gh_executable_path.md) — `"/c/Program Files/GitHub CLI/gh.exe"` で呼ぶ。PATH には通っていない
