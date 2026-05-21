@@ -1,28 +1,28 @@
 """Linux PipeWire-native speaker backend.
 
-VRChat's audio is captured by:
+Splits the work across three planes so a crash in one cannot wedge
+the others:
 
-1. Creating a deterministic virtual sink ``vrcpilot_tap`` via
-   PulseAudio's ``module-null-sink`` (talked to through ``pulsectl``).
-2. Adding additive ``pw-link`` links from every VRChat ``Stream/Output/
-   Audio`` node's ``output_FL`` / ``output_FR`` to the tap's playback
-   ports. Existing links to the user's real speakers are **not** touched,
-   so the user keeps hearing VRChat while we record.
-3. Spawning ``pw-record --target=vrcpilot_tap.monitor`` as a subprocess
-   and draining its stdout (interleaved ``float32`` LE, 48 kHz / stereo)
-   in a background thread.
-4. Subscribing to PulseAudio ``sink_input`` events so newly-opened
-   VRChat streams get linked too.
+* Control plane -- ``pulsectl.Pulse`` (libpulse via ctypes) loads /
+  unloads the ``vrcpilot_tap`` null-sink and subscribes to
+  ``sink_input`` events for late-joining VRChat streams.
+* Data plane -- ``pw-record --target=vrcpilot_tap.monitor`` runs
+  out-of-process and writes interleaved ``float32`` LE / 48 kHz /
+  stereo to its stdout, which a background thread drains into a
+  shared buffer. Matches the constants in
+  :mod:`vrcpilot.speaker.base` so no resampling is needed.
+* Routing -- additive ``pw-link`` calls from every VRChat
+  ``Stream/Output/Audio`` node's ``output_FL`` / ``output_FR`` to the
+  tap's playback ports. The user's existing links to real speakers
+  are left alone, so VRChat is still audible while we record.
 
-The native data plane (``pw-record``) runs out-of-process, so its
-crashes never take down the Python interpreter. The control plane
-(``pulsectl.Pulse``) speaks libpulse via ctypes; the import is lazy
-so non-Linux platforms never need ``pulsectl`` installed.
+A breadcrumb at ``$XDG_RUNTIME_DIR/vrcpilot/tap.json`` carries the
+PID + module id so an out-of-band janitor can unload the null-sink
+after an ungraceful exit; start-up also idempotently unloads any
+leftover ``vrcpilot_tap`` module from a previous crashed run.
 
-State is persisted to ``$XDG_RUNTIME_DIR/vrcpilot/tap.json`` so an
-out-of-band janitor (or a follow-up run) can unload the null-sink
-after an ungraceful exit. Idempotent start-up cleanup also unloads
-any leftover ``vrcpilot_tap`` module before creating a fresh one.
+``pulsectl`` is imported lazily inside :meth:`_open_pulse` so
+non-Linux platforms never need it installed.
 """
 
 from __future__ import annotations
@@ -84,7 +84,28 @@ _DRAIN_CHUNK_BYTES: Final[int] = 4096
 
 
 class PipeWireSpeakerBackend(SpeakerBackend):
-    """``SpeakerBackend`` that captures VRChat audio via PipeWire on Linux.
+    """SpeakerBackend that captures VRChat audio via native PipeWire on Linux.
+
+    Linux-only. The constructor performs the full three-plane setup
+    described in the module docstring:
+
+    1. Verify required CLIs are on ``$PATH`` (``pw-record``,
+       ``pw-link``, ``pw-dump``, ``pactl``) and resolve VRChat's PID.
+    2. Open a ``pulsectl`` connection, unload any stale
+       ``vrcpilot_tap`` null-sink, then load a fresh one. The user
+       keeps hearing VRChat on their real speakers because the
+       existing graph is untouched -- we only *add* links into the
+       tap.
+    3. Spawn ``pw-record`` against the tap's monitor source, drain
+       its stdout from a background thread, and subscribe to
+       ``sink_input`` events so VRChat streams created mid-session
+       get auto-linked too.
+
+    Every successful step registers a rollback callback on an
+    ``ExitStack``; a partial start-up never leaks a null-sink or a
+    ``pw-record`` subprocess. :meth:`close` runs the same cleanup in
+    teardown order and is registered with :func:`atexit` so an
+    interpreter exit cannot strand the null-sink either.
 
     Args:
         read_timeout: Per-:meth:`read` timeout in seconds. A quiet
@@ -93,7 +114,7 @@ class PipeWireSpeakerBackend(SpeakerBackend):
 
     Raises:
         ValueError: ``read_timeout`` is not strictly positive.
-        RuntimeError: Required CLIs are missing, VRChat is not running,
+        RuntimeError: A required CLI is missing, VRChat is not running,
             or the PulseAudio / PipeWire control plane refused the
             null-sink load.
     """
@@ -195,11 +216,11 @@ class PipeWireSpeakerBackend(SpeakerBackend):
     # ------------------------------------------------------------------
 
     def _open_pulse(self, client_name: str) -> Any:
-        """Construct a ``pulsectl.Pulse`` connection.
+        """Construct the ``pulsectl.Pulse`` control connection.
 
-        Lazy-imported so non-Linux test runs do not require ``pulsectl``
-        to be installed. Tests substitute this with a duck-typed
-        :class:`tests.fakes.FakePulse`.
+        Test seam: substituted via :func:`mocker.patch.object` with a
+        duck-typed :class:`tests.fakes.FakePulse`. The import is local
+        so non-Linux test runs do not require ``pulsectl``.
         """
         from pulsectl import (  # pyright: ignore[reportMissingTypeStubs]
             Pulse,
@@ -208,11 +229,11 @@ class PipeWireSpeakerBackend(SpeakerBackend):
         return Pulse(client_name)  # pyright: ignore[reportUnknownVariableType]
 
     def _run_pw_dump(self) -> list[Any]:
-        """Return the parsed ``pw-dump`` JSON.
+        """Return the parsed ``pw-dump`` JSON array.
 
-        ``pw-dump`` prints a JSON array describing every PipeWire object.
-        Tests substitute this with a fixture-driven list so they never
-        need a real PipeWire daemon.
+        Test seam: tests substitute a fixture-driven list of dicts
+        mirroring real ``pw-dump`` output so no PipeWire daemon is
+        needed.
         """
         result = subprocess.run(
             ["pw-dump"],
@@ -228,18 +249,19 @@ class PipeWireSpeakerBackend(SpeakerBackend):
     def _run_pw_link(self, source: str, target: str) -> None:
         """Invoke ``pw-link <source> <target>``.
 
-        ``check=False`` because PipeWire reaps gone nodes asynchronously;
-        a missing endpoint at link-time is not fatal. Tests substitute
-        this with a recording-only no-op.
+        ``check=False`` because PipeWire reaps gone nodes async, so a
+        missing endpoint at link time is not fatal. Test seam: a
+        recording :class:`unittest.mock.MagicMock` replaces this.
         """
         subprocess.run(["pw-link", source, target], check=False)
 
     def _spawn_pw_record(self) -> Any:
-        """Spawn the ``pw-record`` subprocess.
+        """Spawn the ``pw-record`` subprocess piped to stdout.
 
-        ``bufsize=0`` so the OS pipe is not double-buffered by the
-        stdlib (we drain in 4 KiB chunks ourselves). Tests substitute
-        this with a :class:`tests.fakes.FakePwRecordProcess`.
+        ``bufsize=0`` keeps the OS pipe un-double-buffered so the
+        :meth:`_drain_stdout` thread can pull 4 KiB chunks at the
+        latency we want. Test seam: substituted with
+        :class:`tests.fakes.FakePwRecordProcess`.
         """
         return subprocess.Popen(
             list(_PW_RECORD_ARGV),
@@ -253,12 +275,10 @@ class PipeWireSpeakerBackend(SpeakerBackend):
     # ------------------------------------------------------------------
 
     def _reset_stale_modules(self) -> None:
-        """Unload any leftover ``vrcpilot_tap`` modules.
+        """Unload any leftover ``vrcpilot_tap`` null-sink from a prior crash.
 
-        A previous run that died without invoking :meth:`close` may have
-        left the null-sink loaded. Match by sink-name token in the
-        ``module-null-sink`` argument string so we never touch an
-        unrelated module.
+        Matches by the ``sink_name=`` token in the module's ``argument``
+        string so we never unload an unrelated ``module-null-sink``.
         """
         try:
             modules: list[Any] = self._pulse.module_list()  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
@@ -289,12 +309,11 @@ class PipeWireSpeakerBackend(SpeakerBackend):
         return idx
 
     def _resolve_state_dir(self) -> Path:
-        """Return ``$XDG_RUNTIME_DIR/vrcpilot`` or a ``/tmp`` fallback.
+        """Return (and create) the directory the state file lives in.
 
-        The directory is created if missing. Falls back to
-        ``/tmp/vrcpilot-{uid}`` if ``$XDG_RUNTIME_DIR`` is unset so the
-        backend still has a stable path for the state file on minimal
-        systems.
+        ``$XDG_RUNTIME_DIR/vrcpilot`` when the env var is set, otherwise
+        ``/tmp/vrcpilot-{uid}`` so the backend still has a stable path
+        on minimal systems where the runtime dir is missing.
         """
         runtime = os.environ.get("XDG_RUNTIME_DIR")
         if runtime:
@@ -306,11 +325,11 @@ class PipeWireSpeakerBackend(SpeakerBackend):
         return base
 
     def _write_state_file(self, module_id: int) -> Path | None:
-        """Persist the PID + module id so external janitors can clean up.
+        """Persist the PID + module id so external janitors can recover.
 
-        Failure is non-fatal — we degrade to "no state file" and surface
-        a warning. The null-sink itself is still managed via
-        :meth:`close`; the state file is only a recovery aid.
+        Best-effort: write failures degrade to ``None`` with a warning.
+        The state file is only a recovery aid for crashes -- normal
+        shutdown still releases the sink via :meth:`close`.
         """
         try:
             state_dir = self._resolve_state_dir()
@@ -330,10 +349,10 @@ class PipeWireSpeakerBackend(SpeakerBackend):
             return None
 
     def _enumerate_vrchat_nodes(self) -> list[str]:
-        """Return the ``node.name`` of every active VRChat audio output.
+        """Return ``node.name`` for every active VRChat audio output.
 
-        VRChat usually surfaces one output node, but voice / music
-        streams can produce more — we link all of them.
+        VRChat typically exposes one output node but can surface
+        multiple (voice / music submix), so we link every match.
         """
         try:
             dump = self._run_pw_dump()
@@ -382,19 +401,19 @@ class PipeWireSpeakerBackend(SpeakerBackend):
     # ------------------------------------------------------------------
 
     def _drain_stdout(self) -> None:
-        """Background thread body: drain ``pw-record`` stdout into the buffer.
+        """Drain ``pw-record`` stdout into the shared buffer.
 
-        Exits on EOF, on read error, or when :attr:`_stop_drain` is set.
-        Exceptions are stored in :attr:`_stdout_exception` and surfaced
-        from the next :meth:`read` call rather than crashing the thread
-        silently.
+        Background-thread body. Exits on EOF, on read error, or when
+        :attr:`_stop_drain` is set. Errors are stashed in
+        :attr:`_stdout_exception` and raised from the next :meth:`read`
+        so a dead thread never goes unnoticed by the consumer.
         """
         stdout = self._record_proc.stdout
         if stdout is None:
-            self._stdout_exception = RuntimeError(
-                "pw-record subprocess has no stdout pipe"
-            )
             with self._stdout_condition:
+                self._stdout_exception = RuntimeError(
+                    "pw-record subprocess has no stdout pipe"
+                )
                 self._stdout_condition.notify_all()
             return
         try:
@@ -405,36 +424,33 @@ class PipeWireSpeakerBackend(SpeakerBackend):
                 with self._stdout_condition:
                     self._buffer.extend(chunk)
                     self._stdout_condition.notify_all()
-        except BaseException as exc:  # noqa: BLE001
-            self._stdout_exception = exc
+        except Exception as exc:  # noqa: BLE001
             with self._stdout_condition:
+                self._stdout_exception = exc
                 self._stdout_condition.notify_all()
 
     @override
     def read(self) -> NDArray[np.float32]:
-        """Return every sample buffered since the previous call.
-
-        Blocks up to ``read_timeout`` for the first byte; once any data
-        is present, drains the entire buffer in one swap. Returns
-        ``(0, CHANNELS)`` if nothing arrives within the timeout — this
-        is the documented "quiet stream" signal.
-
-        Raises:
-            RuntimeError: The backend has been closed, or the drain
-                thread surfaced an error.
-        """
         with self._lock:
             if self._closed:
                 raise RuntimeError("PipeWireSpeakerBackend is closed")
 
-        if self._stdout_exception is not None:
-            exc = self._stdout_exception
-            self._stdout_exception = None
-            raise RuntimeError(f"pw-record drain thread failed: {exc}") from exc
-
+        # Block up to read_timeout for the first byte, then swap out the
+        # whole buffer in one shot so a single read hand-off covers every
+        # sample buffered since the previous call (mirrors proc-tap's
+        # drain-all-queued-chunks behaviour). Drain-thread errors are
+        # checked under the same condition both before and after the
+        # wait so an exception planted concurrently with the wait is
+        # never silently dropped (the producer-side notify could race
+        # an unguarded pre-wait check).
         with self._stdout_condition:
-            if not self._buffer:
+            exc = self._stdout_exception
+            if exc is None and not self._buffer:
                 self._stdout_condition.wait(timeout=self._read_timeout)
+                exc = self._stdout_exception
+            if exc is not None:
+                self._stdout_exception = None
+                raise RuntimeError(f"pw-record drain thread failed: {exc}") from exc
             chunk = bytes(self._buffer)
             self._buffer.clear()
 
@@ -459,28 +475,26 @@ class PipeWireSpeakerBackend(SpeakerBackend):
     # ------------------------------------------------------------------
 
     def _listen_events(self) -> None:
-        """Background thread body: drive ``pulse.event_listen``.
+        """Drive ``pulse.event_listen`` for ``sink_input`` events.
 
-        The listener loops forever inside ``event_listen`` until the
-        callback (or :meth:`close`) flips ``event_listener_running``
-        to ``False`` and the listen call returns. Errors are logged
-        but never propagated — a dead event listener should not take
-        down the data plane.
+        Background-thread body. Loops inside ``event_listen`` until the
+        callback (or :meth:`close`) flips ``event_listener_running`` to
+        ``False``. Errors are logged but never propagated -- a dead
+        event listener must not take down the data plane.
         """
         try:
             self._pulse.event_mask_set("sink_input")  # pyright: ignore[reportUnknownMemberType]
             self._pulse.event_callback_set(self._on_pulse_event)  # pyright: ignore[reportUnknownMemberType]
             self._pulse.event_listen()  # pyright: ignore[reportUnknownMemberType]
-        except BaseException as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             _logger.warning("pulse event listener exited: %s", exc)
 
     def _on_pulse_event(self, event: Any) -> None:
-        """Callback invoked from the listen thread per pulsectl event.
+        """Re-link VRChat streams when a new ``sink_input`` appears.
 
-        Re-runs the link discovery whenever a fresh ``sink_input``
-        appears so VRChat streams created mid-session get auto-linked.
-        Failures are logged but never raised — the listener must keep
-        running.
+        Pulsectl callback. Failures are logged but swallowed -- the
+        listener must keep running. Also honours :attr:`_stop_events`
+        as the exit signal back into :meth:`_listen_events`.
         """
         if self._stop_events.is_set():
             try:
@@ -531,7 +545,10 @@ class PipeWireSpeakerBackend(SpeakerBackend):
     def _safe_terminate_record_proc(self) -> None:
         if self._record_proc is None:
             return
-        self._stop_drain.set()
+        # _stop_drain is owned by _safe_join_drain_thread; terminate
+        # itself causes pw-record to close its stdout and unblock the
+        # drain loop, which is the only signal that actually wakes
+        # ``stdout.read``.
         try:
             self._record_proc.terminate()
             try:
@@ -586,30 +603,25 @@ class PipeWireSpeakerBackend(SpeakerBackend):
 
     @override
     def close(self) -> None:
-        """Release every resource owned by the backend.
-
-        Idempotent and never raises — cleanup failures are surfaced as
-        ``UserWarning`` so a ``with Speaker(): ...`` exit always
-        completes even if PipeWire is misbehaving.
-        """
         with self._lock:
             if self._closed:
                 return
             self._closed = True
 
-        # 1. Stop the event listener first so it can't fire a callback
-        #    into a half-torn-down backend.
+        # Teardown order matters:
+        # 1. Event listener first, so it can't fire a callback into a
+        #    half-torn-down backend.
+        # 2. pw-record next, which lets the drain thread observe EOF.
+        # 3. Drain thread last among the data plane, joined cleanly.
+        # 4. Null-sink unload so the user's graph stops routing into a
+        #    dead tap.
+        # 5. State file after the sink is gone -- a concurrent janitor
+        #    must never see the breadcrumb without its sink.
+        # 6. Pulse control connection last.
         self._safe_join_event_thread()
-        # 2. Terminate pw-record and let the drain thread observe EOF.
         self._safe_terminate_record_proc()
-        # 3. Wait for the drain thread to exit cleanly.
         self._safe_join_drain_thread()
-        # 4. Unload the null-sink so the user's speaker graph stops
-        #    routing into a dead tap.
         self._safe_unload_null_sink()
-        # 5. Drop the state file last so a janitor sees the sink gone
-        #    before the breadcrumb disappears.
         self._safe_remove_state_file()
-        # 6. Close the pulse control connection.
         self._safe_close_pulse()
         self._pulse = None

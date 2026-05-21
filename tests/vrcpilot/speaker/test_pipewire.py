@@ -426,6 +426,18 @@ class TestPipeWireSpeakerBackendConstruction:
 # ---------------------------------------------------------------------------
 
 
+def _wait_for_drained_bytes(
+    backend: PipeWireSpeakerBackend, timeout: float = 1.0
+) -> None:
+    """Spin until the drain thread has copied bytes into the shared buffer."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        with backend._stdout_condition:  # pyright: ignore[reportPrivateUsage]
+            if backend._buffer:  # pyright: ignore[reportPrivateUsage]
+                return
+        time.sleep(0.01)
+
+
 class TestPipeWireSpeakerBackendRead:
     def test_empty_buffer_returns_zero_shape(
         self,
@@ -448,13 +460,7 @@ class TestPipeWireSpeakerBackendRead:
             dtype=np.float32,
         )
         proc.emit_pcm(payload.tobytes())
-        # Wait briefly for the drain thread to copy the bytes in.
-        deadline = time.monotonic() + 1.0
-        while time.monotonic() < deadline:
-            with backend._stdout_condition:  # pyright: ignore[reportPrivateUsage]
-                if backend._buffer:  # pyright: ignore[reportPrivateUsage]
-                    break
-            time.sleep(0.01)
+        _wait_for_drained_bytes(backend)
 
         buf = backend.read()
         np.testing.assert_array_equal(buf, payload)
@@ -467,13 +473,7 @@ class TestPipeWireSpeakerBackendRead:
     ) -> None:
         backend, _, proc = started_backend
         proc.emit_pcm(np.ones((2, CHANNELS), dtype=np.float32).tobytes())
-        # Spin briefly so the drain thread observes the bytes.
-        deadline = time.monotonic() + 1.0
-        while time.monotonic() < deadline:
-            with backend._stdout_condition:  # pyright: ignore[reportPrivateUsage]
-                if backend._buffer:  # pyright: ignore[reportPrivateUsage]
-                    break
-            time.sleep(0.01)
+        _wait_for_drained_bytes(backend)
         buf = backend.read()
         # np.frombuffer returns a read-only view; the backend must copy
         # so DSP / sinks can mutate freely.
@@ -491,12 +491,7 @@ class TestPipeWireSpeakerBackendRead:
             dtype=np.float32,
         )
         proc.emit_pcm(bad_payload.tobytes())
-        deadline = time.monotonic() + 1.0
-        while time.monotonic() < deadline:
-            with backend._stdout_condition:  # pyright: ignore[reportPrivateUsage]
-                if backend._buffer:  # pyright: ignore[reportPrivateUsage]
-                    break
-            time.sleep(0.01)
+        _wait_for_drained_bytes(backend)
         with caplog.at_level(logging.WARNING, logger="vrcpilot.speaker.pipewire"):
             buf = backend.read()
         assert buf.shape == (2, CHANNELS)
@@ -520,10 +515,14 @@ class TestPipeWireSpeakerBackendRead:
     ) -> None:
         backend, _, _ = started_backend
         backend._read_timeout = 0.05  # pyright: ignore[reportPrivateUsage]
-        # Plant a synthetic drain error and verify it's surfaced.
-        backend._stdout_exception = RuntimeError(  # pyright: ignore[reportPrivateUsage]
-            "stdout pipe broke"
-        )
+        # Plant a synthetic drain error under the condition (production
+        # writes _stdout_exception while holding _stdout_condition; the
+        # test mirrors that invariant so the threading model stays
+        # consistent across producer and consumer).
+        with backend._stdout_condition:  # pyright: ignore[reportPrivateUsage]
+            backend._stdout_exception = RuntimeError(  # pyright: ignore[reportPrivateUsage]
+                "stdout pipe broke"
+            )
         with pytest.raises(RuntimeError, match="drain thread failed"):
             backend.read()
         # And the planted exception is consumed (one-shot).
