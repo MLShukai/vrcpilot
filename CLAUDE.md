@@ -8,9 +8,9 @@
 
 ## メモリ参照
 
-プロジェクト固有の規約・知見・ユーザーの好みは `.claude/memory/` に保存する（git 管理対象、subagent 用の `.claude/agent-memory/` と同じ階層）。harness が自動ロードする `~/.claude/projects/.../memory/` パスは **使わない**（プロジェクト内の git 管理を優先する方針）。
+プロジェクト固有の規約・知見・ユーザーの好みは repo ルート [memory/](memory/) に保存する（git 管理対象）。エージェント固有メモリは [memory/agents/](memory/agents/) 配下に同じレイアウトで配置する。harness が自動ロードする `~/.claude/projects/.../memory/` パスは **使わない**（プロジェクト内の git 管理を優先する方針）。
 
-セッション開始時、または規約が関係しそうなタスクに着手する前に [.claude/memory/MEMORY.md](.claude/memory/MEMORY.md) のインデックスを確認すること。新しい規約・フィードバック・ユーザー像が判明した場合は同ディレクトリにファイルを足し、`MEMORY.md` から 1 行リンクを張る。
+セッション開始時、または規約が関係しそうなタスクに着手する前に [memory/MEMORY.md](memory/MEMORY.md) のインデックスを確認すること。新しい規約・フィードバック・ユーザー像が判明した場合は同ディレクトリにファイルを足し、`MEMORY.md` から 1 行リンクを張る。
 
 ## プロジェクト状況
 
@@ -55,7 +55,7 @@
 
 ## CLI（`vrcpilot` / `python -m vrcpilot`）の使い方
 
-VRChat を実機で操作する end-to-end な手順は [.claude/memory/feedback_vrchat_cli_playbook.md](.claude/memory/feedback_vrchat_cli_playbook.md)。ここでは Claude が CLI 経由で何を呼ぶかを概観する。
+VRChat を実機で操作する end-to-end な手順は [memory/feedback_vrchat_cli_playbook.md](memory/feedback_vrchat_cli_playbook.md)。ここでは Claude が CLI 経由で何を呼ぶかを概観する。
 
 ### サブコマンド一覧
 
@@ -185,7 +185,7 @@ OCR / detect の YAML は同じ座標スキーマで揃えてある:
 - `tests/` 直下に置くのは `__init__.py` / `helpers.py` / `conftest.py` / `manual/` のみ
 - 1 ファイル 1 テストを原則とし、`window/{win32,x11}.py` のようにバックエンド分割されているソースはテストも分けて 1 対 1 を維持する
 
-詳細: [.claude/memory/feedback_test_layout_mirror.md](.claude/memory/feedback_test_layout_mirror.md)
+詳細: [memory/feedback_test_layout_mirror.md](memory/feedback_test_layout_mirror.md)
 
 ### 実践的なテスト
 
@@ -206,7 +206,7 @@ OCR / detect の YAML は同じ座標スキーマで揃えてある:
 
 ### テスト区分とスキップ階層
 
-テストは 4 区分（unit / integration-with-fakes / integration-real / manual e2e）で組み立てる。区分が決まれば配置・モック許容度・スキップ方法が一意に決まる。詳細は [.claude/memory/feedback_test_strategy.md](.claude/memory/feedback_test_strategy.md)。
+テストは 4 区分（unit / integration-with-fakes / integration-real / manual e2e）で組み立てる。区分が決まれば配置・モック許容度・スキップ方法が一意に決まる。詳細は [memory/feedback_test_strategy.md](memory/feedback_test_strategy.md)。
 
 - **共有 fake は `tests/fakes/`**: `FakeWindowsCapture` / `FakeCaptureLoop` / `FakeMp4Sink` / `FakeProcess` / `FakePopen` / `FakeXDisplay` などをここに集約。テスト側は `from tests.fakes import FakeFoo` で import する。テストファイル内でアドホックに `class _Fake*` を定義しない
 - **module-level skip**: プラットフォームやディスプレイに依存して **import 自体が失敗しうる** テストは、ファイル先頭で `if <condition>: pytest.skip(reason, allow_module_level=True)` を **import 文より前** に置く。関数単位の `@pytest.mark.skipif` だけでは収集エラーを防げない
@@ -249,7 +249,7 @@ OCR / detect の YAML は同じ座標スキーマで揃えてある:
 - テストを書く / 書かれている → `_` prefix を **付けない**（例: `steam.py`, `win32.py`, `x11.py`, `capture/sinks.py`）
 - 外部公開は親 `__init__.py` の `__all__` で別軸として集約管理する。モジュール名から `_` を外すことと「外部公開」は独立した判断
 
-詳細: [.claude/memory/feedback_private_module_convention.md](.claude/memory/feedback_private_module_convention.md)
+詳細: [memory/feedback_private_module_convention.md](memory/feedback_private_module_convention.md)
 
 ### カプセル化
 

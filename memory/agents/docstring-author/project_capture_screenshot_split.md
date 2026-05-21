@@ -42,4 +42,4 @@ guide. The `__init__.py` module docstring is the canonical place for
 the side-by-side comparison; capture/screenshot module docstrings
 should each reiterate the chooser briefly. The internal design memo
 that captures the full rationale lives at
-`.claude/agent-memory/spec-planner/capture_screenshot_internal_design.md`.
+`memory/agents/spec-planner/capture_screenshot_internal_design.md`.
