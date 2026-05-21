@@ -23,8 +23,50 @@ _SAMPLE_WIDTH_BYTES = 2
 
 #: Quantisation scale for ``float32 -> int16`` conversion. Using
 #: ``int16.max`` (``32767``) keeps the mapping symmetric around zero;
-#: see :meth:`WavFileSink.write` for the full clipping rationale.
+#: see :func:`_float32_to_int16` for the full clipping rationale.
 _INT16_SCALE: float = float(np.iinfo(np.int16).max)
+
+
+def _validate_float32_frame(frame: NDArray[np.float32], *, sink_name: str) -> None:
+    """Raise :class:`ValueError` unless ``frame`` is ``(N, CHANNELS) float32``.
+
+    Shared by every sink that consumes the speaker backend's
+    ``float32`` chunk contract so the wording of the error stays
+    consistent across :class:`WavFileSink` /
+    :class:`RawPcmStdoutSink`.
+
+    Args:
+        frame: Candidate audio chunk.
+        sink_name: Prefixed into the error message so the failing
+            sink class is obvious to the caller.
+
+    Raises:
+        ValueError: ``frame.dtype`` is not :class:`numpy.float32`, or
+            its shape is not ``(N, CHANNELS)``.
+    """
+    if frame.dtype != np.float32:
+        raise ValueError(f"{sink_name} expects float32 frames, got dtype={frame.dtype}")
+    if frame.ndim != 2 or frame.shape[1] != CHANNELS:
+        raise ValueError(
+            f"{sink_name} expects frames of shape (N, "
+            f"{CHANNELS}), got shape={frame.shape}"
+        )
+
+
+def _float32_to_int16(frame: NDArray[np.float32]) -> NDArray[np.int16]:
+    """Quantise an ``(N, CHANNELS)`` float32 buffer to ``int16``.
+
+    Multiplies by :data:`_INT16_SCALE` (``+32767``) so the mapping is
+    symmetric around zero (``+1.0 -> +32767``, ``-1.0 -> -32767``),
+    then clips to the full ``[-32768, 32767]`` int16 band before
+    casting so out-of-range samples saturate to the int16 extremes
+    rather than wrapping (a value outside ``[-1.0, 1.0]`` does not
+    silently corrupt the output).
+    """
+    scaled = frame * _INT16_SCALE
+    info = np.iinfo(np.int16)
+    clipped = np.clip(scaled, info.min, info.max)
+    return clipped.astype(np.int16)
 
 
 class WavFileSink:
@@ -81,28 +123,13 @@ class WavFileSink:
         if self._closed:
             raise RuntimeError("WavFileSink is closed")
 
-        if frame.dtype != np.float32:
-            raise ValueError(
-                f"WavFileSink expects float32 frames, got dtype={frame.dtype}"
-            )
-        if frame.ndim != 2 or frame.shape[1] != CHANNELS:
-            raise ValueError(
-                "WavFileSink expects frames of shape (N, "
-                f"{CHANNELS}), got shape={frame.shape}"
-            )
+        _validate_float32_frame(frame, sink_name="WavFileSink")
 
         n = frame.shape[0]
         if n == 0:
             return
 
-        # Scale to int16 range first, then clip to int16's full
-        # ``[-32768, 32767]`` band so overdriven input saturates
-        # symmetrically (``+1.0 -> +32767``, ``-1.0 -> -32767``,
-        # while ``-1.5`` clamps to ``-32768`` rather than wrapping).
-        scaled = frame * _INT16_SCALE
-        info = np.iinfo(np.int16)
-        clipped = np.clip(scaled, info.min, info.max)
-        int16 = clipped.astype(np.int16)
+        int16 = _float32_to_int16(frame)
 
         # ``writeframesraw`` lets the header size be patched by
         # ``close()`` once the total payload length is known.
