@@ -35,21 +35,12 @@ _INT16_SCALE: float = float(np.iinfo(np.int16).max)
 
 
 def _validate_float32_frame(frame: NDArray[np.float32], *, sink_name: str) -> None:
-    """Raise :class:`ValueError` unless ``frame`` is ``(N, CHANNELS) float32``.
+    """Enforce the speaker backend's ``(N, CHANNELS) float32`` chunk contract.
 
-    Shared by every sink that consumes the speaker backend's
-    ``float32`` chunk contract so the wording of the error stays
-    consistent across :class:`WavFileSink` /
-    :class:`RawPcmStdoutSink`.
-
-    Args:
-        frame: Candidate audio chunk.
-        sink_name: Prefixed into the error message so the failing
-            sink class is obvious to the caller.
-
-    Raises:
-        ValueError: ``frame.dtype`` is not :class:`numpy.float32`, or
-            its shape is not ``(N, CHANNELS)``.
+    Shared between :class:`WavFileSink` and :class:`RawPcmStdoutSink`
+    so the rejection wording (and what counts as a valid chunk) stays
+    identical across sinks; ``sink_name`` is interpolated into the
+    error so the failing class is obvious in tracebacks.
     """
     if frame.dtype != np.float32:
         raise ValueError(f"{sink_name} expects float32 frames, got dtype={frame.dtype}")
