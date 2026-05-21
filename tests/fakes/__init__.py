@@ -18,7 +18,10 @@ from __future__ import annotations
 
 from .audio import (
     FakeProcessAudioCapture,
+    FakeRawPcmStdoutSink,
     FakeSpeaker,
+    FakeSpeakerLoop,
+    FakeWavSink,
 )
 from .capture import (
     FakeCapture,
@@ -60,8 +63,11 @@ __all__ = [
     "FakeProcess",
     "FakeProcessAudioCapture",
     "FakePyDirectInput",
+    "FakeRawPcmStdoutSink",
     "FakeSpeaker",
+    "FakeSpeakerLoop",
     "FakeUDPClient",
+    "FakeWavSink",
     "FakeWindowsCapture",
     "FakeWindowsCaptureControl",
     "FakeWindowsFrame",

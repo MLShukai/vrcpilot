@@ -178,6 +178,30 @@ vrcpilot capture [-o PATH] [--fps FLOAT] [--duration SECONDS]
 
 ______________________________________________________________________
 
+## record
+
+Record VRChat-only audio (via `proc-tap` process loopback — system audio from other applications is not mixed in) to a WAV file or as a raw PCM stream.
+
+```
+vrcpilot record [-o PATH] [--duration SECONDS]
+```
+
+| Option                     | Default        | Description                                                                                                                                                                                                                                                                                               |
+| -------------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `-o PATH`, `--output PATH` | stdout (s16le) | If set to an existing directory, files are written as `<dir>/vrcpilot_record_<YYYYMMDD_HHMMSS>.wav`. If set to any other path, that path is used as-is for the WAV file (no extension forcing). If unset, a raw signed 16-bit little-endian PCM stream (48 kHz, stereo, headerless) is written to stdout. |
+| `--duration SECONDS`       | unbounded      | Stop after this many seconds. Without it, recording continues until interrupted (Ctrl+C).                                                                                                                                                                                                                 |
+
+**Output**:
+
+- File mode: progress is logged to stderr; on completion, the absolute path of the saved WAV is printed once on stdout.
+- Pipe mode: a binary `s16le` PCM stream is written to stdout; progress is logged to stderr. The stream is **not self-describing** — downstream consumers must specify the format explicitly, e.g. `ffmpeg -f s16le -ar 48000 -ac 2 -i - ...`.
+
+**Exit codes**: `0` on success, `1` if VRChat is not running, no samples were captured, or pipe mode is requested while stdout is a TTY.
+
+**Side effects**: writes a WAV file in file mode (48 kHz / stereo / 16-bit PCM). Acquires a `proc-tap` process-loopback session against the VRChat PID for the duration of the recording.
+
+______________________________________________________________________
+
 ## mouse
 
 Send synthetic mouse input to VRChat. All actions guard on VRChat being running and focused.
