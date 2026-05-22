@@ -171,7 +171,7 @@ vrcpilot record -o /tmp/vrc.mp4 --duration 10
 # Video only
 vrcpilot record --video -o /tmp/vrc_video.mp4 --duration 10
 
-# Audio only (proc-tap process loopback — VRChat-only, no system audio)
+# Audio only (VRChat-only — native PipeWire on Linux, proc-tap on Windows; no system audio either way)
 vrcpilot record --audio -o /tmp/vrc_audio.wav --duration 10
 
 # Stream MKV to ffmpeg for re-encoding without temp files
@@ -302,16 +302,16 @@ ______________________________________________________________________
 
 ## 11. Recovering from common failures
 
-| Symptom                                      | Likely cause                                                | Fix                                                     |
-| -------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------- |
-| `VRChat PID was not observed before timeout` | Steam is not running, or VRChat install is missing          | Start Steam first; verify the install in Steam library  |
-| `vrcpilot focus` exits 1 silently            | Wayland-native session, or VRChat window not yet mapped     | Switch to X11 / XWayland; wait for the warm-up          |
-| `VRChatNotFocusedError` from input commands  | The window lost focus right before the call                 | Re-focus with `vrcpilot focus`, then retry              |
-| Tab key does nothing                         | The 2026-series UI no longer maps Tab to a menu             | Use Escape (Launch Pad) and R (Radial Action Menu)      |
-| `keyboard press` ignored                     | `--duration` lowered below `0.1`                            | Restore the default of `0.1` or higher                  |
-| `mouse move` lands far from the OCR target   | Adding `window.x` / `window.y` to `pos` (pre-0.1.0a2 habit) | Pass `pos.bbox` directly — `mouse move` is window-local |
-| `pyperclip.PyperclipException` on Linux      | No clipboard backend installed                              | `sudo apt-get install xclip` (or `xsel`)                |
-| Capture hangs or fails immediately           | Wayland-native session, or screen is locked                 | Switch to X11 / XWayland; unlock the screen             |
+| Symptom                                      | Likely cause                                              | Fix                                                     |
+| -------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------- |
+| `VRChat PID was not observed before timeout` | Steam is not running, or VRChat install is missing        | Start Steam first; verify the install in Steam library  |
+| `vrcpilot focus` exits 1 silently            | Wayland-native session, or VRChat window not yet mapped   | Switch to X11 / XWayland; wait for the warm-up          |
+| `VRChatNotFocusedError` from input commands  | The window lost focus right before the call               | Re-focus with `vrcpilot focus`, then retry              |
+| Tab key does nothing                         | The 2026-series UI no longer maps Tab to a menu           | Use Escape (Launch Pad) and R (Radial Action Menu)      |
+| `keyboard press` ignored                     | `--duration` lowered below `0.1`                          | Restore the default of `0.1` or higher                  |
+| `mouse move` lands far from the OCR target   | Treating OCR/detect `pos` as desktop-absolute coordinates | Pass `pos.bbox` directly — `mouse move` is window-local |
+| `pyperclip.PyperclipException` on Linux      | No clipboard backend installed                            | `sudo apt-get install xclip` (or `xsel`)                |
+| Capture hangs or fails immediately           | Wayland-native session, or screen is locked               | Switch to X11 / XWayland; unlock the screen             |
 
 ______________________________________________________________________
 

@@ -1,6 +1,6 @@
 [project]
 name = "vrcpilot"
-version = "0.1.0"
+version = "0.2.0rc1"
 description = "Python automation toolkit for VRChat (Windows / Linux)"
 readme = "README.md"
 authors = [{ name = "MLShukai" }]

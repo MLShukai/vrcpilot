@@ -11,14 +11,12 @@
 
 Windows / Linux 上の VRChat デスクトップクライアントを Python から自動操作するためのツールキットです。起動、フォーカス、画面キャプチャ、OCR、画像テンプレート検出、合成入力を、型付きの Python API と `vrcpilot` CLI から扱えます。
 
-> **破壊的変更 (`0.1.0a2`)** — 座標系が **VRChat ウィンドウローカル** に一本化されました。`mouse.move(x, y)`（および `vrcpilot mouse move X Y`）はウィンドウローカル座標として解釈され、OCR / detect の結果もウィンドウローカルな `pos` のみを返します。従来の `display_pos.{polygon,bbox}` キーや、`OCRResult.display_polygon` / `display_bbox`（`DetectResult` 側も同様）は撤廃されました。OCR / detect の `pos.bbox`（あるいは `word.bbox` / `detection.bbox`）をそのまま `mouse.move` に渡せます。座標を手動で平行移動する必要はありません。
-
 ## 機能
 
 - **プロセス制御** — Steam 経由で VRChat を起動 (`vrcpilot.launch`)。起動中プロセスの PID 検出と終了処理にも対応
 - **ウィンドウ制御** — VRChat ウィンドウのフォーカス取得・解除、前面状態の確認に対応（Win32 / X11 / XWayland）
 - **画面キャプチャ** — 映像フレームのストリーミング向けの `Capture` / `CaptureLoop` と、YAML と相互変換できる単発キャプチャ `take_screenshot`
-- **音声キャプチャ** — `proc-tap` のプロセスループバック経由で VRChat の音声のみを抽出する `Speaker` / `SpeakerLoop`
+- **音声キャプチャ** — VRChat の音声のみを抽出する `Speaker` / `SpeakerLoop`（Linux はネイティブ PipeWire パイプライン、Windows は `proc-tap` プロセスループバック）
 - **統合録画** — `vrcpilot record` で映像 / 音声 / 両方を MP4 (映像を含む場合) または WAV (音声のみ) のファイルに書き出すか、自己記述形式の Matroska (MKV) バイトストリームを stdout に流して `ffmpeg` などに直接渡せる
 - **OCR** — 差し替え可能な `OCREngine` ABC と標準実装の `RapidOCREngine`。`ocr()` は単語単位の認識結果を VRChat ウィンドウローカル座標で返し、そのまま `mouse.move()` に渡せます
 - **画像テンプレート検出** — OpenCV の `TM_CCOEFF_NORMED` を使う `TemplateDetectEngine`。OCR と同じ座標スキーマで検出結果を返します

@@ -1,6 +1,6 @@
 # Python API Reference
 
-This is a hand-curated reference for every symbol exposed at `vrcpilot.<name>`. For runnable examples see [`usage.md`](usage.md); for the equivalent CLI see [`cli.md`](cli.md). Function signatures match the source as of `0.1.0a1`.
+This is a hand-curated reference for every symbol exposed at `vrcpilot.<name>`. For runnable examples see [`usage.md`](usage.md); for the equivalent CLI see [`cli.md`](cli.md). Function signatures match the source as of `0.2.0rc1`.
 
 ## Conventions
 
@@ -171,7 +171,7 @@ ______________________________________________________________________
 
 ## Speaker (audio capture)
 
-Process-isolated audio capture for VRChat. On Linux the backend is a native PipeWire pipeline (virtual null-sink + `pw-link` + `pw-record`); on Windows and macOS it is `proc-tap`, a cross-platform native extension that taps a single PID's audio rather than the whole system mix. Either way the stream contains **only VRChat's output** — Discord, OBS, and other applications are not mixed in. Windows / Linux are stable; macOS is experimental.
+Process-isolated audio capture for VRChat. On Linux the backend is a native PipeWire pipeline (virtual null-sink + `pw-link` + `pw-record`); on Windows it is `proc-tap`, a native extension that taps a single PID's audio rather than the whole system mix. Either way the stream contains **only VRChat's output** — Discord, OBS, and other applications are not mixed in. `import vrcpilot` raises `ImportError` on any other `sys.platform`, so no other Speaker backend is reachable.
 
 The backend produces `float32 (N, CHANNELS)` chunks at 48 kHz stereo. The CLI `vrcpilot record` command muxes these via internal PyAV-backed writers (`vrcpilot.cli.record.muxer`, not part of the public surface); to persist audio from your own code, feed the chunks into a writer of your choice — for example PyAV (`WAV`, `MP4`, `MKV`, ...) or a `ffmpeg` subprocess. The `(N, 2) float32` layout maps cleanly onto PyAV's planar/packed float frames.
 
@@ -188,7 +188,7 @@ Context-managed capture session. VRChat must already be running when the constru
 
 **Raises**:
 
-- `RuntimeError` when VRChat is not running or the `proc-tap` backend cannot start.
+- `RuntimeError` when VRChat is not running or the Speaker backend cannot start (the PipeWire pipeline on Linux, `proc-tap` on Windows).
 - `ValueError` when `read_timeout <= 0`.
 
 ### `vrcpilot.speaker.SpeakerLoop`
@@ -211,7 +211,7 @@ class SpeakerLoop:
     def close(self) -> None: ...
 ```
 
-Background-thread driver around `Speaker`. Constructs and owns its own `Speaker`, so VRChat must already be running when the loop is instantiated. Each tick drains one chunk and forwards it to `callback`; the worker sleeps `chunk_seconds` between drains (default 50 ms, chosen to match the proc-tap buffer cadence). Empty chunks are forwarded verbatim so consumers can treat them as a "silence tick". Exceptions raised by the callback or by `Speaker.read()` are captured and re-raised on the next `stop()` / `close()` so worker-thread failures are never lost. Supports `with`.
+Background-thread driver around `Speaker`. Constructs and owns its own `Speaker`, so VRChat must already be running when the loop is instantiated. Each tick drains one chunk and forwards it to `callback`; the worker sleeps `chunk_seconds` between drains (default 50 ms, chosen to match the backend buffer cadence). Empty chunks are forwarded verbatim so consumers can treat them as a "silence tick". Exceptions raised by the callback or by `Speaker.read()` are captured and re-raised on the next `stop()` / `close()` so worker-thread failures are never lost. Supports `with`.
 
 **Raises**: `ValueError` when `chunk_seconds` or `read_timeout` is non-positive; `RuntimeError` from the inner `Speaker`.
 
@@ -282,7 +282,7 @@ class Mic:
 
 `device` is matched as a case-insensitive **substring** against the names `soundcard` reports (matching covers both `Speaker.name` and `Speaker.id`, with fuzzy id matching). `None` defers to `$VRCPILOT_MIC_DEVICE`, then to the OS default returned by `default_device_name()`. The constructor resolves the device, opens a `soundcard` player for `(sample_rate, channels)`, and enters it — those values are baked in for the lifetime of the session, so reconfiguring means constructing a new `Mic`.
 
-`device_id` exposes the underlying `soundcard` `Speaker.id` as a string. On Linux this is the PulseAudio sink name (e.g. `"VRCPilotMic"`); on Windows it is the WASAPI device id string surfaced by `soundcard`. (This replaces the integer `device_index` from the PortAudio-backed prototype.)
+`device_id` exposes the underlying `soundcard` `Speaker.id` as a string. On Linux this is the PulseAudio sink name (e.g. `"VRCPilotMic"`); on Windows it is the WASAPI device id string surfaced by `soundcard`.
 
 `play(chunk)` writes one float32 array per call. The chunk shape must match the configured channel count (`(N,)` for mono, `(N, channels)` for multi-channel) or `ValueError` is raised. The call blocks if the backend's internal buffer is full, giving the caller natural back-pressure for live TTS streams.
 

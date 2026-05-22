@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0rc1] - 2026-05-22
 
 ### Breaking
 
@@ -46,6 +46,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Linux speaker backend**: replaced `proc-tap` process loopback with
+  a native PipeWire pipeline (virtual null-sink + `pw-link` + `pw-record`)
+  driven by a `pulsectl` control plane. Windows still uses `proc-tap`.
+  Linux runtime now requires the PipeWire CLIs (`pw-link`, `pw-record`)
+  and `libpulse0` — both already pulled in by `pipewire-pulse` on most
+  desktops.
 - **Virtual mic backend**: replaced `sounddevice` (PortAudio) with
   `soundcard` (libpulse on Linux, WASAPI on Windows). Linux now
   enumerates individual PulseAudio sinks, so `vrcpilot mic` can resolve
@@ -92,4 +98,4 @@ First public release candidate. Validates the end-to-end publish pipeline before
 
 [0.1.0]: https://github.com/MLShukai/vrcpilot/compare/v0.1.0rc1...v0.1.0
 [0.1.0rc1]: https://github.com/MLShukai/vrcpilot/releases/tag/v0.1.0rc1
-[unreleased]: https://github.com/MLShukai/vrcpilot/compare/v0.1.0...HEAD
+[0.2.0rc1]: https://github.com/MLShukai/vrcpilot/compare/v0.1.0...v0.2.0rc1
