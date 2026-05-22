@@ -1,5 +1,7 @@
 # CLI Reference
 
+**English** | [日本語](cli.ja.md)
+
 This is the flag-by-flag reference for the `vrcpilot` command. For task-oriented walkthroughs see [`usage.md`](usage.md); for the equivalent Python API see [`python-api.md`](python-api.md).
 
 `vrcpilot --help` and `vrcpilot <subcommand> --help` print the same content at runtime.
