@@ -57,13 +57,9 @@ def _find_steam_on_linux() -> Path:
 def find_steam_executable(override: Path | None = None) -> Path:
     """Return the verified Steam executable path for the current platform.
 
-    Args:
-        override: Explicit path; when provided it is validated and
-            returned without auto-detection.
-
-    Raises:
-        SteamNotFoundError: ``override`` does not exist, auto-detection
-            fails, or the platform is unsupported.
+    When ``override`` is given it is validated and returned without
+    auto-detection. Raises :class:`SteamNotFoundError` when ``override``
+    does not exist, auto-detection fails, or the platform is unsupported.
     """
     if override is not None:
         if override.is_file():

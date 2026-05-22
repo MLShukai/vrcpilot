@@ -51,12 +51,9 @@ def get_vrchat_window_rect() -> tuple[int, int, int, int] | None:
     """Return the VRChat window ``(x, y, width, height)`` in desktop pixels.
 
     ``None`` when VRChat is not running, the window cannot be located,
-    or the geometry query fails.
-
-    Raises:
-        NotImplementedError: Platform other than Windows or Linux.
-            Raised (rather than returning ``None``) so direct callers
-            without their own platform guard fail loudly.
+    or the geometry query fails. Raises :class:`NotImplementedError`
+    outside Windows / Linux (rather than returning ``None``) so direct
+    callers without their own platform guard fail loudly.
     """
     if sys.platform == "win32":
         return _get_vrchat_rect_win32()

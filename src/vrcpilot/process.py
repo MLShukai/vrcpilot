@@ -37,13 +37,8 @@ class OscConfig:
     """Structured form of VRChat's ``--osc=<in>:<ip>:<out>`` launch flag.
 
     Defaults mirror VRChat's factory OSC settings, so ``OscConfig()``
-    forwards the flag explicitly without changing client semantics -
+    forwards the flag explicitly without changing client semantics —
     useful when a deterministic argv is wanted (logging, tests).
-
-    Attributes:
-        in_port: UDP port VRChat listens on for inbound OSC messages.
-        out_ip: IP VRChat sends outbound OSC messages to.
-        out_port: UDP port VRChat sends outbound OSC messages to.
     """
 
     in_port: int = 9000
@@ -66,18 +61,8 @@ def build_vrchat_launch_args(
     """Assemble the VRChat-side argv that follows ``-applaunch <app_id>``.
 
     Output order is fixed (``no_vr`` -> screen size -> ``osc`` ->
-    ``extra_args``) so the argv is byte-stable across runs. Kept
-    separate from :func:`build_launch_command` so callers can reuse or
-    filter the VRChat-side argv without re-implementing Steam's
-    wrapper.
-
-    Args:
-        no_vr: When ``True`` append ``--no-vr``.
-        screen_width: Optional Unity ``-screen-width`` value.
-        screen_height: Optional Unity ``-screen-height`` value.
-        osc: Optional :class:`OscConfig`.
-        extra_args: Raw tokens appended verbatim. Escape hatch for
-            flags this helper does not model.
+    ``extra_args``) so the argv is byte-stable across runs. ``extra_args``
+    is the escape hatch for flags this helper does not model.
     """
     args: list[str] = []
     if no_vr:
@@ -102,15 +87,8 @@ def build_launch_command(
     """Build the Steam ``-applaunch`` argv for spawning the game.
 
     Exposed separately from :func:`launch` so callers can inspect, log,
-    or wrap the command without spawning. ``vrchat_args`` lives here
-    because Steam's ``-applaunch`` form transports trailing tokens to
-    the launched game in the same argv - there is no parallel channel.
-
-    Args:
-        steam_executable: Path to the Steam executable. Not validated.
-        app_id: Steam application id. Defaults to
-            :data:`VRCHAT_STEAM_APP_ID`.
-        vrchat_args: Forwarded to VRChat after ``-applaunch <app_id>``.
+    or wrap the command without spawning. ``steam_executable`` is not
+    validated by this helper.
     """
     cmd = [str(steam_executable), "-applaunch", str(app_id)]
     if vrchat_args:
@@ -135,30 +113,10 @@ def launch(
     Detached from the parent's process group / session so the calling
     Python script can exit without taking VRChat down with it. After
     spawning Steam, polls :func:`find_pid` until VRChat appears or
-    ``wait_timeout`` elapses.
-
-    Args:
-        app_id: Steam application id. Defaults to
-            :data:`VRCHAT_STEAM_APP_ID`.
-        steam_path: Explicit Steam executable path; auto-detected when
-            ``None``.
-        no_vr: Forward ``--no-vr`` (desktop mode).
-        screen_width: Unity ``-screen-width`` value.
-        screen_height: Unity ``-screen-height`` value.
-        osc: Optional :class:`OscConfig` rendered into ``--osc=...``.
-        extra_args: Raw tokens forwarded verbatim to VRChat.
-        wait_timeout: Maximum seconds to wait for the VRChat PID after
-            spawning Steam. Defaults to :data:`PID_WAIT_TIMEOUT`. Pass
-            ``0`` (or any non-positive value) to skip the wait and
-            return immediately.
-        wait_interval: Seconds between PID polls. Defaults to
-            :data:`PID_WAIT_INTERVAL`.
-
-    Returns:
-        The observed VRChat PID, or ``None`` when ``wait_timeout <= 0``
-        or the timeout expires before VRChat appears. Timeout does not
-        raise - callers can branch on ``None`` if they need a stricter
-        signal.
+    ``wait_timeout`` elapses; pass ``wait_timeout <= 0`` to skip the
+    wait. Returns the observed PID, or ``None`` when the wait was
+    skipped or expired — timeout does not raise so callers can branch
+    on ``None`` if they need a stricter signal.
 
     Raises:
         SteamNotFoundError: Steam executable cannot be located.
@@ -226,19 +184,9 @@ def wait_for_pid(
 ) -> int | None:
     """Poll for a VRChat PID until one appears or ``timeout`` elapses.
 
-    Uses :func:`find_pid` so the first match wins (enumeration order is
-    OS-defined). Suitable for both the ``launch`` CLI flow and e2e
-    scenarios that need to wait for the game to finish bootstrapping.
-
-    Args:
-        timeout: Maximum total seconds to wait before giving up.
-            Defaults to :data:`PID_WAIT_TIMEOUT`.
-        interval: Seconds to sleep between polls. Defaults to
-            :data:`PID_WAIT_INTERVAL`.
-
-    Returns:
-        The first observed PID, or ``None`` if the deadline expired
-        before any VRChat process appeared.
+    Uses :func:`find_pid` so the first match wins (enumeration order
+    is OS-defined). Returns ``None`` if the deadline expired before
+    any VRChat process appeared.
     """
     deadline = time.monotonic() + timeout
     while True:
@@ -256,19 +204,9 @@ def wait_for_no_pid(
 ) -> bool:
     """Poll until no VRChat process is running, or ``timeout`` elapses.
 
-    Mirror of :func:`wait_for_pid` for the teardown path: poll until
-    :func:`find_pid` reports ``None``. Useful after :func:`terminate`
-    to confirm the kill actually settled.
-
-    Args:
-        timeout: Maximum total seconds to wait before giving up.
-            Defaults to :data:`PID_WAIT_TIMEOUT`.
-        interval: Seconds to sleep between polls. Defaults to
-            :data:`PID_WAIT_INTERVAL`.
-
-    Returns:
-        ``True`` once VRChat is gone; ``False`` if the deadline expired
-        with the process still present.
+    Mirror of :func:`wait_for_pid` for the teardown path. Useful after
+    :func:`terminate` to confirm the kill actually settled. Returns
+    ``True`` once VRChat is gone; ``False`` on timeout.
     """
     deadline = time.monotonic() + timeout
     while True:
@@ -282,16 +220,10 @@ def wait_for_no_pid(
 def terminate(*, timeout: float = 5.0) -> list[int]:
     """Forcefully ``kill`` every running VRChat process.
 
-    Args:
-        timeout: Seconds to wait for the killed processes to disappear
-            before returning. The function returns the killed PIDs even
-            if a process is still listed after the timeout - the kill
-            was issued, only the wait did not observe completion.
-
-    Returns:
-        The list of PIDs that were issued ``kill()``. Empty when no
-        VRChat instance was running. The order matches
-        :func:`psutil.process_iter` enumeration (OS-defined).
+    Returns the PIDs that were issued ``kill()`` (empty when none were
+    running). PIDs are returned even if a process is still listed after
+    ``timeout`` — the kill was issued, only the wait did not observe
+    completion.
     """
     procs = [
         p
