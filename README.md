@@ -24,7 +24,8 @@ Python automation toolkit for the VRChat desktop client on Windows / Linux. It c
 - **Image-template detection** — `TemplateDetectEngine` using OpenCV `TM_CCOEFF_NORMED`. Detections use the same coordinate schema as OCR.
 - **Synthetic input** — keyboard / mouse input via [`pydirectinput`](https://github.com/learncodebygaming/pydirectinput) on Windows and [`inputtino`](https://github.com/games-on-whales/inputtino) + `/dev/uinput` on Linux. Input is sent only while VRChat is focused.
 - **Non-ASCII text injection** — `vrcpilot.clipboard` sends arbitrary Unicode strings through clipboard + Ctrl+V.
-- **CLI front-end** — subcommands such as `vrcpilot launch / screenshot / record / ocr / detect / mouse / keyboard / paste / ...`, with tab completion via `argcomplete`.
+- **Virtual mic output** — Stream WAV files or live float32 chunks (e.g. an LLM agent's TTS) into VRChat through VB-Audio Virtual Cable on Windows, or through the `VRCPilotMic` PipeWire sink on Linux (one-time setup via `vrcpilot linux-mic register`). CLI subcommand `vrcpilot mic` accepts a WAV file or raw `s16le` over stdin.
+- **CLI front-end** — subcommands such as `vrcpilot launch / screenshot / record / ocr / detect / mouse / keyboard / paste / mic / ...`, with tab completion via `argcomplete`.
 
 ## Installation
 
@@ -64,6 +65,8 @@ uv sync --all-extras
 
 No additional system packages are required. `pywin32` and `pydirectinput` are installed automatically as dependencies.
 
+For `vrcpilot mic` only, install [VB-Audio Virtual Cable](https://vb-audio.com/Cable/). After installation, Windows sound settings expose a playback device named `CABLE Input` and a recording device named `CABLE Output`. Open VRChat's **Audio** settings and select **"CABLE Output (VB-Audio Virtual Cable)"** as the microphone input device — `vrcpilot mic` writes to `CABLE Input` and VRChat picks the audio up through `CABLE Output`. The dependency is **not** needed if you do not use `vrcpilot mic`.
+
 ### Linux
 
 An X11 or XWayland session is required. Wayland-native sessions are not supported. In that environment, `focus()` / `unfocus()` emit a `RuntimeWarning` and return `False`.
@@ -85,6 +88,18 @@ sudo usermod -aG input "$USER"   # write access to /dev/uinput; log out and back
 If the `uinput` kernel module is disabled, load it with `sudo modprobe uinput`.
 
 Also note that the distribution name differs from the import name. On PyPI it is `inputtino-python`; in Python, import it as `inputtino`.
+
+#### Audio (for `vrcpilot mic`)
+
+For `vrcpilot mic` and the `Mic` Python API on Linux, you also need:
+
+- `pipewire` + `pipewire-pulse` (PulseAudio compatibility layer)
+- `libpulse0` (`soundcard` links against it via CFFI)
+- Run `vrcpilot linux-mic register` once after installation to create the
+  persistent `VRCPilotMic` PipeWire sink.
+
+Then in VRChat's Audio settings, select `Monitor of VRCPilot Virtual Mic`
+as the microphone input.
 
 ### macOS
 
@@ -121,6 +136,10 @@ vrcpilot record -o /tmp/vrc.mp4 --duration 10
 
 # Stream a self-describing MKV from VRChat into ffmpeg
 vrcpilot record --duration 5 | ffmpeg -i - -c copy /tmp/vrc.mkv
+
+# Play a WAV file into VRChat's mic
+# (Windows: requires VB-Cable; Linux: run `vrcpilot linux-mic register` first)
+vrcpilot mic -i greeting.wav
 
 # Terminate (idempotent)
 vrcpilot terminate
@@ -166,6 +185,20 @@ finally:
     vrcpilot.terminate()
 ```
 
+Stream audio chunks (e.g. from an LLM agent's TTS) into VRChat's mic:
+
+```python
+import numpy as np
+import vrcpilot
+
+def tts_chunks():  # yield float32 NDArray chunks; (N,) mono or (N, C) multi-channel
+    yield np.zeros(48000, dtype=np.float32)  # 1s of silence as a placeholder
+
+with vrcpilot.Mic(sample_rate=48000, channels=1) as mic:
+    for chunk in tts_chunks():
+        mic.play(chunk)
+```
+
 ## CLI Subcommands
 
 | Subcommand   | Purpose                                                                                                                 |
@@ -182,12 +215,14 @@ finally:
 | `paste`      | Input text through clipboard + Ctrl+V (non-ASCII safe)                                                                  |
 | `ocr`        | Run OCR on a `Screenshot` YAML (stdin pipe or `--screenshot <path>`)                                                    |
 | `detect`     | Template-search a `Screenshot` YAML with a query image. `-q query.png` / `--threshold` / `--top-k`                      |
+| `mic`        | Stream WAV / raw s16le PCM into a virtual mic device (Windows + VB-Cable, Linux + PipeWire); defaults to reading stdin  |
+| `linux-mic`  | Register / unregister / inspect the `VRCPilotMic` PipeWire virtual mic (Linux only)                                     |
 
 ## Shell Completion
 
 `vrcpilot` supports tab completion through [`argcomplete`](https://pypi.org/project/argcomplete/). The following items can be completed:
 
-- Subcommands (`launch` / `pid` / `terminate` / `focus` / `unfocus` / `screenshot` / `record` / `mouse` / `keyboard` / `paste` / `ocr` / `detect` / `osc`)
+- Subcommands (`launch` / `pid` / `terminate` / `focus` / `unfocus` / `screenshot` / `record` / `mouse` / `keyboard` / `paste` / `ocr` / `detect` / `osc` / `mic` / `linux-mic`)
 - Options (`--steam-path`, etc.)
 - Options that take file paths (`.exe` for `--steam-path`, `.png` for `--query`, etc.)
 

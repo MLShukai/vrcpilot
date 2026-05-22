@@ -49,6 +49,7 @@ dependencies = [
     "python-xlib>=0.33 ; sys_platform == 'linux'",
     "pywin32>=306 ; sys_platform == 'win32'",
     "pyyaml>=6.0.2",
+    "soundcard>=0.4.4",
     "windows-capture>=2.0.0 ; sys_platform == 'win32'",
 ]
 

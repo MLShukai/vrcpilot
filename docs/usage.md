@@ -186,7 +186,73 @@ See [`cli.md` record](cli.md#record) for the full flag reference and exit codes.
 
 ______________________________________________________________________
 
-## 9. Pipeline patterns
+## 9. Send audio into VRChat's mic
+
+`vrcpilot mic` plays a float32 PCM stream into a virtual-cable output device. With VRChat configured to use that cable as its mic, anything the CLI plays reaches other players as if you had spoken into a real microphone. The primary use case is hooking an LLM agent's TTS up to VRChat.
+
+### One-time setup (Windows)
+
+1. Install [VB-Audio Virtual Cable](https://vb-audio.com/Cable/) and reboot if prompted.
+2. Open **Settings → System → Sound** and confirm that the playback device `CABLE Input` and the recording device `CABLE Output` are both listed.
+3. In VRChat's **Audio** settings, switch the microphone input to **`CABLE Output (VB-Audio Virtual Cable)`**. `vrcpilot mic` writes to `CABLE Input`, and VRChat reads that audio back through `CABLE Output`.
+
+### One-time setup (Linux)
+
+1. Ensure PipeWire (with `pipewire-pulse`) and `libpulse0` are installed.
+   On Debian/Ubuntu: `sudo apt-get install pipewire pipewire-pulse libpulse0`.
+2. Register the virtual mic once: `vrcpilot linux-mic register`. This writes
+   `~/.config/pipewire/pipewire.conf.d/vrcpilot-mic.conf` and loads the
+   `module-null-sink` immediately so the device is usable in the current
+   session.
+3. In VRChat's **Audio** settings, switch the microphone input to
+   **`Monitor of VRCPilot Virtual Mic`**. `vrcpilot mic` writes to
+   `VRCPilotMic` (the sink) and VRChat picks up that audio from
+   `VRCPilotMic.monitor` (the matching monitor source).
+
+Check the status anytime with `vrcpilot linux-mic status`; remove the
+registration with `vrcpilot linux-mic unregister`.
+
+### Smoke test
+
+```bash
+vrcpilot mic -i greeting.wav
+```
+
+The CLI logs progress (sample rate, etc.) to stderr and blocks until the WAV has finished playing. Stdout is silent so the command can sit downstream of any raw-PCM producer without polluting the byte stream:
+
+```bash
+# Decode any audio source to raw s16le and play it through the virtual mic.
+ffmpeg -i greeting.mp3 -f s16le -ar 48000 -ac 2 - \
+  | vrcpilot mic --format s16le --rate 48000 --channels 2
+```
+
+### Stream from an LLM agent
+
+Open a `Mic` once and pump one chunk per `play()` call as the agent produces them. The session keeps a `soundcard` player alive for the duration of the `with` block, so the constructor pays the device-resolution cost once and `play(chunk)` only does a buffer write per iteration.
+
+```python
+from collections.abc import Iterator
+
+import numpy as np
+from numpy.typing import NDArray
+
+import vrcpilot
+
+def agent_tts_chunks() -> Iterator[NDArray[np.float32]]:
+    # Replace with the agent's incremental TTS output.
+    for _ in range(10):
+        yield np.zeros(4800, dtype=np.float32)  # 100 ms of silence per chunk
+
+with vrcpilot.Mic(sample_rate=48000, channels=1) as mic:  # picks up CABLE Input on Windows, VRCPilotMic on Linux
+    for chunk in agent_tts_chunks():
+        mic.play(chunk)
+```
+
+The chunk shape must match the channel count chosen at construction time (`(N,)` for mono, `(N, channels)` for multi-channel). `play()` blocks if the backend's internal buffer is full, giving the caller natural back-pressure for live streams.
+
+______________________________________________________________________
+
+## 10. Pipeline patterns
 
 ### Probe → act → re-probe
 
@@ -234,7 +300,7 @@ This launches VRChat, captures and OCRs the Launch Pad, then shuts down — a us
 
 ______________________________________________________________________
 
-## 10. Recovering from common failures
+## 11. Recovering from common failures
 
 | Symptom                                      | Likely cause                                                | Fix                                                     |
 | -------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------- |
@@ -249,7 +315,7 @@ ______________________________________________________________________
 
 ______________________________________________________________________
 
-## 11. Python equivalents
+## 12. Python equivalents
 
 Everything above has a Python counterpart in [`python-api.md`](python-api.md). The end-to-end flow:
 

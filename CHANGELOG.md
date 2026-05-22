@@ -14,11 +14,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Virtual mic output** (`vrcpilot.mic`): `Mic` opens a `soundcard`
+  player in its constructor for a fixed `(sample_rate, channels)` and
+  writes one float32 chunk per `play(chunk)` call, so callers drive the
+  cadence (`for chunk in tts.stream(): mic.play(chunk)`). The session is
+  released via context manager, explicit `close()`, or the finaliser.
+  Windows uses VB-Audio Virtual Cable as the default (`"CABLE Input"`);
+  Linux uses `VRCPilotMic` after `vrcpilot linux-mic register`.
+- **CLI**: `vrcpilot mic` subcommand. Reads stdin by default (raw s16le
+  PCM under `--format auto`, suitable for piping from tools like
+  `ffmpeg -f s16le -ar 48000 -ac 2 -`); also accepts `-i path.wav` for
+  16-bit signed PCM WAV files, with `--format {auto,wav,s16le}`,
+  `--rate`, `--channels`, `--chunk-ms`, and `--device` overrides.
+- **CLI**: `vrcpilot linux-mic register / unregister / status`
+  subcommand for managing the persistent `VRCPilotMic` PipeWire virtual
+  mic on Linux. `register` writes
+  `~/.config/pipewire/pipewire.conf.d/vrcpilot-mic.conf` and (unless
+  `--no-runtime-load` is passed) loads `module-null-sink` immediately
+  so the sink is usable in the current session.
+- **Python API**: `vrcpilot.mic.linux.register_virtual_mic`,
+  `unregister_virtual_mic`, `is_registered`, and the `RegisterResult`
+  dataclass. The submodule is Linux-only and raises `RuntimeError` at
+  import time on other platforms.
+- `vrcpilot.MicDeviceNotFoundError` raised when `soundcard` cannot find a
+  matching output device.
+- `VRCPILOT_MIC_DEVICE` environment variable to override the resolved device
+  name.
 - `vrcpilot record` now records video, audio, or both in a single subcommand. The `--video` / `--audio` flags select the mode (passing both, or neither, records both video and audio). File output is MP4 for video / both modes (`-o file.mp4` or a directory argument) and WAV for audio-only mode (`--audio -o file.wav`); a mismatched extension exits `2`. With `-o` omitted, the recording is streamed to stdout as a self-describing Matroska (MKV) container (libx264 + AAC) regardless of mode, so downstream tools like `ffmpeg -i -` can consume it directly.
 - New `--fps FLOAT` flag on `vrcpilot record` (default `30.0`); combining it with `--audio` alone is rejected with exit `2` and `vrcpilot: --fps is not meaningful with --audio (drop --fps or remove --audio)`.
 
 ### Changed
 
+- **Virtual mic backend**: replaced `sounddevice` (PortAudio) with
+  `soundcard` (libpulse on Linux, WASAPI on Windows). Linux now
+  enumerates individual PulseAudio sinks, so `vrcpilot mic` can resolve
+  `VRCPilotMic` by name and `vrcpilot.mic.default_device_name()`
+  returns `"VRCPilotMic"` on Linux. **Breaking**: `Mic.device_index: int` is replaced by `Mic.device_id: str` (the `soundcard` `Speaker.id`
+  -- PulseAudio sink name on Linux, WASAPI device id on Windows). On
+  Linux this also adds a `libpulse0` system dependency (already pulled
+  in by `pipewire-pulse` on most distros).
 - PyAV (`av>=12,<16`) is now a runtime dependency, replacing `cv2.VideoWriter` and the standard `wave` module for the record subcommand's muxing path.
 
 ## [0.1.0] - 2026-05-15

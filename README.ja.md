@@ -24,7 +24,8 @@ Windows / Linux 上の VRChat デスクトップクライアントを Python か
 - **画像テンプレート検出** — OpenCV の `TM_CCOEFF_NORMED` を使う `TemplateDetectEngine`。OCR と同じ座標スキーマで検出結果を返します
 - **合成入力** — keyboard / mouse の入力（Windows: [`pydirectinput`](https://github.com/learncodebygaming/pydirectinput) / Linux: [`inputtino`](https://github.com/games-on-whales/inputtino) + `/dev/uinput`）。VRChat にフォーカスがあるときだけ入力します
 - **非 ASCII テキスト入力** — `vrcpilot.clipboard` がクリップボード + Ctrl+V 経由で任意の Unicode 文字列を入力
-- **CLI フロントエンド** — `vrcpilot launch / screenshot / record / ocr / detect / mouse / keyboard / paste / ...` の各サブコマンドを提供。`argcomplete` によるタブ補完にも対応
+- **仮想マイク出力** — WAV ファイルや float32 チャンク列 (例: LLM エージェントの TTS) を、Windows 上の VB-Audio Virtual Cable または Linux 上の `VRCPilotMic` PipeWire シンク経由で VRChat マイクへ流し込み (Linux は `vrcpilot linux-mic register` で一度だけ初期化)。CLI サブコマンド `vrcpilot mic` で同じ機能を提供します
+- **CLI フロントエンド** — `vrcpilot launch / screenshot / record / ocr / detect / mouse / keyboard / paste / mic / ...` の各サブコマンドを提供。`argcomplete` によるタブ補完にも対応
 
 ## インストール
 
@@ -64,6 +65,8 @@ uv sync --all-extras
 
 追加のシステムパッケージは不要です。`pywin32` と `pydirectinput` は依存関係として自動的にインストールされます。
 
+`vrcpilot mic` を利用する場合のみ、[VB-Audio Virtual Cable](https://vb-audio.com/Cable/) のインストールが必要です。インストール後は Windows のサウンド設定に再生デバイス `CABLE Input` と録音デバイス `CABLE Output` が現れます。続いて VRChat の **Audio** 設定を開き、マイク入力デバイスを **"CABLE Output (VB-Audio Virtual Cable)"** に切り替えてください。`vrcpilot mic` は `CABLE Input` に書き込み、VRChat はそれを `CABLE Output` 経由でマイクとして拾います。`vrcpilot mic` を使わないなら **不要** です。
+
 ### Linux
 
 X11 または XWayland セッションが必要です。Wayland ネイティブセッションには対応していません。その環境では `focus()` / `unfocus()` が `RuntimeWarning` を出し、`False` を返します。
@@ -85,6 +88,18 @@ sudo usermod -aG input "$USER"   # /dev/uinput への書き込み権限。一度
 `uinput` カーネルモジュールが無効な場合は、`sudo modprobe uinput` で読み込んでください。
 
 また、ディストリビューション名とインポート名が異なる点に注意してください。PyPI 上では `inputtino-python`、Python からは `inputtino` としてインポートします。
+
+#### オーディオ (`vrcpilot mic` 用)
+
+Linux で `vrcpilot mic` および `Mic` Python API を使うには、追加で以下が必要です。
+
+- `pipewire` + `pipewire-pulse` (PulseAudio 互換レイヤ)
+- `libpulse0` (`soundcard` が CFFI 経由でリンクします)
+- インストール後に一度だけ `vrcpilot linux-mic register` を実行し、永続的な
+  `VRCPilotMic` PipeWire シンクを作成してください。
+
+その後、VRChat の Audio 設定でマイク入力デバイスを
+`Monitor of VRCPilot Virtual Mic` に切り替えます。
 
 ### macOS
 
@@ -121,6 +136,10 @@ vrcpilot record -o /tmp/vrc.mp4 --duration 10
 
 # 自己記述形式の MKV を stdout から ffmpeg に流し込む
 vrcpilot record --duration 5 | ffmpeg -i - -c copy /tmp/vrc.mkv
+
+# WAV ファイルを VRChat のマイクへ流す
+# (Windows: VB-Cable が必要 / Linux: 事前に `vrcpilot linux-mic register` を実行)
+vrcpilot mic -i greeting.wav
 
 # 終了 (idempotent)
 vrcpilot terminate
@@ -166,28 +185,44 @@ finally:
     vrcpilot.terminate()
 ```
 
+音声チャンク列 (例: LLM エージェントの TTS) を VRChat のマイクへ流し込む例:
+
+```python
+import numpy as np
+import vrcpilot
+
+def tts_chunks():  # float32 NDArray の iterable。(N,) は mono、(N, C) は C ch
+    yield np.zeros(48000, dtype=np.float32)  # 1 秒分の無音をプレースホルダとして yield
+
+with vrcpilot.Mic(sample_rate=48000, channels=1) as mic:
+    for chunk in tts_chunks():
+        mic.play(chunk)
+```
+
 ## CLI サブコマンド一覧
 
-| サブコマンド | 用途                                                                                                       |
-| ------------ | ---------------------------------------------------------------------------------------------------------- |
-| `launch`     | Steam 経由で VRChat を起動。`--no-vr` / `--screen-{width,height}` / `--wait-timeout` などに対応            |
-| `pid`        | 起動中の VRChat の PID を 1 行 1 件で列挙                                                                  |
-| `terminate`  | VRChat を終了 (idempotent)                                                                                 |
-| `focus`      | VRChat ウィンドウを前面に出す                                                                              |
-| `unfocus`    | VRChat ウィンドウを Z オーダーの最背面に送る                                                               |
-| `screenshot` | 画面を 1 枚キャプチャし、`Screenshot` を YAML で標準出力へ出力 (PNG パスまたはインライン base64)           |
-| `record`     | VRChat の映像 / 音声を録画。`-o file.mp4` / `file.wav` でファイル出力、未指定時は自己記述 MKV を標準出力へ |
-| `mouse`      | `move` / `click` / `scroll` (VRChat ウィンドウローカル座標)                                                |
-| `keyboard`   | `press` (`--duration` の既定値は 0.1 秒)                                                                   |
-| `paste`      | クリップボード + Ctrl+V でテキストを入力 (非 ASCII 対応)                                                   |
-| `ocr`        | `Screenshot` YAML に対して OCR を実行 (標準入力のパイプ、または `--screenshot <path>`)                     |
-| `detect`     | `Screenshot` YAML に対してクエリ画像でテンプレート検索。`-q query.png` / `--threshold` / `--top-k`         |
+| サブコマンド | 用途                                                                                                        |
+| ------------ | ----------------------------------------------------------------------------------------------------------- |
+| `launch`     | Steam 経由で VRChat を起動。`--no-vr` / `--screen-{width,height}` / `--wait-timeout` などに対応             |
+| `pid`        | 起動中の VRChat の PID を 1 行 1 件で列挙                                                                   |
+| `terminate`  | VRChat を終了 (idempotent)                                                                                  |
+| `focus`      | VRChat ウィンドウを前面に出す                                                                               |
+| `unfocus`    | VRChat ウィンドウを Z オーダーの最背面に送る                                                                |
+| `screenshot` | 画面を 1 枚キャプチャし、`Screenshot` を YAML で標準出力へ出力 (PNG パスまたはインライン base64)            |
+| `record`     | VRChat の映像 / 音声を録画。`-o file.mp4` / `file.wav` でファイル出力、未指定時は自己記述 MKV を標準出力へ  |
+| `mouse`      | `move` / `click` / `scroll` (VRChat ウィンドウローカル座標)                                                 |
+| `keyboard`   | `press` (`--duration` の既定値は 0.1 秒)                                                                    |
+| `paste`      | クリップボード + Ctrl+V でテキストを入力 (非 ASCII 対応)                                                    |
+| `ocr`        | `Screenshot` YAML に対して OCR を実行 (標準入力のパイプ、または `--screenshot <path>`)                      |
+| `detect`     | `Screenshot` YAML に対してクエリ画像でテンプレート検索。`-q query.png` / `--threshold` / `--top-k`          |
+| `mic`        | WAV / raw s16le PCM を仮想マイクデバイスへ流す (Windows + VB-Cable / Linux + PipeWire); 既定で stdin を読む |
+| `linux-mic`  | `VRCPilotMic` PipeWire 仮想マイクの登録 / 解除 / 確認 (Linux 専用)                                          |
 
 ## シェル補完
 
 `vrcpilot` は [`argcomplete`](https://pypi.org/project/argcomplete/) によるタブ補完に対応しています。補完できる対象は以下のとおりです。
 
-- 各サブコマンド (`launch` / `pid` / `terminate` / `focus` / `unfocus` / `screenshot` / `record` / `mouse` / `keyboard` / `paste` / `ocr` / `detect` / `osc`)
+- 各サブコマンド (`launch` / `pid` / `terminate` / `focus` / `unfocus` / `screenshot` / `record` / `mouse` / `keyboard` / `paste` / `ocr` / `detect` / `osc` / `mic` / `linux-mic`)
 - 各種オプション (`--steam-path` など)
 - ファイルパスを取るオプション (`--steam-path` の `.exe`、`--query` の `.png` など)
 

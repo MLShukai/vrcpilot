@@ -249,6 +249,159 @@ To persist the recording, write `audio` (or each incoming chunk) with PyAV, the 
 
 ______________________________________________________________________
 
+## Mic (audio playback)
+
+Stream float32 PCM into a virtual-cable output device so it appears to VRChat as live microphone input. The primary use case is piping an LLM agent's TTS chunks directly into VRChat without ever touching a real microphone or an intermediate audio file. The session opens a `soundcard` player in `__init__` and keeps it alive until the instance is closed; `play(chunk)` writes a single chunk per call so callers drive the cadence themselves (`for chunk in tts.stream(): mic.play(chunk)`). On Windows the default device is VB-Audio Virtual Cable's `"CABLE Input"`; on Linux the default is the `"VRCPilotMic"` PipeWire sink created by [`vrcpilot.mic.linux.register_virtual_mic`](#vrcpilotmiclinux) (or by running `vrcpilot linux-mic register`).
+
+### `vrcpilot.Mic`
+
+```python
+class Mic:
+    def __init__(
+        self,
+        device: str | None = None,
+        *,
+        sample_rate: int = 48000,
+        channels: int = 1,
+    ) -> None: ...
+
+    @property
+    def device_name(self) -> str: ...
+    @property
+    def device_id(self) -> str: ...
+    @property
+    def sample_rate(self) -> int: ...
+    @property
+    def channels(self) -> int: ...
+
+    def play(self, chunk: NDArray[np.float32]) -> None: ...
+    def close(self) -> None: ...
+    def __enter__(self) -> Self: ...
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None: ...
+```
+
+`device` is matched as a case-insensitive **substring** against the names `soundcard` reports (matching covers both `Speaker.name` and `Speaker.id`, with fuzzy id matching). `None` defers to `$VRCPILOT_MIC_DEVICE`, then to the OS default returned by `default_device_name()`. The constructor resolves the device, opens a `soundcard` player for `(sample_rate, channels)`, and enters it — those values are baked in for the lifetime of the session, so reconfiguring means constructing a new `Mic`.
+
+`device_id` exposes the underlying `soundcard` `Speaker.id` as a string. On Linux this is the PulseAudio sink name (e.g. `"VRCPilotMic"`); on Windows it is the WASAPI device id string surfaced by `soundcard`. (This replaces the integer `device_index` from the PortAudio-backed prototype.)
+
+`play(chunk)` writes one float32 array per call. The chunk shape must match the configured channel count (`(N,)` for mono, `(N, channels)` for multi-channel) or `ValueError` is raised. The call blocks if the backend's internal buffer is full, giving the caller natural back-pressure for live TTS streams.
+
+The stream is released by `close()`, by leaving the `with` block, or as a best-effort fallback in `__del__`. Prefer the context manager — `__del__` runs at GC time and cannot be relied on for prompt resource release on every interpreter.
+
+**Raises**:
+
+- `MicDeviceNotFoundError` when no output device matches the resolved name, or no default is configured for this platform.
+- `ImportError` when `soundcard` is not installed (the lazy import happens during construction).
+- `RuntimeError` from the `soundcard` backend (libpulse on Linux, WASAPI on Windows) when it cannot open the player, or from `play()` after the Mic has been closed.
+- `OSError` when the native backend shared library cannot be loaded (e.g. `libpulse0` is missing on Linux).
+- `ValueError` when `sample_rate` / `channels` is not strictly positive, or when `play()` receives a non-`float32` chunk, a chunk with `ndim` outside `{1, 2}`, or a chunk whose channel count disagrees with the constructor.
+
+### `vrcpilot.MicDeviceNotFoundError`
+
+`RuntimeError` subclass raised when `soundcard` cannot locate an output device matching the resolved name. The message lists every output device `soundcard` currently sees and includes an OS-specific setup hint (`vrcpilot linux-mic register` on Linux, VB-Cable install link on Windows), which makes mis-named installations easy to diagnose.
+
+### `vrcpilot.mic.default_device_name`
+
+```python
+def default_device_name() -> str | None: ...
+```
+
+The OS-specific default output-device substring. Returns `"CABLE Input"` on Windows and `"VRCPilotMic"` on Linux (after `vrcpilot linux-mic register`). Returns `None` on other platforms.
+
+### `VRCPILOT_MIC_DEVICE`
+
+Environment variable consulted between the constructor argument and `default_device_name()`. Useful for keeping device names out of source code, or for overriding the Windows default without code changes.
+
+### End-to-end snippets
+
+Play a single preloaded buffer:
+
+```python
+import numpy as np
+import vrcpilot
+
+samples = np.zeros(48000, dtype=np.float32)  # 1 second of silence
+with vrcpilot.Mic(sample_rate=48000, channels=1) as mic:
+    mic.play(samples)
+```
+
+Stream chunks from a generator (the shape an LLM agent's incremental TTS typically produces):
+
+```python
+from collections.abc import Iterator
+
+import numpy as np
+from numpy.typing import NDArray
+
+import vrcpilot
+
+def tts_chunks() -> Iterator[NDArray[np.float32]]:
+    # Replace with the agent's actual chunk iterator.
+    for _ in range(10):
+        yield np.zeros(4800, dtype=np.float32)  # 100 ms of silence per chunk
+
+with vrcpilot.Mic(sample_rate=48000, channels=1) as mic:
+    for chunk in tts_chunks():
+        mic.play(chunk)
+```
+
+______________________________________________________________________
+
+## `vrcpilot.mic.linux`
+
+Linux-only helpers that manage the persistent `VRCPilotMic` virtual mic in PipeWire. This is the programmatic counterpart of the `vrcpilot linux-mic` CLI; both write the same config fragment and call the same PulseAudio `module_load` path.
+
+**Importing this submodule on non-Linux platforms raises `RuntimeError` at import time**, so guard accesses with `sys.platform == "linux"` (or import lazily) when writing cross-platform code.
+
+### `vrcpilot.mic.linux.register_virtual_mic`
+
+```python
+def register_virtual_mic(*, runtime_load: bool = True) -> RegisterResult: ...
+```
+
+Persist the `VRCPilotMic` `module-null-sink` to
+`$XDG_CONFIG_HOME/pipewire/pipewire.conf.d/vrcpilot-mic.conf` (falling back to `~/.config/...` when the variable is unset) and, when `runtime_load=True`, additionally call `pulsectl.Pulse.module_load("module-null-sink", ...)` so the sink is usable immediately. The runtime step is best-effort — failures (missing `pulsectl`, control-plane error) are surfaced via `RegisterResult.runtime_warning` rather than raised, because the persistent config is the source of truth and will be picked up after the next PipeWire restart / re-login.
+
+**Returns**: a `RegisterResult` describing what was done.
+
+**Raises**: `OSError` when the persistent config cannot be written (permission errors, filesystem failures).
+
+### `vrcpilot.mic.linux.unregister_virtual_mic`
+
+```python
+def unregister_virtual_mic() -> bool: ...
+```
+
+Remove the persistent config fragment and unload any currently loaded `VRCPilotMic` `module-null-sink`. Returns `True` if anything was actually removed (config file deleted, runtime module unloaded, or both); `False` when neither artefact existed. Idempotent — safe to call repeatedly.
+
+### `vrcpilot.mic.linux.is_registered`
+
+```python
+def is_registered() -> bool: ...
+```
+
+Return whether the persistent config fragment exists. Does not consult PulseAudio — use the `vrcpilot linux-mic status` CLI or call `open_pulse_control()` directly to inspect the runtime module list.
+
+### `vrcpilot.mic.linux.RegisterResult`
+
+```python
+@dataclass(frozen=True)
+class RegisterResult:
+    config_path: Path
+    created_config: bool
+    runtime_loaded: bool
+    runtime_warning: str | None
+```
+
+Outcome of `register_virtual_mic`:
+
+- `config_path` — absolute path to the persistent config fragment.
+- `created_config` — `True` iff the call wrote the file (`False` when it already existed with the expected contents).
+- `runtime_loaded` — `True` iff the immediate `pulsectl` `module_load` succeeded. `False` when skipped via `runtime_load=False` or when the runtime step failed (in which case `runtime_warning` is populated).
+- `runtime_warning` — human-readable description of the runtime-load failure, or `None` when no failure occurred.
+
+______________________________________________________________________
+
 ## Screenshot
 
 ### `vrcpilot.Screenshot`

@@ -35,6 +35,17 @@ class TestPackage:
         assert hasattr(vrcpilot, name)
         assert name in vrcpilot.__all__
 
+    @pytest.mark.parametrize("name", ["Mic", "MicDeviceNotFoundError"])
+    def test_mic_modality_re_exported_at_top_level(self, name: str):
+        """Mic modality symbols must be in :data:`vrcpilot.__all__`.
+
+        Pins the public-API surface the mic package exposes through the
+        top-level namespace so a refactor cannot quietly drop a re-
+        export.
+        """
+        assert hasattr(vrcpilot, name)
+        assert name in vrcpilot.__all__
+
     @pytest.mark.parametrize(
         "name",
         [
