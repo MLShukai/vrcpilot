@@ -18,10 +18,13 @@ from vrcpilot.mic.base import (
     MicDeviceNotFoundError,
 )
 from vrcpilot.mic.devices import default_device_name
+from vrcpilot.mic.session import Mic, play
 
 __all__ = [
     "DEVICE_ENV_VAR",
+    "Mic",
     "MicDeviceNotFoundError",
     "SAMPLE_RATE",
     "default_device_name",
+    "play",
 ]

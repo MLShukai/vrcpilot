@@ -17,6 +17,7 @@ fixtures next to each fake; see :mod:`tests.fakes.capture`.)
 from __future__ import annotations
 
 from .audio import (
+    FakeMic,
     FakeProcessAudioCapture,
     FakePulse,
     FakePulseEventInfo,
@@ -59,6 +60,7 @@ __all__ = [
     "FakeCaptureLoop",
     "FakeInputtinoKeyboard",
     "FakeInputtinoMouse",
+    "FakeMic",
     "FakeMouseButton",
     "FakeMp4Sink",
     "FakeOCREngine",

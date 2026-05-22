@@ -58,7 +58,7 @@ from __future__ import annotations
 import threading
 import time
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
@@ -673,24 +673,76 @@ class FakeRawPcmStdoutSink:
         self.close()
 
 
+class FakeOutputStream:
+    """Stand-in for :class:`sounddevice.OutputStream`.
+
+    Models the slice of the OutputStream surface
+    :meth:`vrcpilot.mic.Mic.play` invokes: constructor kwargs are
+    captured for assertions, :meth:`write` records every chunk pushed,
+    and the context-manager protocol marks :attr:`closed` so tests can
+    verify that the PortAudio stream was drained.
+    """
+
+    def __init__(
+        self,
+        *,
+        samplerate: int,
+        channels: int,
+        dtype: str,
+        device: int,
+    ) -> None:
+        self.samplerate = samplerate
+        self.channels = channels
+        self.dtype = dtype
+        self.device = device
+        self.writes: list[NDArray[np.float32]] = []
+        self.closed: bool = False
+
+    def write(self, frame: NDArray[np.float32]) -> None:
+        if self.closed:
+            raise RuntimeError("write after close")
+        self.writes.append(frame)
+
+    def close(self) -> None:
+        self.closed = True
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        del exc_type, exc_val, exc_tb
+        self.close()
+
+
 class FakeSoundDevice:
     """Module-shaped stand-in for the ``sounddevice`` package.
 
     Tests install an instance via ``mocker.patch.dict(sys.modules,
     {"sounddevice": fake})`` so the lazy ``import sounddevice as sd``
-    inside :mod:`vrcpilot.mic.devices` resolves to this fake instead of
-    the real PortAudio binding. Only the surface the mic module
-    actually touches is modelled here; widen the stand-in when new
-    sounddevice calls are added in production.
+    inside :mod:`vrcpilot.mic.devices` and :mod:`vrcpilot.mic.session`
+    resolves to this fake instead of the real PortAudio binding. Only
+    the surface the mic module actually touches is modelled here;
+    widen the stand-in when new sounddevice calls are added in
+    production.
 
     Currently models:
 
     * :meth:`query_devices` -- backs
       :func:`vrcpilot.mic.devices.lookup_output_device`.
+    * :meth:`OutputStream` -- backs :meth:`vrcpilot.mic.Mic.play`.
+      Each call records a :class:`FakeOutputStream` in
+      :attr:`output_streams` so tests can assert constructor kwargs
+      and written frames.
     """
 
     def __init__(self) -> None:
         self.devices: list[dict[str, Any]] = []
+        self.output_streams: list[FakeOutputStream] = []
 
     def add_output_device(self, name: str, *, max_output_channels: int = 2) -> None:
         """Register an output-capable device.
@@ -724,3 +776,55 @@ class FakeSoundDevice:
     def query_devices(self) -> list[dict[str, Any]]:
         """Return a shallow copy of the registered device list."""
         return list(self.devices)
+
+    def OutputStream(  # noqa: N802 -- mirrors sounddevice.OutputStream
+        self,
+        *,
+        samplerate: int,
+        channels: int,
+        dtype: str,
+        device: int,
+    ) -> FakeOutputStream:
+        """Return a fresh :class:`FakeOutputStream` and track it."""
+        stream = FakeOutputStream(
+            samplerate=samplerate,
+            channels=channels,
+            dtype=dtype,
+            device=device,
+        )
+        self.output_streams.append(stream)
+        return stream
+
+
+class FakeMic:
+    """Stand-in for :class:`vrcpilot.mic.Mic` for CLI tests.
+
+    The CLI subcommand depends only on :meth:`Mic.play`, so this fake
+    captures every play invocation as a ``(chunks, sample_rate)`` pair
+    in :attr:`played` without touching sounddevice. Construction never
+    raises -- the CLI's device-not-found error path is exercised by
+    patching ``Mic`` to raise on instantiation instead.
+    """
+
+    instances: list[FakeMic] = []
+
+    def __init__(self, device: str | None = None) -> None:
+        self.device_argument = device
+        self.played: list[tuple[list[NDArray[np.float32]], int]] = []
+        FakeMic.instances.append(self)
+
+    @property
+    def device_name(self) -> str:
+        return self.device_argument or "fake-device"
+
+    @property
+    def device_index(self) -> int:
+        return 0
+
+    def play(
+        self,
+        stream: Iterable[NDArray[np.float32]],
+        *,
+        sample_rate: int = 48000,
+    ) -> None:
+        self.played.append((list(stream), sample_rate))
