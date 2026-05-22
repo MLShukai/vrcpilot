@@ -34,7 +34,7 @@ def fake_keyboard(mocker: MockerFixture) -> ImplKeyboard:
     """
     impl = ImplKeyboard()
     mocker.patch("vrcpilot.controls.keyboard._get", return_value=impl)
-    mocker.patch("vrcpilot.controls.keyboard.ensure_target", return_value=None)
+    mocker.patch("vrcpilot.controls.keyboard.base.ensure_target", return_value=None)
     return impl
 
 
@@ -54,7 +54,7 @@ class TestKeyboardPress:
         mocker: MockerFixture,
         expected_key: Key,
     ):
-        sleep_spy = mocker.patch("vrcpilot.controls.keyboard.time.sleep")
+        sleep_spy = mocker.patch("vrcpilot.controls.keyboard.base.time.sleep")
 
         exit_code = main(["keyboard", "press", key_arg])
 
@@ -72,7 +72,7 @@ class TestKeyboardPress:
         # (Unity / VRChat drops shorter holds - see
         # memory/project_keyboard_press_duration.md).
         del fake_keyboard
-        sleep_spy = mocker.patch("vrcpilot.controls.keyboard.time.sleep")
+        sleep_spy = mocker.patch("vrcpilot.controls.keyboard.base.time.sleep")
 
         exit_code = main(["keyboard", "press", "a"])
 
@@ -82,7 +82,7 @@ class TestKeyboardPress:
     def test_custom_duration_propagates(
         self, fake_keyboard: ImplKeyboard, mocker: MockerFixture
     ):
-        sleep_spy = mocker.patch("vrcpilot.controls.keyboard.time.sleep")
+        sleep_spy = mocker.patch("vrcpilot.controls.keyboard.base.time.sleep")
 
         exit_code = main(["keyboard", "press", "a", "--duration", "0.5"])
 
@@ -100,7 +100,7 @@ class TestKeyboardPress:
         mocker: MockerFixture,
     ):
         del fake_keyboard
-        mocker.patch("vrcpilot.controls.keyboard.time.sleep")
+        mocker.patch("vrcpilot.controls.keyboard.base.time.sleep")
         exit_code = main(["keyboard", "press", "a"])
 
         assert exit_code == 0
@@ -114,7 +114,7 @@ class TestKeyboardPress:
         # `vrcpilot keyboard press a b c --duration 0.2` issues a single
         # `keyboard.press(A, B, C, duration=0.2)` call: down left-to-right,
         # one sleep, up right-to-left.
-        sleep_spy = mocker.patch("vrcpilot.controls.keyboard.time.sleep")
+        sleep_spy = mocker.patch("vrcpilot.controls.keyboard.base.time.sleep")
 
         exit_code = main(["keyboard", "press", "a", "b", "c", "--duration", "0.2"])
 
@@ -173,7 +173,7 @@ class TestKeyboardGuardErrors:
     ):
         del fake_keyboard  # fixture wires the impl, but the guard fires first
         mocker.patch(
-            "vrcpilot.controls.keyboard.ensure_target",
+            "vrcpilot.controls.keyboard.base.ensure_target",
             side_effect=VRChatNotRunningError("VRChat is not running"),
         )
 
@@ -193,7 +193,7 @@ class TestKeyboardGuardErrors:
     ):
         del fake_keyboard
         mocker.patch(
-            "vrcpilot.controls.keyboard.ensure_target",
+            "vrcpilot.controls.keyboard.base.ensure_target",
             side_effect=VRChatNotFocusedError("VRChat is not focused"),
         )
 
@@ -214,7 +214,7 @@ class TestKeyboardGuardErrors:
         # guard runs once up-front. When it raises, no `_do_down` /
         # `_do_up` records should land.
         mocker.patch(
-            "vrcpilot.controls.keyboard.ensure_target",
+            "vrcpilot.controls.keyboard.base.ensure_target",
             side_effect=VRChatNotRunningError("VRChat is not running"),
         )
 

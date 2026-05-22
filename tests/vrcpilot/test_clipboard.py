@@ -55,7 +55,7 @@ class TestPasteCopiesText:
         text: str,
     ):
         del fake_keyboard
-        mocker.patch("vrcpilot.controls.keyboard.ensure_target")
+        mocker.patch("vrcpilot.controls.keyboard.base.ensure_target")
         copy_spy = mocker.patch("vrcpilot.clipboard.pyperclip.copy")
 
         clipboard.paste(text)
@@ -74,7 +74,7 @@ class TestPasteCallOrder:
         # once inside ``keyboard.press`` for the key-down hold), and the
         # ``time`` module is shared between both call sites, so a single
         # patch captures both invocations.
-        mocker.patch("vrcpilot.controls.keyboard.ensure_target")
+        mocker.patch("vrcpilot.controls.keyboard.base.ensure_target")
         recorder = mocker.MagicMock()
         recorder.attach_mock(mocker.patch("vrcpilot.clipboard.pyperclip.copy"), "copy")
         recorder.attach_mock(mocker.patch("vrcpilot.clipboard.time.sleep"), "sleep")
@@ -131,7 +131,7 @@ class TestPasteFocusForwarding:
         del fake_keyboard
         mocker.patch("vrcpilot.clipboard.pyperclip.copy")
         mocker.patch("vrcpilot.clipboard.time.sleep")
-        guard = mocker.patch("vrcpilot.controls.keyboard.ensure_target")
+        guard = mocker.patch("vrcpilot.controls.keyboard.base.ensure_target")
 
         clipboard.paste("hi")  # default focus=True
 
@@ -143,7 +143,7 @@ class TestPasteFocusForwarding:
         del fake_keyboard
         mocker.patch("vrcpilot.clipboard.pyperclip.copy")
         mocker.patch("vrcpilot.clipboard.time.sleep")
-        guard = mocker.patch("vrcpilot.controls.keyboard.ensure_target")
+        guard = mocker.patch("vrcpilot.controls.keyboard.base.ensure_target")
 
         clipboard.paste("hi", focus=False)
 
@@ -156,7 +156,7 @@ class TestPasteErrorPropagation:
     ):
         # When pyperclip itself fails (e.g. no xclip / xsel installed),
         # paste must NOT swallow the error -- CLI callers wrap it.
-        mocker.patch("vrcpilot.controls.keyboard.ensure_target")
+        mocker.patch("vrcpilot.controls.keyboard.base.ensure_target")
         sleep_spy = mocker.patch("vrcpilot.clipboard.time.sleep")
         mocker.patch(
             "vrcpilot.clipboard.pyperclip.copy",
