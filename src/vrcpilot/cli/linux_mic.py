@@ -176,7 +176,12 @@ def _sounddevice_visible(sink_name: str) -> tuple[bool, str | None]:
     callers print it alongside the ``not visible`` answer.
     """
     try:
-        import sounddevice as sd  # pyright: ignore[reportMissingTypeStubs]
+        # ``sounddevice`` was dropped from runtime deps in the Phase 1
+        # ``soundcard`` migration; Phase 2 will rewrite this probe.
+        # Until then, suppress the missing-import diagnostic so strict
+        # pyright stays green while the lazy import path is exercised
+        # only via ``sys.modules`` patching in tests.
+        import sounddevice as sd  # pyright: ignore[reportMissingImports,reportMissingTypeStubs]
     except ImportError as exc:
         return False, f"sounddevice not installed ({exc})"
     except OSError as exc:

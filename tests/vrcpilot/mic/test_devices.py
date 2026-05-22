@@ -5,11 +5,11 @@ import sys
 import pytest
 from pytest_mock import MockerFixture
 
-from tests.fakes import FakeSoundDevice
+from tests.fakes import FakeSoundCard, FakeSoundCardSpeaker
 from vrcpilot.mic.base import DEVICE_ENV_VAR, MicDeviceNotFoundError
 from vrcpilot.mic.devices import (
     default_device_name,
-    lookup_output_device,
+    lookup_speaker,
     resolve_device_name,
 )
 
@@ -83,50 +83,58 @@ class TestResolveDeviceName:
         assert DEVICE_ENV_VAR in str(exc_info.value)
 
 
-class TestLookupOutputDevice:
+class TestLookupSpeaker:
     @staticmethod
-    def _install_fake(mocker: MockerFixture, fake: FakeSoundDevice) -> None:
-        mocker.patch.dict(sys.modules, {"sounddevice": fake})
+    def _install_fake(mocker: MockerFixture, fake: FakeSoundCard) -> None:
+        mocker.patch.dict(sys.modules, {"soundcard": fake})
 
-    def test_returns_index_of_first_matching_output_device(
-        self, mocker: MockerFixture
-    ) -> None:
-        fake = FakeSoundDevice()
-        fake.add_input_device("Microphone (Realtek)")
-        fake.add_output_device("Speakers (Realtek)")
-        fake.add_output_device("CABLE Input (VB-Audio Virtual Cable)")
+    def test_returns_first_matching_output_device(self, mocker: MockerFixture) -> None:
+        fake = FakeSoundCard()
+        fake.add_microphone("Microphone (Realtek)")
+        fake.add_speaker("Speakers (Realtek)", id="speakers-realtek")
+        fake.add_speaker("CABLE Input (VB-Audio Virtual Cable)", id="cable-input-vb")
         self._install_fake(mocker, fake)
-        assert lookup_output_device("CABLE Input") == 2
+        speaker = lookup_speaker("CABLE Input")
+        assert isinstance(speaker, FakeSoundCardSpeaker)
+        assert speaker.id == "cable-input-vb"
+        assert speaker.name == "CABLE Input (VB-Audio Virtual Cable)"
 
     def test_match_is_case_insensitive(self, mocker: MockerFixture) -> None:
-        fake = FakeSoundDevice()
-        fake.add_output_device("CABLE Input (VB-Audio Virtual Cable)")
+        fake = FakeSoundCard()
+        fake.add_speaker("CABLE Input (VB-Audio Virtual Cable)", id="cable-input")
         self._install_fake(mocker, fake)
-        assert lookup_output_device("cable input") == 0
+        speaker = lookup_speaker("cable input")
+        assert speaker.id == "cable-input"
 
     def test_first_match_wins_among_multiple(self, mocker: MockerFixture) -> None:
-        fake = FakeSoundDevice()
-        fake.add_output_device("foo CABLE Input")
-        fake.add_output_device("bar CABLE Input")
+        fake = FakeSoundCard()
+        fake.add_speaker("foo CABLE Input", id="first")
+        fake.add_speaker("bar CABLE Input", id="second")
         self._install_fake(mocker, fake)
-        assert lookup_output_device("CABLE Input") == 0
+        speaker = lookup_speaker("CABLE Input")
+        assert speaker.id == "first"
 
     def test_input_only_device_is_skipped(self, mocker: MockerFixture) -> None:
-        fake = FakeSoundDevice()
-        fake.add_input_device("CABLE Input recording side")
-        fake.add_output_device("CABLE Input render side")
+        # ``all_speakers()`` only returns output devices on soundcard, so
+        # microphones registered alongside (input-only) must not appear
+        # in the lookup pool even when they share a substring with the
+        # needle. The fake mirrors that split.
+        fake = FakeSoundCard()
+        fake.add_microphone("CABLE Input recording side")
+        fake.add_speaker("CABLE Input render side", id="render")
         self._install_fake(mocker, fake)
-        assert lookup_output_device("CABLE Input") == 1
+        speaker = lookup_speaker("CABLE Input")
+        assert speaker.id == "render"
 
     def test_raises_when_no_output_device_matches_on_windows(
         self, mocker: MockerFixture
     ) -> None:
         mocker.patch.object(sys, "platform", "win32")
-        fake = FakeSoundDevice()
-        fake.add_output_device("Speakers (Realtek)")
+        fake = FakeSoundCard()
+        fake.add_speaker("Speakers (Realtek)", id="speakers-realtek")
         self._install_fake(mocker, fake)
         with pytest.raises(MicDeviceNotFoundError) as exc_info:
-            lookup_output_device("CABLE Input")
+            lookup_speaker("CABLE Input")
         msg = str(exc_info.value)
         assert "CABLE Input" in msg
         assert "vb-audio.com/Cable" in msg
@@ -134,11 +142,11 @@ class TestLookupOutputDevice:
 
     def test_lookup_error_message_on_linux(self, mocker: MockerFixture) -> None:
         mocker.patch.object(sys, "platform", "linux")
-        fake = FakeSoundDevice()
-        fake.add_output_device("Built-in Audio Analog Stereo")
+        fake = FakeSoundCard()
+        fake.add_speaker("Built-in Audio Analog Stereo", id="built-in-analog-stereo")
         self._install_fake(mocker, fake)
         with pytest.raises(MicDeviceNotFoundError) as exc_info:
-            lookup_output_device("VRCPilotMic")
+            lookup_speaker("VRCPilotMic")
         msg = str(exc_info.value)
         assert "VRCPilotMic" in msg
         assert "vrcpilot linux-mic register" in msg
@@ -149,9 +157,9 @@ class TestLookupOutputDevice:
         self, mocker: MockerFixture
     ) -> None:
         mocker.patch.object(sys, "platform", "win32")
-        fake = FakeSoundDevice()
-        fake.add_input_device("Mic only")
+        fake = FakeSoundCard()
+        fake.add_microphone("Mic only")
         self._install_fake(mocker, fake)
         with pytest.raises(MicDeviceNotFoundError) as exc_info:
-            lookup_output_device("CABLE Input")
+            lookup_speaker("CABLE Input")
         assert "(none)" in str(exc_info.value)

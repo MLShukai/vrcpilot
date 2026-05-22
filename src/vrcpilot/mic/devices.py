@@ -1,9 +1,10 @@
 """Output-device resolution for the mic modality.
 
 OS-specific knowledge is confined here: the per-platform default
-device-name substring (only Windows + VB-Cable for now) and the lazy
-import of :mod:`sounddevice`. :class:`vrcpilot.mic.Mic` and the CLI
-consume the resolved sounddevice index without touching either.
+device-name substring (only Windows + VB-Cable and Linux + PipeWire for
+now) and the lazy import of :mod:`soundcard`. :class:`vrcpilot.mic.Mic`
+and the CLI consume the resolved ``Speaker`` handle without touching
+either.
 """
 
 from __future__ import annotations
@@ -44,7 +45,7 @@ def resolve_device_name(argument: str | None) -> str:
 
     Raises:
         MicDeviceNotFoundError: All three sources yield nothing (e.g.
-            on Linux/macOS without explicit configuration).
+            on macOS without explicit configuration).
     """
     if argument is not None:
         return argument
@@ -60,33 +61,43 @@ def resolve_device_name(argument: str | None) -> str:
     return default
 
 
-def lookup_output_device(name: str) -> int:
-    """Return the sounddevice index of the first output device whose name
-    *contains* ``name`` (case-insensitive).
+def lookup_speaker(name: str) -> Any:
+    """Return the first soundcard ``Speaker`` whose name contains ``name``
+    (case-insensitive).
 
-    ``sounddevice`` is imported lazily so platforms without a PortAudio
-    binding installed can still ``import vrcpilot.mic``.
+    ``soundcard`` is imported lazily so platforms without ``libpulse``
+    (Linux) or WASAPI (Windows) wired up can still ``import
+    vrcpilot.mic``. The return value is the duck-typed ``_Speaker``
+    instance exposed by :mod:`soundcard`; it carries ``id`` / ``name``
+    / ``channels`` attributes and a ``player(samplerate, channels,
+    blocksize=None)`` context-manager factory that :class:`Mic` opens.
 
     Raises:
         MicDeviceNotFoundError: No output device matches; the message
-            lists every output device currently visible to PortAudio.
+            lists every output device currently visible to soundcard.
     """
-    import sounddevice as sd  # pyright: ignore[reportMissingTypeStubs]
+    import soundcard as sc  # pyright: ignore[reportMissingTypeStubs]
 
-    devices: list[dict[str, Any]] = list(
-        sd.query_devices()  # pyright: ignore[reportUnknownMemberType]
+    speakers: list[Any] = list(
+        sc.all_speakers()  # pyright: ignore[reportUnknownMemberType]
     )
     needle = name.lower()
-    for index, info in enumerate(devices):
-        if int(info.get("max_output_channels", 0)) <= 0:
-            continue
-        if needle in str(info.get("name", "")).lower():
-            return index
-    listing = "\n".join(
-        f"  [{i}] {d['name']!r} (out={d.get('max_output_channels', 0)})"
-        for i, d in enumerate(devices)
-        if int(d.get("max_output_channels", 0)) > 0
-    )
+    for speaker in speakers:
+        speaker_name = str(
+            getattr(speaker, "name", "")  # pyright: ignore[reportUnknownArgumentType]
+        )
+        if needle in speaker_name.lower():
+            return speaker
+    listing_lines: list[str] = []
+    for s in speakers:
+        s_name = str(
+            getattr(s, "name", "")  # pyright: ignore[reportUnknownArgumentType]
+        )
+        s_id = str(
+            getattr(s, "id", "")  # pyright: ignore[reportUnknownArgumentType]
+        )
+        listing_lines.append(f"  {s_name!r} (id={s_id!r})")
+    listing = "\n".join(listing_lines)
     if sys.platform == "linux":
         setup_hint = (
             "Run 'vrcpilot linux-mic register' to create the VRCPilotMic "

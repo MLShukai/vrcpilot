@@ -11,4 +11,4 @@ VIRTUAL_MIC_SINK_NAME: Final[str] = "VRCPilotMic"
 
 
 class MicDeviceNotFoundError(RuntimeError):
-    """Raised when sounddevice cannot find a matching output device."""
+    """Raised when soundcard cannot find a matching output device."""

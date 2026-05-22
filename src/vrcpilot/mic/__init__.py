@@ -3,7 +3,7 @@
 Public API:
 
 * :class:`Mic` -- session bound to a virtual-cable output device. Owns
-  the underlying sounddevice OutputStream; :meth:`Mic.play` writes one
+  the underlying :mod:`soundcard` player; :meth:`Mic.play` writes one
   chunk at a time and the caller drives the loop.
 * :data:`SAMPLE_RATE`, :data:`DEVICE_ENV_VAR`,
   :data:`VIRTUAL_MIC_SINK_NAME`, :func:`default_device_name`

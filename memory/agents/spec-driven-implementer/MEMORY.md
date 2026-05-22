@@ -3,3 +3,4 @@
 - [Factory-method seam for COM/native test substitution](feedback_factory_seam_pattern.md) — COM/WGC や native 拡張 (proc-tap 等) は `_open_session` / `_open_capture` factory + duck-typed fake で差し替え可能にする
 - [ExitStack for partial-init resource unwind](feedback_exitstack_partial_init_cleanup.md) — multi-step backend constructors use ExitStack + pop_all() instead of nested try/except pyramids; rollback helpers double as close() steps
 - [dict.get on isinstance-narrowed Any returns Unknown under pyright strict](feedback_pyright_strict_untyped_dict_get.md) — rebind through `dict[Any, Any]` alias after narrow; annotate LHS as `: Any`
+- [soundcard library quirks](reference_soundcard_quirks.md) — argv probe crashes on empty argv, no public Speaker type, player()/recorder() are context managers, fakes carry `FakeSoundCard*` prefix

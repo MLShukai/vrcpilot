@@ -164,7 +164,11 @@ def _query_devices() -> list[dict[str, Any]] | None:
     single "skipped" branch.
     """
     try:
-        import sounddevice as sd  # pyright: ignore[reportMissingTypeStubs]
+        # ``sounddevice`` was removed from runtime deps in the Phase 1
+        # ``soundcard`` migration; Phase 2 (Unit Z) will rewrite this
+        # e2e scenario against soundcard's recorder API. The defensive
+        # try/except already handles the import failure gracefully.
+        import sounddevice as sd  # pyright: ignore[reportMissingImports,reportMissingTypeStubs]
     except Exception as exc:
         _helpers.log(f"sounddevice import failed: {exc!r}")
         return None
@@ -280,7 +284,12 @@ class _LoopbackRecorder:
         self._ready = threading.Event()
 
     def __enter__(self) -> _LoopbackRecorder:
-        import sounddevice as sd  # pyright: ignore[reportMissingTypeStubs]
+        # ``sounddevice`` was removed from runtime deps in the Phase 1
+        # ``soundcard`` migration; Phase 2 (Unit Z) will rewrite this
+        # recorder against soundcard's recorder API. Until then the
+        # missing-import diagnostic is suppressed; the scenario itself
+        # is gated by ``_query_devices()`` returning ``None``.
+        import sounddevice as sd  # pyright: ignore[reportMissingImports,reportMissingTypeStubs]
 
         def _callback(
             indata: NDArray[np.float32],
