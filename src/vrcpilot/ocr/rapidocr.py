@@ -1,9 +1,8 @@
-"""Rapidocr バックエンドの :class:`OCREngine` 実装。
+"""Rapidocr-backed :class:`OCREngine` implementation.
 
-`rapidocr` パッケージをコンストラクタ内で遅延 import するため、
-本モジュール自体のロードでは外部 `rapidocr` を解決しない。
-これにより `[ocr]` extra 未導入時でも
-``from vrcpilot.ocr import OCREngine`` 等は問題なく動作する。
+``rapidocr`` is imported inside the constructor, not at module load,
+so ``from vrcpilot.ocr import OCREngine`` continues to work when the
+``[ocr]`` extra is not installed.
 """
 
 from __future__ import annotations
@@ -19,23 +18,19 @@ from .base import OCREngine, OCRWord
 
 
 class RapidOCREngine(OCREngine):
-    """Rapidocr (PP-OCRv4) バックエンドの具象 :class:`OCREngine`。
+    """Default :class:`OCREngine` backed by rapidocr (PP-OCRv4).
 
-    コンストラクタ内で ``from rapidocr import RapidOCR`` を遅延 import
-    する。`[ocr]` extra 未導入で本クラスをインスタンス化しようとすると
-    :class:`ImportError` が送出される。
+    Instantiation triggers the lazy ``import rapidocr``; without the
+    ``[ocr]`` extra installed this raises :class:`ImportError`.
     """
 
     def __init__(self, *, params: dict[str, Any] | None = None) -> None:
-        """Construct the underlying rapidocr engine.
+        """Build the underlying rapidocr engine.
 
-        Args:
-            params: ``RapidOCR(params=...)`` にそのまま転送される設定
-                辞書。``None`` のときはデフォルト構成 (PP-OCRv4) で
-                動作する。
-
-        Raises:
-            ImportError: ``rapidocr`` がインストールされていない場合。
+        ``params`` is forwarded verbatim to ``RapidOCR(params=...)``;
+        ``None`` uses the rapidocr default (PP-OCRv4). Raises
+        :class:`ImportError` when ``rapidocr`` is not installed — install
+        with ``pip install vrcpilot[ocr]``.
         """
         try:
             # ``rapidocr`` ships no type stubs; suppress the import-time
@@ -54,16 +49,10 @@ class RapidOCREngine(OCREngine):
 
     @override
     def recognize(self, image: NDArray[np.uint8]) -> list[OCRWord]:
-        """Run rapidocr on an RGB ``uint8`` image.
+        """Run rapidocr on an ``(H, W, 3)`` uint8 RGB image.
 
-        Args:
-            image: ``(H, W, 3)`` の RGB uint8 ndarray。
-                BGR 変換は不要 (rapidocr 3.x は RGB ndarray を
-                直接受け取る)。
-
-        Returns:
-            検出された :class:`OCRWord` の list。検出ゼロのときは
-            空 list を返す。
+        No BGR conversion is needed: rapidocr 3.x consumes RGB ndarrays
+        directly. Returns an empty list when nothing is detected.
         """
         result: Any = self._engine(image)
 
