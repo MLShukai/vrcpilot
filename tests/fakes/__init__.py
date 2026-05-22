@@ -42,6 +42,7 @@ from .ocr import FakeOCREngine
 from .osc import FakeUDPClient
 from .process import FakePopen, FakeProcess
 from .pydirectinput import FakePyDirectInput
+from .record_muxer import FakeMkvStdoutMuxer, FakeMp4FileMuxer, FakeWavFileMuxer
 from .screenshot import patch_stdin_with_screenshot, write_screenshot_payload
 from .x11 import (
     FakePixmap,
@@ -58,7 +59,9 @@ __all__ = [
     "FakeCaptureLoop",
     "FakeInputtinoKeyboard",
     "FakeInputtinoMouse",
+    "FakeMkvStdoutMuxer",
     "FakeMouseButton",
+    "FakeMp4FileMuxer",
     "FakeMp4Sink",
     "FakeOCREngine",
     "FakePixmap",
@@ -75,6 +78,7 @@ __all__ = [
     "FakeSpeaker",
     "FakeSpeakerLoop",
     "FakeUDPClient",
+    "FakeWavFileMuxer",
     "FakeWavSink",
     "FakeWindowsCapture",
     "FakeWindowsCaptureControl",
