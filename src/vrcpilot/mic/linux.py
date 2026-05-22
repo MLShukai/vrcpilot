@@ -22,14 +22,9 @@ and hosts without ``pulsectl`` can still write the persistent config.
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING
 
-# Runtime guard: importing this module off-Linux is a programming
-# error. Skip the raise during type-checking so pyright analyses the
-# module on every platform (otherwise the CLI wrapper module sees
-# Unknown symbols when checked from Windows).
-if not TYPE_CHECKING and sys.platform != "linux":
-    raise RuntimeError("vrcpilot.mic.linux is Linux-only")
+if sys.platform != "linux":
+    raise ImportError("vrcpilot.mic.linux is Linux-only")
 
 import logging
 import os
@@ -128,8 +123,8 @@ def open_pulse_control(client_name: str = "vrcpilot-mic") -> Any:
     """
     # ``pulsectl`` is a Linux-only conditional dependency
     # (``sys_platform == 'linux'`` in pyproject.toml); silence the
-    # missing-import + unknown-type fallout when pyright runs on Windows.
-    from pulsectl import (  # pyright: ignore[reportMissingTypeStubs, reportMissingImports]
+    # unknown-type fallout from its missing inline annotations.
+    from pulsectl import (  # pyright: ignore[reportMissingTypeStubs]
         Pulse,  # pyright: ignore[reportUnknownVariableType]
     )
 
