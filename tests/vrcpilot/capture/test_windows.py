@@ -1,4 +1,4 @@
-"""Tests for :mod:`vrcpilot.capture.win32`.
+"""Tests for :mod:`vrcpilot.capture.windows`.
 
 The module raises ``ImportError`` on non-Windows because it depends on
 ``windows_capture``, so a module-level skip up front gates the rest of
@@ -22,7 +22,7 @@ if sys.platform != "win32":
 from pytest_mock import MockerFixture
 
 from tests.fakes import FakeWindowsCapture, make_fresh_windows_capture_subclass
-from vrcpilot.capture.win32 import Win32CaptureBackend
+from vrcpilot.capture.windows import Win32CaptureBackend
 
 
 @pytest.fixture
@@ -33,8 +33,8 @@ def win32_pid_and_hwnd(mocker: MockerFixture) -> None:
     to ``None``; tests that need to exercise downstream branches use
     this fixture to override that default.
     """
-    mocker.patch("vrcpilot.capture.win32.find_pid", return_value=4242)
-    mocker.patch("vrcpilot.capture.win32.find_vrchat_hwnd", return_value=12345)
+    mocker.patch("vrcpilot.capture.windows.find_pid", return_value=4242)
+    mocker.patch("vrcpilot.capture.windows.find_vrchat_hwnd", return_value=12345)
 
 
 class TestWin32CaptureBackend:
@@ -49,8 +49,8 @@ class TestWin32CaptureBackend:
         # ``find_pid`` succeeds but the top-level HWND is not yet
         # mapped — raise rather than fall through to ``WindowsCapture``,
         # which would crash on a null HWND.
-        mocker.patch("vrcpilot.capture.win32.find_pid", return_value=4242)
-        mocker.patch("vrcpilot.capture.win32.find_vrchat_hwnd", return_value=None)
+        mocker.patch("vrcpilot.capture.windows.find_pid", return_value=4242)
+        mocker.patch("vrcpilot.capture.windows.find_vrchat_hwnd", return_value=None)
 
         with pytest.raises(RuntimeError, match="window is not yet mapped"):
             Win32CaptureBackend(frame_timeout=1.0)
@@ -67,7 +67,7 @@ class TestWin32CaptureBackend:
         fresh = make_fresh_windows_capture_subclass()
         original = OSError("WGC unavailable")
         fresh.start_raises = original
-        mocker.patch("vrcpilot.capture.win32.WindowsCapture", fresh)
+        mocker.patch("vrcpilot.capture.windows.WindowsCapture", fresh)
 
         with pytest.raises(RuntimeError, match="Failed to start WGC session") as ei:
             Win32CaptureBackend(frame_timeout=1.0)

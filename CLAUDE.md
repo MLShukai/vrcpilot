@@ -16,18 +16,20 @@
 
 `vrcpilot` パッケージは以下のサブシステムから構成される:
 
+**対応プラットフォーム**: Windows と Linux のみ。それ以外（macOS, FreeBSD, etc.）では `import vrcpilot` の時点で `ImportError` を送出する（親 `__init__.py` 冒頭の `if sys.platform not in ("win32", "linux"): raise ImportError(...)`）。`proc-tap` 依存も `pyproject.toml` で `sys_platform == 'win32'` に限定。
+
 - **プロセス制御**: `process`（起動/終了/PID 検出）、`steam`（Steam 検出）、`session`（Wayland-native 判定）
-- **ウィンドウ操作**: `window/`（Win32/X11 バックエンドの focus/unfocus/is_foreground）、`geometry`（ウィンドウ矩形取得）
-- **キャプチャ系**: `capture/`（`Capture` + `CaptureLoop`、Win32/X11 バックエンド）、`screenshot`（GUI 自動化向けの 1 ショット取得。`Screenshot.save/load` は file-path / inline base64 の 2 モード対応で YAML を双方向にやり取り可能）
+- **ウィンドウ操作**: `window/`（Windows / Linux バックエンドの focus/unfocus/is_foreground）、`geometry`（ウィンドウ矩形取得）
+- **キャプチャ系**: `capture/`（`Capture` + `CaptureLoop`、Windows / Linux バックエンド）、`screenshot`（GUI 自動化向けの 1 ショット取得。`Screenshot.save/load` は file-path / inline base64 の 2 モード対応で YAML を双方向にやり取り可能）
 - **OCR**: `ocr/`（`OCREngine` ABC + `RapidOCREngine` 実装、`ocr()` で `Screenshot` を入力に取る、`visualize.render` で bbox 重ね描き PNG を生成）
 - **画像検出**: `detect/`（`DetectEngine` ABC + `TemplateDetectEngine`（OpenCV `TM_CCOEFF_NORMED`）実装、`detect()` で `Screenshot` + クエリ画像から座標付き `Detection` 列を返す、`visualize.render` で OCR と同一スキーマの可視化）
-- **入力制御**: `controls/`（VRChat フォーカス保証つきの `keyboard` / `mouse`、`guard`、`errors`）、`clipboard`（pyperclip + Ctrl+V で scancode keyboard の非 ASCII 制限を回避）
+- **入力制御**: `controls/`（VRChat フォーカス保証つきの `keyboard` / `mouse` サブパッケージ、`guard`、`errors`）、`clipboard`（pyperclip + Ctrl+V で scancode keyboard の非 ASCII 制限を回避）。`controls/keyboard/` と `controls/mouse/` はそれぞれ `{__init__.py, base.py, windows.py, linux.py}` 構造で、`base.py` に platform-agnostic な ABC と enum、`windows.py` / `linux.py` に platform 別バックエンド実装を分離
 - **OSC**: `osc/`（`OscSender` 低レベル送信、`OscController` ボタン / 軸 / typing / chatbox、`OscAvatar` パラメータ送信。CLI 側は `cli/osc.py` で `send` / `axis` / `tap` / `hold` / `chatbox` / `typing` / `avatar` の 7 アクション）
-- **音声系 (出力キャプチャ)**: `speaker/`（`Speaker` + `SpeakerLoop`。Linux はネイティブ PipeWire パイプライン（`pw-link` + `pw-record` + `pulsectl` 制御平面）、Windows / macOS は `proc-tap` プロセスループバックで、いずれも VRChat.exe からのみ音声を抽出する Python API。Windows / Linux は stable、macOS は experimental）
-- **音声系 (仮想マイク入力)**: `mic/`（`Mic` を `soundcard` バックエンドで開き、Windows は VB-Audio Virtual Cable、Linux は `mic/linux.py` 経由で PipeWire `VRCPilotMic` 仮想 sink を登録・管理。Linux 限定の `linux.py` を持つ）
-- **CLI フロントエンド**: `cli/` 配下にサブコマンド毎 1 ファイル（`launch` / `pid` / `terminate` / `focus` / `unfocus` / `screenshot` / `record` / `mouse` / `keyboard` / `paste` / `ocr` / `detect` / `osc` / `mic` / `linux-mic`）、ディスパッチは `cli/__init__.py` の `build_parser` / `main`、共有ヘルパは `cli/_common.py`（`add_screenshot_input_arg` / `resolve_screenshot` で `--screenshot` ↔ stdin pipe の入力解決を集約）
+- **音声系 (出力キャプチャ)**: `speaker/`（`Speaker` + `SpeakerLoop`。Linux は PipeWire ネイティブバックエンド (`speaker/linux.py`)、Windows は `proc-tap` 経由のプロセス単位ループバックバックエンド (`speaker/windows.py`)。`speaker/session.py` の `_select_speaker_backend` で 2 択にディスパッチ、Windows / Linux 以外は `NotImplementedError`。いずれも VRChat.exe からのみ音声を抽出する Python API）
+- **音声系 (仮想マイク入力)**: `mic/`（`Mic` を `soundcard` バックエンドで開き、Windows は VB-Audio Virtual Cable、Linux は `mic/linux.py` 経由で PipeWire `VRCPilotMic` 仮想 sink を登録・管理）
+- **CLI フロントエンド**: `cli/` 配下にサブコマンド毎 1 ファイル（`launch` / `pid` / `terminate` / `focus` / `unfocus` / `screenshot` / `record` / `mic` / `mouse` / `keyboard` / `paste` / `ocr` / `detect` / `osc`）、ディスパッチは `cli/__init__.py` の `build_parser` / `main`、共有ヘルパは `cli/_common.py`（`add_screenshot_input_arg` / `resolve_screenshot` で `--screenshot` ↔ stdin pipe の入力解決を集約）。Linux 限定の `linux-mic` サブコマンドは `cli/__init__.py` 内で `if sys.platform == "linux":` ブロックで条件付き登録される（Windows では `vrcpilot --help` にも現れない）
 
-プラットフォーム抽象は親 `__init__.py` で `sys.platform` ディスパッチして公開する（`__all__` 経由で公開 API を集約）。プラットフォーム固有の低レベル実装（`steam`, `win32`, `x11`, `capture/{win32,x11}`, `window/{win32,x11}`, `controls/{keyboard,mouse}`, `speaker/{pipewire,proctap}`）は対応モジュールに配置している。`speaker/` は `session.py` から Linux 用 `pipewire.py` と Windows / macOS 用 `proctap.py` を `sys.platform` でディスパッチする。`mic/` は `soundcard` 側で OS 抽象が完結するが、PipeWire 仮想 sink 管理だけは Linux 限定の `mic/linux.py` に切り出している。
+**Platform 別実装ファイルの命名規約**: 該当 platform 専用の低レベル実装は **`windows.py` / `linux.py`** で統一する（旧 `win32.py` / `x11.py` / `proctap.py` / `pipewire.py` は廃止）。各ファイルは冒頭で `if sys.platform != "<plat>": raise ImportError("<module> is <Plat>-only")` の素のガードを持ち、`TYPE_CHECKING` で platform import を回避する技法は使わない。pyright は実行 platform のみで strict が通ればよく、両 platform 解析は試みない。クラス名（`Win32CaptureBackend`, `X11CaptureBackend`, `Win32Keyboard`, `LinuxKeyboard`, `ProcTapSpeakerBackend`, `PipeWireSpeakerBackend` 等）はファイル名のリネームとは独立に保持。dispatch は親 `__init__.py` / `session.py` で `sys.platform` チェック後に lazy import する。
 
 ## ツーリング
 
@@ -83,7 +85,7 @@
 `src/vrcpilot/` 配下のモジュールは **テストの有無** で `_` prefix の有無を決める:
 
 - テストを書かない（真に private な実装）→ ファイル名に `_` prefix を付ける（例: `_session.py`）
-- テストを書く / 書かれている → `_` prefix を **付けない**（例: `steam.py`, `win32.py`, `x11.py`, `capture/sinks.py`）
+- テストを書く / 書かれている → `_` prefix を **付けない**（例: `steam.py`, `windows.py`, `linux.py`, `capture/sinks.py`）
 - 外部公開は親 `__init__.py` の `__all__` で別軸として集約管理する。モジュール名から `_` を外すことと「外部公開」は独立した判断
 
 詳細: [memory/feedback_private_module_convention.md](memory/feedback_private_module_convention.md)

@@ -154,7 +154,7 @@ ______________________________________________________________________
 
 ## record
 
-Record VRChat video and/or audio to a file or stream it to stdout. Video is the VRChat window (focus-free, same backends as [`Capture`](python-api.md#vrcpilotcapture)); audio is VRChat-only — a native PipeWire pipeline on Linux, `proc-tap` process loopback on Windows / macOS — so system audio from other applications is not mixed in.
+Record VRChat video and/or audio to a file or stream it to stdout. Video is the VRChat window (focus-free, same backends as [`Capture`](python-api.md#vrcpilotcapture)); audio is VRChat-only — a native PipeWire pipeline on Linux, `proc-tap` process loopback on Windows — so system audio from other applications is not mixed in.
 
 ```
 vrcpilot record [-o PATH] [--video] [--audio] [--fps FLOAT] [--duration SECONDS]
@@ -197,7 +197,7 @@ Passing an `-o PATH` whose extension does not match the resolved mode exits `2` 
 ### Side effects
 
 - File mode writes an MP4 or WAV to disk; the parent directory must already exist.
-- Acquires the Speaker backend for the host platform (a PipeWire pipeline on Linux, a `proc-tap` process-loopback session on Windows / macOS) against the VRChat PID for the audio-bearing portion of the recording.
+- Acquires the Speaker backend for the host platform (a PipeWire pipeline on Linux, a `proc-tap` process-loopback session on Windows) against the VRChat PID for the audio-bearing portion of the recording.
 
 ______________________________________________________________________
 

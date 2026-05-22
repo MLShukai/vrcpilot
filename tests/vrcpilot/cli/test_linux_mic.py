@@ -4,86 +4,17 @@ The CLI front-end calls into :mod:`vrcpilot.mic.linux` (which raises
 on import outside Linux) and probes ``pulsectl`` / ``soundcard``
 indirectly via :func:`vrcpilot.mic.linux.open_pulse_control` -- the
 same seam ``register`` / ``unregister`` use, so unit tests patch one
-symbol and cover all three code paths. Linux-only behaviour is
-module-skip-gated the same way as ``tests/vrcpilot/mic/test_linux.py``;
-a single ``TestNonLinuxGuard`` class exercises the entry-point guard
-via a local ``sys.platform`` patch -- this is the *CLI entry* guard
-test (not a cross-platform claim about ``vrcpilot.mic.linux`` itself),
-so the broad ``sys.platform`` mocking ban in
-``memory/feedback_test_strategy.md`` does not apply.
+symbol and cover all three code paths. The module raises
+:class:`ImportError` on import when ``sys.platform != "linux"`` (and
+the top-level dispatcher never registers ``linux-mic`` off-Linux), so
+the file is collect-time skipped on non-Linux hosts.
 """
 
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
 import pytest
-from pytest_mock import MockerFixture
-
-from tests.fakes import (
-    FakePulse,
-    FakePulseModuleInfo,
-    FakePulseRegistry,
-    FakeSoundCard,
-)
-from vrcpilot.cli import linux_mic as cli_linux_mic, main
-
-
-class TestNonLinuxGuard:
-    """Entry-point OS guard. Verified on every platform.
-
-    Patching ``sys.platform`` here is intentional: the guard's whole
-    contract is "refuse to act on non-Linux"; testing it requires
-    pretending to be one of those platforms. The ban on broad
-    ``sys.platform`` mocking applies to architectural claims, not to
-    targeted CLI-entry refusals.
-    """
-
-    def test_register_on_non_linux_returns_2(
-        self,
-        mocker: MockerFixture,
-        capsys: pytest.CaptureFixture[str],
-    ) -> None:
-        mocker.patch.object(cli_linux_mic.sys, "platform", "win32")
-
-        exit_code = main(["linux-mic", "register"])
-
-        assert exit_code == 2
-        captured = capsys.readouterr()
-        assert "linux-mic is Linux-only" in captured.err
-        assert captured.out == ""
-
-    def test_unregister_on_non_linux_returns_2(
-        self,
-        mocker: MockerFixture,
-        capsys: pytest.CaptureFixture[str],
-    ) -> None:
-        mocker.patch.object(cli_linux_mic.sys, "platform", "darwin")
-
-        exit_code = main(["linux-mic", "unregister"])
-
-        assert exit_code == 2
-        captured = capsys.readouterr()
-        assert "linux-mic is Linux-only" in captured.err
-
-    def test_status_on_non_linux_returns_2(
-        self,
-        mocker: MockerFixture,
-        capsys: pytest.CaptureFixture[str],
-    ) -> None:
-        mocker.patch.object(cli_linux_mic.sys, "platform", "win32")
-
-        exit_code = main(["linux-mic", "status"])
-
-        assert exit_code == 2
-        captured = capsys.readouterr()
-        assert "linux-mic is Linux-only" in captured.err
-
-
-# ---------------------------------------------------------------------------
-# Linux-only fixtures + tests below.
-# ---------------------------------------------------------------------------
 
 if sys.platform != "linux":
     pytest.skip(
@@ -92,6 +23,17 @@ if sys.platform != "linux":
     )
 
 
+from pathlib import Path  # noqa: E402
+
+from pytest_mock import MockerFixture  # noqa: E402
+
+from tests.fakes import (  # noqa: E402
+    FakePulse,
+    FakePulseModuleInfo,
+    FakePulseRegistry,
+    FakeSoundCard,
+)
+from vrcpilot.cli import main  # noqa: E402
 from vrcpilot.mic import linux as mic_linux  # noqa: E402
 
 

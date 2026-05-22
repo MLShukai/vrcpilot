@@ -157,7 +157,7 @@ class FakeWindowsFrame:
     """Stand-in for ``windows_capture.Frame``.
 
     Only exposes ``frame_buffer`` / ``width`` / ``height`` because
-    those are the sole fields :class:`vrcpilot.capture.win32.Win32CaptureBackend`
+    those are the sole fields :class:`vrcpilot.capture.windows.Win32CaptureBackend`
     reads.
     """
 

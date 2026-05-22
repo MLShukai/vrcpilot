@@ -171,7 +171,7 @@ ______________________________________________________________________
 
 ## Speaker (audio capture)
 
-Process-isolated audio capture for VRChat. On Linux the backend is a native PipeWire pipeline (virtual null-sink + `pw-link` + `pw-record`); on Windows and macOS it is `proc-tap`, a cross-platform native extension that taps a single PID's audio rather than the whole system mix. Either way the stream contains **only VRChat's output** — Discord, OBS, and other applications are not mixed in. Windows / Linux are stable; macOS is experimental.
+Process-isolated audio capture for VRChat. On Linux the backend is a native PipeWire pipeline (virtual null-sink + `pw-link` + `pw-record`); on Windows it is `proc-tap`, a native extension that taps a single PID's audio rather than the whole system mix. Either way the stream contains **only VRChat's output** — Discord, OBS, and other applications are not mixed in. `import vrcpilot` raises `ImportError` on any other `sys.platform`, so no other Speaker backend is reachable.
 
 The backend produces `float32 (N, CHANNELS)` chunks at 48 kHz stereo. The CLI `vrcpilot record` command muxes these via internal PyAV-backed writers (`vrcpilot.cli.record.muxer`, not part of the public surface); to persist audio from your own code, feed the chunks into a writer of your choice — for example PyAV (`WAV`, `MP4`, `MKV`, ...) or a `ffmpeg` subprocess. The `(N, 2) float32` layout maps cleanly onto PyAV's planar/packed float frames.
 
@@ -188,7 +188,7 @@ Context-managed capture session. VRChat must already be running when the constru
 
 **Raises**:
 
-- `RuntimeError` when VRChat is not running or the Speaker backend cannot start (the PipeWire pipeline on Linux, `proc-tap` on Windows / macOS).
+- `RuntimeError` when VRChat is not running or the Speaker backend cannot start (the PipeWire pipeline on Linux, `proc-tap` on Windows).
 - `ValueError` when `read_timeout <= 0`.
 
 ### `vrcpilot.speaker.SpeakerLoop`

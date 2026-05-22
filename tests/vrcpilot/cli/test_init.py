@@ -9,11 +9,14 @@ Covers the dispatcher (:func:`vrcpilot.cli.main`) and the
 from __future__ import annotations
 
 import argparse
+import importlib
+import sys
 
 import pytest
 from argcomplete.completers import FilesCompleter
 from pytest_mock import MockerFixture
 
+import vrcpilot.cli
 from vrcpilot.cli import build_parser, main
 
 
@@ -91,3 +94,30 @@ class TestArgcompleteIntegration:
         assert isinstance(completer, FilesCompleter)
         allowednames = completer.allowednames
         assert any("wav" in name for name in allowednames)
+
+
+class TestLinuxMicRegistration:
+    """``linux-mic`` is conditionally registered only on Linux.
+
+    The dispatcher's ``_COMMANDS`` dict is built at import time, so the
+    test reloads :mod:`vrcpilot.cli` under a patched ``sys.platform``
+    and inspects the rebuilt mapping. The original module is restored
+    at the end so other tests keep operating on the real dispatcher.
+    """
+
+    def test_linux_mic_registered_on_linux(self) -> None:
+        if sys.platform != "linux":
+            pytest.skip("registration is Linux-only")
+        assert "linux-mic" in vrcpilot.cli._COMMANDS  # pyright: ignore[reportPrivateUsage]
+
+    def test_linux_mic_absent_on_non_linux(
+        self,
+        mocker: MockerFixture,
+    ) -> None:
+        mocker.patch.object(sys, "platform", "freebsd")
+        try:
+            reloaded = importlib.reload(vrcpilot.cli)
+            assert "linux-mic" not in reloaded._COMMANDS  # pyright: ignore[reportPrivateUsage]
+        finally:
+            mocker.stopall()
+            importlib.reload(vrcpilot.cli)

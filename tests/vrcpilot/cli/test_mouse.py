@@ -37,9 +37,9 @@ def fake_mouse(mocker: MockerFixture) -> ImplMouse:
     """
     impl = ImplMouse()
     mocker.patch("vrcpilot.controls.mouse._get", return_value=impl)
-    mocker.patch("vrcpilot.controls.mouse.ensure_target", return_value=None)
+    mocker.patch("vrcpilot.controls.mouse.base.ensure_target", return_value=None)
     mocker.patch(
-        "vrcpilot.controls.mouse.get_vrchat_window_rect",
+        "vrcpilot.controls.mouse.base.get_vrchat_window_rect",
         return_value=(0, 0, 1920, 1080),
     )
     return impl
@@ -117,7 +117,7 @@ class TestMouseClick:
     def test_count_and_duration_propagation(
         self, fake_mouse: ImplMouse, mocker: MockerFixture
     ):
-        sleep_spy = mocker.patch("vrcpilot.controls.mouse.time.sleep")
+        sleep_spy = mocker.patch("vrcpilot.controls.mouse.base.time.sleep")
 
         exit_code = main(
             ["mouse", "click", "right", "--count", "3", "--duration", "0.05"]
@@ -160,7 +160,7 @@ class TestMouseClick:
     def test_click_three_buttons_with_count_and_duration(
         self, fake_mouse: ImplMouse, mocker: MockerFixture
     ):
-        sleep_spy = mocker.patch("vrcpilot.controls.mouse.time.sleep")
+        sleep_spy = mocker.patch("vrcpilot.controls.mouse.base.time.sleep")
 
         exit_code = main(
             [
@@ -225,7 +225,7 @@ class TestMouseGuardErrors:
     ):
         del fake_mouse  # fixture wires the impl, but the guard fires first
         mocker.patch(
-            "vrcpilot.controls.mouse.ensure_target",
+            "vrcpilot.controls.mouse.base.ensure_target",
             side_effect=VRChatNotRunningError("VRChat is not running"),
         )
 
@@ -245,7 +245,7 @@ class TestMouseGuardErrors:
     ):
         del fake_mouse
         mocker.patch(
-            "vrcpilot.controls.mouse.ensure_target",
+            "vrcpilot.controls.mouse.base.ensure_target",
             side_effect=VRChatNotFocusedError("VRChat is not focused"),
         )
 

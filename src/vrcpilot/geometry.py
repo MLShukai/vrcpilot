@@ -15,7 +15,7 @@ if sys.platform == "win32":
 
     def _get_vrchat_rect_win32() -> tuple[int, int, int, int] | None:
         """Win32 path: ``find_pid`` -> ``find_vrchat_hwnd`` -> ``get_window_rect``."""
-        from vrcpilot.win32 import find_vrchat_hwnd, get_window_rect
+        from vrcpilot.windows import find_vrchat_hwnd, get_window_rect
 
         pid = find_pid()
         if pid is None:
@@ -30,7 +30,7 @@ if sys.platform == "linux":
 
     def _get_vrchat_rect_x11() -> tuple[int, int, int, int] | None:
         """X11 path: open display, locate the VRChat window, query geometry."""
-        from vrcpilot.x11 import find_vrchat_window, get_window_rect, open_x11_display
+        from vrcpilot.linux import find_vrchat_window, get_window_rect, open_x11_display
 
         pid = find_pid()
         if pid is None:

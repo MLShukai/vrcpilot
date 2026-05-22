@@ -40,7 +40,7 @@ dependencies = [
     "numpy>=2.1",
     "opencv-python>=4.10",
     "pillow>=12.2.0",
-    "proc-tap>=1.0.3",
+    "proc-tap>=1.0.3 ; sys_platform == 'win32'",
     "psutil>=7.2.2",
     "pydirectinput>=1.0.4 ; sys_platform == 'win32'",
     "pulsectl>=24.12.0 ; sys_platform == 'linux'",

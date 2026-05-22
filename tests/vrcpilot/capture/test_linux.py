@@ -1,4 +1,4 @@
-"""Tests for :mod:`vrcpilot.capture.x11`.
+"""Tests for :mod:`vrcpilot.capture.linux`.
 
 The module raises ``ImportError`` on non-Linux because it depends on
 ``Xlib``, so a module-level skip up front gates the rest of the file.
@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from pytest_mock import MockerFixture
 
 from tests.fakes import FakeXDisplay, FakeXWindow, make_xerror_subclass
-from vrcpilot.capture.x11 import X11CaptureBackend
+from vrcpilot.capture.linux import X11CaptureBackend
 
 
 @dataclass
@@ -51,9 +51,9 @@ def x11_chain(mocker: MockerFixture, monkeypatch: pytest.MonkeyPatch) -> _X11Cha
     monkeypatch.setenv("DISPLAY", ":0")
     fake_display = FakeXDisplay()
     fake_window = FakeXWindow()
-    mocker.patch("vrcpilot.capture.x11.find_pid", return_value=4242)
-    mocker.patch("vrcpilot.capture.x11.open_x11_display", return_value=fake_display)
-    mocker.patch("vrcpilot.capture.x11.find_vrchat_window", return_value=fake_window)
+    mocker.patch("vrcpilot.capture.linux.find_pid", return_value=4242)
+    mocker.patch("vrcpilot.capture.linux.open_x11_display", return_value=fake_display)
+    mocker.patch("vrcpilot.capture.linux.find_vrchat_window", return_value=fake_window)
     return _X11Chain(display=fake_display, window=fake_window)
 
 
@@ -83,8 +83,8 @@ class TestX11CaptureBackend:
         # the backend converts this to RuntimeError so callers do not
         # need to read the docs of the helper.
         monkeypatch.setenv("DISPLAY", ":0")
-        mocker.patch("vrcpilot.capture.x11.find_pid", return_value=4242)
-        mocker.patch("vrcpilot.capture.x11.open_x11_display", return_value=None)
+        mocker.patch("vrcpilot.capture.linux.find_pid", return_value=4242)
+        mocker.patch("vrcpilot.capture.linux.open_x11_display", return_value=None)
 
         with pytest.raises(RuntimeError, match="X11 display unavailable"):
             X11CaptureBackend()
@@ -94,7 +94,7 @@ class TestX11CaptureBackend:
     ):
         # Override the chain's ``find_vrchat_window`` to None so the
         # close-on-failure path runs.
-        mocker.patch("vrcpilot.capture.x11.find_vrchat_window", return_value=None)
+        mocker.patch("vrcpilot.capture.linux.find_vrchat_window", return_value=None)
 
         with pytest.raises(RuntimeError, match="window is not yet mapped"):
             X11CaptureBackend()
@@ -108,7 +108,7 @@ class TestX11CaptureBackend:
         # close the display so the retry loop above cannot leak.
         xerr_cls = make_xerror_subclass()
         mocker.patch(
-            "vrcpilot.capture.x11.composite.query_version",
+            "vrcpilot.capture.linux.composite.query_version",
             side_effect=xerr_cls(),
         )
 
@@ -122,10 +122,10 @@ class TestX11CaptureBackend:
         # ``redirect_window`` may raise on locked-down servers (XACE,
         # nested Xephyr, etc.). Same recovery contract: wrap and close
         # the display.
-        mocker.patch("vrcpilot.capture.x11.composite.query_version")
+        mocker.patch("vrcpilot.capture.linux.composite.query_version")
         xerr_cls = make_xerror_subclass()
         mocker.patch(
-            "vrcpilot.capture.x11.composite.redirect_window",
+            "vrcpilot.capture.linux.composite.redirect_window",
             side_effect=xerr_cls(),
         )
 

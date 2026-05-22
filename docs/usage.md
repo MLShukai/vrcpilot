@@ -171,7 +171,7 @@ vrcpilot record -o /tmp/vrc.mp4 --duration 10
 # Video only
 vrcpilot record --video -o /tmp/vrc_video.mp4 --duration 10
 
-# Audio only (VRChat-only — native PipeWire on Linux, proc-tap on Windows / macOS; no system audio either way)
+# Audio only (VRChat-only — native PipeWire on Linux, proc-tap on Windows; no system audio either way)
 vrcpilot record --audio -o /tmp/vrc_audio.wav --duration 10
 
 # Stream MKV to ffmpeg for re-encoding without temp files

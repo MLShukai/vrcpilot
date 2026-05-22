@@ -1,4 +1,4 @@
-"""Tests for :mod:`vrcpilot.window.x11`.
+"""Tests for :mod:`vrcpilot.window.linux`.
 
 The module under test raises ``ImportError`` on non-Linux platforms,
 and the real connection paths require a reachable X server. Two
@@ -37,7 +37,7 @@ from tests.fakes import (
     fake_x11_display_cm,
     make_xerror_subclass,
 )
-from vrcpilot.window.x11 import focus_window, is_window_foreground, unfocus_window
+from vrcpilot.window.linux import focus_window, is_window_foreground, unfocus_window
 
 
 class TestFocusWindow:
@@ -79,13 +79,13 @@ class TestUnfocusWindow:
         # (the lookup is short-circuited by patching
         # ``find_vrchat_window``).
         xerror_cls = make_xerror_subclass()
-        mocker.patch("vrcpilot.window.x11.find_pid", return_value=4242)
+        mocker.patch("vrcpilot.window.linux.find_pid", return_value=4242)
         mocker.patch(
-            "vrcpilot.window.x11.x11_display",
+            "vrcpilot.window.linux.x11_display",
             return_value=fake_x11_display_cm(FakeXDisplay()),
         )
         mocker.patch(
-            "vrcpilot.window.x11.find_vrchat_window",
+            "vrcpilot.window.linux.find_vrchat_window",
             return_value=FakeXWindow(raises=xerror_cls()),
         )
 
@@ -117,13 +117,13 @@ class TestIsWindowForeground:
         root_window = FakeXWindow(wid=1, raises=xerror_cls())
         display = FakeXDisplay(root=root_window)
 
-        mocker.patch("vrcpilot.window.x11.find_pid", return_value=4242)
+        mocker.patch("vrcpilot.window.linux.find_pid", return_value=4242)
         mocker.patch(
-            "vrcpilot.window.x11.x11_display",
+            "vrcpilot.window.linux.x11_display",
             return_value=fake_x11_display_cm(display),
         )
         mocker.patch(
-            "vrcpilot.window.x11.find_vrchat_window",
+            "vrcpilot.window.linux.find_vrchat_window",
             return_value=vrchat_window,
         )
 
@@ -140,13 +140,13 @@ class TestIsWindowForeground:
         )
         display = FakeXDisplay(root=root_window)
 
-        mocker.patch("vrcpilot.window.x11.find_pid", return_value=4242)
+        mocker.patch("vrcpilot.window.linux.find_pid", return_value=4242)
         mocker.patch(
-            "vrcpilot.window.x11.x11_display",
+            "vrcpilot.window.linux.x11_display",
             return_value=fake_x11_display_cm(display),
         )
         mocker.patch(
-            "vrcpilot.window.x11.find_vrchat_window",
+            "vrcpilot.window.linux.find_vrchat_window",
             return_value=vrchat_window,
         )
 
@@ -162,13 +162,13 @@ class TestIsWindowForeground:
         )
         display = FakeXDisplay(root=root_window)
 
-        mocker.patch("vrcpilot.window.x11.find_pid", return_value=4242)
+        mocker.patch("vrcpilot.window.linux.find_pid", return_value=4242)
         mocker.patch(
-            "vrcpilot.window.x11.x11_display",
+            "vrcpilot.window.linux.x11_display",
             return_value=fake_x11_display_cm(display),
         )
         mocker.patch(
-            "vrcpilot.window.x11.find_vrchat_window",
+            "vrcpilot.window.linux.find_vrchat_window",
             return_value=vrchat_window,
         )
 
@@ -182,13 +182,13 @@ class TestIsWindowForeground:
         root_window = FakeXWindow(wid=1, properties={})
         display = FakeXDisplay(root=root_window)
 
-        mocker.patch("vrcpilot.window.x11.find_pid", return_value=4242)
+        mocker.patch("vrcpilot.window.linux.find_pid", return_value=4242)
         mocker.patch(
-            "vrcpilot.window.x11.x11_display",
+            "vrcpilot.window.linux.x11_display",
             return_value=fake_x11_display_cm(display),
         )
         mocker.patch(
-            "vrcpilot.window.x11.find_vrchat_window",
+            "vrcpilot.window.linux.find_vrchat_window",
             return_value=vrchat_window,
         )
 

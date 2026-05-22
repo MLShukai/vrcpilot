@@ -5,10 +5,12 @@ Mirrors the layout of :mod:`tests.vrcpilot.controls.test_mouse`:
 * :class:`Key` enum coverage (cross-platform).
 * :class:`Keyboard` ABC template-method wiring -- runs on every
   platform via :class:`tests.helpers.ImplKeyboard` so the guard
-  plumbing is verified independently of any backend.
+  plumbing is verified independently of any backend. Patches target
+  :mod:`vrcpilot.controls.keyboard.base` because that is where
+  ``ensure_target`` and ``time`` are bound on the production code.
 * ``_INPUTTINO_CODES`` exhaustiveness -- Linux-only because the
-  mapping table is only populated under ``sys.platform == "linux"``.
-* :class:`vrcpilot.controls.keyboard.LinuxKeyboard` -- the
+  mapping table only lives in :mod:`vrcpilot.controls.keyboard.linux`.
+* :class:`vrcpilot.controls.keyboard.linux.LinuxKeyboard` -- the
   inputtino-backed concrete class. Linux-only, with the real
   ``inputtino.Keyboard`` swapped out via ``mocker.patch`` so no
   uinput device is ever opened during testing.
@@ -117,14 +119,14 @@ class TestInputtinoCodes:
     """
 
     def test_mapping_covers_all_keys(self):
-        from vrcpilot.controls.keyboard import _INPUTTINO_CODES
+        from vrcpilot.controls.keyboard.linux import _INPUTTINO_CODES
 
         assert set(_INPUTTINO_CODES.keys()) == set(Key)
 
     def test_mapping_values_are_inputtino_keycodes(self):
         import inputtino
 
-        from vrcpilot.controls.keyboard import _INPUTTINO_CODES
+        from vrcpilot.controls.keyboard.linux import _INPUTTINO_CODES
 
         for member, code in _INPUTTINO_CODES.items():
             assert isinstance(
@@ -154,7 +156,7 @@ class TestInputtinoCodes:
     def test_known_name_translations(self, key_name: str, code_name: str):
         import inputtino
 
-        from vrcpilot.controls.keyboard import _INPUTTINO_CODES
+        from vrcpilot.controls.keyboard.linux import _INPUTTINO_CODES
 
         key = getattr(Key, key_name)
         expected = getattr(inputtino.KeyCode, code_name)
@@ -175,8 +177,8 @@ class TestKeyboardGuardWiring:
     def test_focus_true_calls_ensure_target_for_every_method(
         self, mocker: MockerFixture
     ):
-        guard = mocker.patch("vrcpilot.controls.keyboard.ensure_target")
-        mocker.patch("vrcpilot.controls.keyboard.time.sleep")
+        guard = mocker.patch("vrcpilot.controls.keyboard.base.ensure_target")
+        mocker.patch("vrcpilot.controls.keyboard.base.time.sleep")
         impl = ImplKeyboard()
 
         impl.press(Key.A)
@@ -186,8 +188,8 @@ class TestKeyboardGuardWiring:
         assert guard.call_count == 3
 
     def test_focus_false_skips_ensure_target(self, mocker: MockerFixture):
-        guard = mocker.patch("vrcpilot.controls.keyboard.ensure_target")
-        mocker.patch("vrcpilot.controls.keyboard.time.sleep")
+        guard = mocker.patch("vrcpilot.controls.keyboard.base.ensure_target")
+        mocker.patch("vrcpilot.controls.keyboard.base.time.sleep")
         impl = ImplKeyboard()
 
         impl.press(Key.A, focus=False)
@@ -197,8 +199,8 @@ class TestKeyboardGuardWiring:
         guard.assert_not_called()
 
     def test_press_single_key_decomposes_to_down_sleep_up(self, mocker: MockerFixture):
-        mocker.patch("vrcpilot.controls.keyboard.ensure_target")
-        sleep_spy = mocker.patch("vrcpilot.controls.keyboard.time.sleep")
+        mocker.patch("vrcpilot.controls.keyboard.base.ensure_target")
+        sleep_spy = mocker.patch("vrcpilot.controls.keyboard.base.time.sleep")
         impl = ImplKeyboard()
 
         impl.press(Key.A, duration=0.05)
@@ -210,8 +212,8 @@ class TestKeyboardGuardWiring:
         sleep_spy.assert_called_once_with(0.05)
 
     def test_press_default_duration_is_0_1(self, mocker: MockerFixture):
-        mocker.patch("vrcpilot.controls.keyboard.ensure_target")
-        sleep_spy = mocker.patch("vrcpilot.controls.keyboard.time.sleep")
+        mocker.patch("vrcpilot.controls.keyboard.base.ensure_target")
+        sleep_spy = mocker.patch("vrcpilot.controls.keyboard.base.time.sleep")
         impl = ImplKeyboard()
 
         impl.press(Key.SPACE)
@@ -219,7 +221,7 @@ class TestKeyboardGuardWiring:
         sleep_spy.assert_called_once_with(0.1)
 
     def test_down_up_forward_key(self, mocker: MockerFixture):
-        mocker.patch("vrcpilot.controls.keyboard.ensure_target")
+        mocker.patch("vrcpilot.controls.keyboard.base.ensure_target")
         impl = ImplKeyboard()
 
         impl.down(Key.CTRL_LEFT)
@@ -233,8 +235,8 @@ class TestKeyboardGuardWiring:
     def test_press_combo_runs_down_left_to_right_and_up_reversed(
         self, mocker: MockerFixture
     ):
-        mocker.patch("vrcpilot.controls.keyboard.ensure_target")
-        sleep_spy = mocker.patch("vrcpilot.controls.keyboard.time.sleep")
+        mocker.patch("vrcpilot.controls.keyboard.base.ensure_target")
+        sleep_spy = mocker.patch("vrcpilot.controls.keyboard.base.time.sleep")
         impl = ImplKeyboard()
 
         impl.press(Key.CTRL_LEFT, Key.C, duration=0.05)
@@ -248,7 +250,7 @@ class TestKeyboardGuardWiring:
         sleep_spy.assert_called_once_with(0.05)
 
     def test_down_combo_left_to_right(self, mocker: MockerFixture):
-        mocker.patch("vrcpilot.controls.keyboard.ensure_target")
+        mocker.patch("vrcpilot.controls.keyboard.base.ensure_target")
         impl = ImplKeyboard()
 
         impl.down(Key.CTRL_LEFT, Key.SHIFT_LEFT, Key.A)
@@ -260,7 +262,7 @@ class TestKeyboardGuardWiring:
         ]
 
     def test_up_combo_reversed(self, mocker: MockerFixture):
-        mocker.patch("vrcpilot.controls.keyboard.ensure_target")
+        mocker.patch("vrcpilot.controls.keyboard.base.ensure_target")
         impl = ImplKeyboard()
 
         impl.up(Key.CTRL_LEFT, Key.SHIFT_LEFT, Key.A)
@@ -273,7 +275,7 @@ class TestKeyboardGuardWiring:
         ]
 
     def test_press_with_no_keys_raises_type_error(self, mocker: MockerFixture):
-        mocker.patch("vrcpilot.controls.keyboard.ensure_target")
+        mocker.patch("vrcpilot.controls.keyboard.base.ensure_target")
         impl = ImplKeyboard()
 
         with pytest.raises(TypeError, match="at least one Key"):
@@ -282,7 +284,7 @@ class TestKeyboardGuardWiring:
         assert impl.calls == []
 
     def test_down_with_no_keys_raises_type_error(self, mocker: MockerFixture):
-        mocker.patch("vrcpilot.controls.keyboard.ensure_target")
+        mocker.patch("vrcpilot.controls.keyboard.base.ensure_target")
         impl = ImplKeyboard()
 
         with pytest.raises(TypeError, match="at least one Key"):
@@ -291,7 +293,7 @@ class TestKeyboardGuardWiring:
         assert impl.calls == []
 
     def test_up_with_no_keys_raises_type_error(self, mocker: MockerFixture):
-        mocker.patch("vrcpilot.controls.keyboard.ensure_target")
+        mocker.patch("vrcpilot.controls.keyboard.base.ensure_target")
         impl = ImplKeyboard()
 
         with pytest.raises(TypeError, match="at least one Key"):
@@ -300,8 +302,8 @@ class TestKeyboardGuardWiring:
         assert impl.calls == []
 
     def test_focus_guard_runs_once_per_call_not_per_key(self, mocker: MockerFixture):
-        guard = mocker.patch("vrcpilot.controls.keyboard.ensure_target")
-        mocker.patch("vrcpilot.controls.keyboard.time.sleep")
+        guard = mocker.patch("vrcpilot.controls.keyboard.base.ensure_target")
+        mocker.patch("vrcpilot.controls.keyboard.base.time.sleep")
         impl = ImplKeyboard()
 
         impl.press(Key.A, Key.B, Key.C)
@@ -322,7 +324,9 @@ def fake_inputtino_keyboard(mocker: MockerFixture) -> FakeInputtinoKeyboard:
     tests can read ``.calls`` directly.
     """
     fake = FakeInputtinoKeyboard()
-    mocker.patch("vrcpilot.controls.keyboard.inputtino.Keyboard", return_value=fake)
+    mocker.patch(
+        "vrcpilot.controls.keyboard.linux.inputtino.Keyboard", return_value=fake
+    )
     return fake
 
 
@@ -340,7 +344,7 @@ class TestLinuxKeyboard:
     ):
         import inputtino
 
-        from vrcpilot.controls.keyboard import LinuxKeyboard
+        from vrcpilot.controls.keyboard.linux import LinuxKeyboard
 
         kb = LinuxKeyboard()
         kb._do_down(Key.SHIFT_LEFT)
@@ -354,7 +358,7 @@ class TestLinuxKeyboard:
     ):
         import inputtino
 
-        from vrcpilot.controls.keyboard import LinuxKeyboard
+        from vrcpilot.controls.keyboard.linux import LinuxKeyboard
 
         kb = LinuxKeyboard()
         kb._do_up(Key.CTRL_RIGHT)
@@ -374,10 +378,10 @@ class TestLinuxKeyboard:
         # backend sees only press/release calls.
         import inputtino
 
-        from vrcpilot.controls.keyboard import LinuxKeyboard
+        from vrcpilot.controls.keyboard.linux import LinuxKeyboard
 
-        mocker.patch("vrcpilot.controls.keyboard.ensure_target")
-        mocker.patch("vrcpilot.controls.keyboard.time.sleep")
+        mocker.patch("vrcpilot.controls.keyboard.base.ensure_target")
+        mocker.patch("vrcpilot.controls.keyboard.base.time.sleep")
         kb = LinuxKeyboard()
 
         kb.down(Key.SHIFT_LEFT)
@@ -399,13 +403,16 @@ class TestLinuxKeyboard:
 def fake_pydirectinput(mocker: MockerFixture) -> FakePyDirectInput:
     """Patch the module-level ``pydirectinput`` symbol with a fake.
 
-    Windows-only fixture: substituted via ``mocker.patch.object`` so the
-    fake intercepts the same call sites the production code uses (the
-    ``import pydirectinput`` is wrapped in ``if sys.platform == 'win32'``,
-    so it is only present on Windows runners).
+    Windows-only fixture: ``pydirectinput`` lives on
+    :mod:`vrcpilot.controls.keyboard.windows`, which is only importable
+    when ``sys.platform == 'win32'``. The patch is therefore performed
+    against the Windows backend submodule via ``mocker.patch`` with a
+    dotted string so collection on Linux does not eagerly import it.
     """
+    from vrcpilot.controls.keyboard import windows as keyboard_windows
+
     fake = FakePyDirectInput()
-    mocker.patch.object(keyboard_mod, "pydirectinput", fake)
+    mocker.patch.object(keyboard_windows, "pydirectinput", fake)
     return fake
 
 
@@ -425,7 +432,7 @@ class TestWin32Keyboard:
     def test_do_down_routes_to_key_down(
         self, fake_pydirectinput: FakePyDirectInput, key: Key
     ):
-        from vrcpilot.controls.keyboard import Win32Keyboard
+        from vrcpilot.controls.keyboard.windows import Win32Keyboard
 
         kb = Win32Keyboard()
         kb._do_down(key)
@@ -439,7 +446,7 @@ class TestWin32Keyboard:
     def test_do_up_routes_to_key_up(
         self, fake_pydirectinput: FakePyDirectInput, key: Key
     ):
-        from vrcpilot.controls.keyboard import Win32Keyboard
+        from vrcpilot.controls.keyboard.windows import Win32Keyboard
 
         kb = Win32Keyboard()
         kb._do_up(key)
@@ -454,7 +461,7 @@ class TestWin32Keyboard:
         # Coverage smoke: no Key member should crash the Win32 backend
         # in unit tests. Real pydirectinput KEYBOARD_MAPPING compatibility
         # is verified by the manual smoke / e2e scenario.
-        from vrcpilot.controls.keyboard import Win32Keyboard
+        from vrcpilot.controls.keyboard.windows import Win32Keyboard
 
         kb = Win32Keyboard()
         kb._do_down(key)
@@ -483,9 +490,9 @@ class TestGetLazyInit:
         # Force the "neither linux nor win32" branch by patching the
         # module-level sys.platform reference. Singleton has been
         # cleared by the autouse fixture, so the branch is reached.
-        mocker.patch.object(sys, "platform", "darwin")
+        mocker.patch.object(sys, "platform", "freebsd")
 
-        with pytest.raises(NotImplementedError, match="darwin"):
+        with pytest.raises(NotImplementedError, match="freebsd"):
             keyboard_mod._get()
 
 

@@ -127,6 +127,8 @@
       "Bash(gh auth status:*)",
       "Bash(gh search:*)",
       "Bash(just:*)",
+      "Bash(python:*)",
+      "Bash(python3:*)",
       "Bash(uv pip show:*)",
       "Bash(uv pip list:*)",
       "Bash(uv python:*)",
@@ -160,11 +162,11 @@
       "Bash(tar -tvf:*)",
       "WebSearch",
       "WebFetch",
+      "Bash(git -C:*)",
       "Bash(git cherry-pick *)",
       "Bash(git worktree *)"
     ],
     "deny": [
-      "Bash(git -C:*)",
       "Bash(git reset --hard:*)",
       "Bash(git clean -f:*)",
       "Bash(git push --force:*)",

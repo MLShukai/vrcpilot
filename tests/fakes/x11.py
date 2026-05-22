@@ -178,9 +178,10 @@ class FakeXDisplay:
 def fake_x11_display_cm(
     display: FakeXDisplay | None,
 ) -> Iterator[FakeXDisplay | None]:
-    """Wrap *display* so it satisfies the :func:`vrcpilot.x11.x11_display` API.
+    """Wrap *display* so it satisfies the :func:`vrcpilot.linux.x11_display`
+    API.
 
-    Tests that patch ``vrcpilot.window.x11.x11_display`` must hand back
+    Tests that patch ``vrcpilot.window.linux.x11_display`` must hand back
     a context manager (production uses ``with x11_display() as d:``);
     this helper keeps the wrap one-liner across tests.
     """

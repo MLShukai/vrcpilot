@@ -1,15 +1,13 @@
-"""Cross-platform process-loopback backend backed by ``proc-tap``.
+"""Windows process-loopback backend backed by ``proc-tap``.
 
 ``proc-tap`` is a small Python package that ships a native extension
-per platform and wraps the OS-specific process-loopback API:
+per platform and wraps the OS-specific process-loopback API; on
+Windows it drives ``ActivateAudioInterfaceAsync`` + Process Loopback.
+Linux uses :mod:`vrcpilot.speaker.linux` (native PipeWire) instead, so
+this module is Windows-only.
 
-* Windows: ``ActivateAudioInterfaceAsync`` + Process Loopback (stable)
-* Linux: not used in vrcpilot -- see :mod:`vrcpilot.speaker.pipewire`
-  for the native PipeWire backend.
-* macOS: Core Audio (experimental)
-
-We delegate the OS-specific COM / D-Bus / Core Audio plumbing to
-``proc-tap`` and keep this module to a thin adapter:
+We delegate the OS-specific COM plumbing to ``proc-tap`` and keep this
+module to a thin adapter:
 
 1. Resolve the VRChat PID via :func:`vrcpilot.process.find_pid`.
 2. Construct a ``proctap.ProcessAudioCapture`` and start it.
@@ -24,6 +22,11 @@ don't carry our own resampling or format negotiation.
 """
 
 from __future__ import annotations
+
+import sys
+
+if sys.platform != "win32":
+    raise ImportError("vrcpilot.speaker.windows is Windows-only")
 
 import logging
 import threading
@@ -42,10 +45,10 @@ _logger = logging.getLogger(__name__)
 class ProcTapSpeakerBackend(SpeakerBackend):
     """SpeakerBackend backed by :class:`proctap.ProcessAudioCapture`.
 
-    proc-tap ships native backends for Windows / Linux / macOS so this
-    class itself is platform-neutral; the import-time guard sits on
-    proc-tap (it raises a clear error if it cannot find a backend for
-    the host OS).
+    Windows-only. proc-tap is installed only on Windows (see the
+    ``proc-tap`` environment marker in ``pyproject.toml``); the
+    module-level guard above raises :class:`ImportError` on any other
+    platform so this class is never reached off-Windows.
 
     Args:
         read_timeout: Per-:meth:`read` timeout forwarded to
@@ -93,11 +96,15 @@ class ProcTapSpeakerBackend(SpeakerBackend):
         exposes ``start`` / ``stop`` / ``close`` / ``read(timeout)`` --
         the same surface as :class:`proctap.ProcessAudioCapture`.
         """
+        # ``proc-tap`` is Windows-only (``sys_platform == 'win32'`` in
+        # pyproject.toml). This module's top-of-file guard makes the body
+        # unreachable for pyright on Linux, so only the stub ignore is
+        # needed for the upstream ``proc-tap`` package.
         from proctap import (  # pyright: ignore[reportMissingTypeStubs]
             ProcessAudioCapture,
         )
 
-        return ProcessAudioCapture(pid=pid)  # pyright: ignore[reportUnknownVariableType]
+        return ProcessAudioCapture(pid=pid)
 
     @override
     def read(self) -> NDArray[np.float32]:
