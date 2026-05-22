@@ -34,6 +34,7 @@ classifiers = [
 ]
 dependencies = [
     "argcomplete>=3.5,<4",
+    "av>=12,<16",
     "inputtino-python; sys_platform == 'linux'",
     "mss>=10.2.0",
     "numpy>=2.1",
