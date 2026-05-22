@@ -43,23 +43,24 @@ class Mouse(ABC):
     ) -> None:
         """Move the cursor.
 
-        With ``relative=False`` (default), ``(x, y)`` are interpreted as
-        VRChat window-local pixels: ``(0, 0)`` is the top-left of the
-        VRChat window. The values are translated to desktop-absolute
-        coordinates via :meth:`_to_desktop` before reaching the backend.
+        With ``relative=False`` (default), ``(x, y)`` are VRChat
+        window-local pixels: ``(0, 0)`` is the top-left of the VRChat
+        window. This lets coordinates from
+        :func:`vrcpilot.ocr.ocr` / :func:`vrcpilot.detect.detect` feed
+        straight in without translation.
 
-        With ``relative=True``, ``(x, y)`` are mouse deltas (relative
-        movement) and are passed through to the backend unchanged.
+        With ``relative=True``, ``(x, y)`` are mouse deltas and the
+        VRChat window is not consulted.
 
-        Out-of-window coordinates (negative or beyond the window size)
-        are intentionally not rejected: the desktop-absolute value is
-        forwarded to the OS as-is, matching the previous
-        desktop-absolute semantics for points outside any monitor.
+        Out-of-window coordinates are forwarded to the OS as-is rather
+        than clamped — callers driving drag gestures or off-screen
+        parking rely on that pass-through.
 
         Raises:
             VRChatNotRunningError: ``relative=False`` and the VRChat
                 window cannot be located, so window-local coordinates
-                cannot be resolved.
+                cannot be resolved. ``focus=False`` does not suppress
+                this — the lookup is required to interpret ``(x, y)``.
         """
         if focus:
             ensure_target()
@@ -72,12 +73,9 @@ class Mouse(ABC):
     def _to_desktop(self, x: int, y: int) -> tuple[int, int]:
         """Translate VRChat window-local ``(x, y)`` to desktop pixels.
 
-        Looks up the current VRChat window rectangle via
-        :func:`vrcpilot.geometry.get_vrchat_window_rect` and returns
-        ``(x + wx, y + wy)`` where ``(wx, wy)`` is the window origin.
-
-        Raises:
-            VRChatNotRunningError: The VRChat window cannot be located.
+        Raises :class:`VRChatNotRunningError` when the VRChat window
+        cannot be located, since the translation has no defined answer
+        without a window origin.
         """
         rect = get_vrchat_window_rect()
         if rect is None:

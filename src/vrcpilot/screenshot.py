@@ -41,8 +41,11 @@ class Screenshot:
 
     Attributes:
         image: ``(H, W, 3)`` ``uint8`` ndarray in RGB. Detached copy.
-        x, y: Window-frame top-left in absolute desktop pixels. May be
-            negative on multi-monitor layouts.
+        x, y: Window-frame top-left in absolute desktop pixels at
+            capture time. Informational only — :func:`mouse.move`
+            takes window-local coordinates so callers no longer need
+            to add these offsets. May be negative on multi-monitor
+            layouts.
         width, height: Window-frame size in physical pixels.
         monitor_index: Index into ``mss.MSS().monitors`` (``0`` is the
             composite, ``1..N`` are individual monitors). Falls back to

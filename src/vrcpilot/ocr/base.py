@@ -1,10 +1,10 @@
 """OCR engine abstract base class and the :class:`OCRWord` value type.
 
 All coordinates handled here are *image-local* — the origin is the
-top-left of the captured image, not the desktop. Callers that need
-desktop-absolute coordinates compose them from the engine output and
-the originating :class:`~vrcpilot.screenshot.Screenshot`'s
-``x`` / ``y`` offsets.
+top-left of the captured image. For VRChat window screenshots this
+coincides with the window-local frame used by
+:func:`vrcpilot.controls.mouse.move`, so the values are click-ready
+without translation.
 """
 
 from __future__ import annotations

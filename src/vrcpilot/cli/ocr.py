@@ -1,9 +1,9 @@
 """``vrcpilot ocr`` subcommand.
 
-Runs OCR against the current VRChat window and dumps a YAML document on
-stdout that ties each recognised word back to both image-local and
-desktop-absolute coordinates. Optionally also writes an annotated PNG
-visualization for human review.
+Runs OCR against a VRChat window screenshot and dumps a YAML document on
+stdout. Word coordinates are window-local (origin = window top-left)
+so the values feed straight into ``vrcpilot mouse move``. Optionally
+also writes an annotated PNG visualization for human review.
 
 YAML schema (stable, ``sort_keys=False`` so the order is fixed):
 

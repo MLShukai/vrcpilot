@@ -29,9 +29,9 @@ class DetectResult:
     do not mutate it).
 
     Attributes:
-        screenshot: Source screenshot. Its ``x`` / ``y`` record the
-            desktop offset at capture time for callers that need to
-            translate detections themselves.
+        screenshot: Source screenshot. When the screenshot is a VRChat
+            window grab, ``detections`` are also VRChat window-local
+            and feed straight into :func:`mouse.move`.
         query: ``(h, w, 3)`` uint8 RGB query passed to the engine.
         detections: Detections in image-local coordinates.
     """

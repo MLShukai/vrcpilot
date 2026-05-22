@@ -84,9 +84,8 @@ def ocr(
     Args:
         screenshot: Image to recognise. ``screenshot.image`` is fed
             to the engine and the :class:`Screenshot` is preserved on
-            the returned :class:`OCRResult` so callers retain access
-            to ``screenshot.x`` / ``y`` (window-on-desktop offsets)
-            when they need them.
+            the returned :class:`OCRResult` so callers retain the
+            capture metadata (``captured_at``, ``x`` / ``y`` offsets).
         engine: OCR backend. ``None`` (default) lazily builds and
             caches a :class:`RapidOCREngine` via
             :func:`_get_default_engine`.

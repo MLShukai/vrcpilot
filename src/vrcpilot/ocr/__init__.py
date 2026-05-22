@@ -3,9 +3,10 @@
 Public surface:
 
 * :class:`OCREngine` — swappable backend ABC.
-* :class:`OCRWord` — single-detection value type (image-local).
-* :class:`OCRResult` — screenshot + word tuple, with helpers that
-  shift coordinates to desktop-absolute space.
+* :class:`OCRWord` — single-detection value type. Coordinates are
+  window-local (origin = screenshot top-left), so callers can pass
+  them straight to :func:`vrcpilot.controls.mouse.move`.
+* :class:`OCRResult` — screenshot + word tuple.
 * :class:`RapidOCREngine` — default rapidocr-backed engine.
 * :func:`ocr` — runs an :class:`OCREngine` on a captured
   :class:`Screenshot` and bundles the words with it.
