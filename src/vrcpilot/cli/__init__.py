@@ -11,6 +11,7 @@ the ``vrcpilot`` console script and ``python -m vrcpilot``.
 from __future__ import annotations
 
 import argparse
+import sys
 from importlib import metadata
 
 import argcomplete
@@ -20,7 +21,6 @@ from . import (
     focus,
     keyboard,
     launch,
-    linux_mic,
     mic,
     mouse,
     ocr,
@@ -42,7 +42,6 @@ _COMMANDS = {
     "screenshot": screenshot,
     "record": record,
     "mic": mic,
-    "linux-mic": linux_mic,
     "mouse": mouse,
     "keyboard": keyboard,
     "paste": paste,
@@ -50,6 +49,11 @@ _COMMANDS = {
     "osc": osc,
     "detect": detect,
 }
+
+if sys.platform == "linux":
+    from . import linux_mic
+
+    _COMMANDS["linux-mic"] = linux_mic
 
 
 def build_parser() -> argparse.ArgumentParser:
