@@ -62,7 +62,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
-from typing import BinaryIO, Self
+from typing import Any, BinaryIO, Self
 
 import numpy as np
 from numpy.typing import NDArray
@@ -671,3 +671,56 @@ class FakeRawPcmStdoutSink:
     ) -> None:
         del exc_type, exc_val, exc_tb
         self.close()
+
+
+class FakeSoundDevice:
+    """Module-shaped stand-in for the ``sounddevice`` package.
+
+    Tests install an instance via ``mocker.patch.dict(sys.modules,
+    {"sounddevice": fake})`` so the lazy ``import sounddevice as sd``
+    inside :mod:`vrcpilot.mic.devices` resolves to this fake instead of
+    the real PortAudio binding. Only the surface the mic module
+    actually touches is modelled here; widen the stand-in when new
+    sounddevice calls are added in production.
+
+    Currently models:
+
+    * :meth:`query_devices` -- backs
+      :func:`vrcpilot.mic.devices.lookup_output_device`.
+    """
+
+    def __init__(self) -> None:
+        self.devices: list[dict[str, Any]] = []
+
+    def add_output_device(self, name: str, *, max_output_channels: int = 2) -> None:
+        """Register an output-capable device.
+
+        ``query_devices`` returns the registered entries in insertion
+        order; the index a test passes to assertions matches the order
+        of :meth:`add_output_device` / :meth:`add_input_device` calls.
+        """
+        self.devices.append(
+            {
+                "name": name,
+                "max_output_channels": max_output_channels,
+                "max_input_channels": 0,
+            }
+        )
+
+    def add_input_device(self, name: str, *, max_input_channels: int = 2) -> None:
+        """Register an input-only device (``max_output_channels=0``).
+
+        Useful for asserting that output-device lookup skips input-only
+        entries that happen to share a substring with the search needle.
+        """
+        self.devices.append(
+            {
+                "name": name,
+                "max_input_channels": max_input_channels,
+                "max_output_channels": 0,
+            }
+        )
+
+    def query_devices(self) -> list[dict[str, Any]]:
+        """Return a shallow copy of the registered device list."""
+        return list(self.devices)
