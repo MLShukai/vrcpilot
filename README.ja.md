@@ -176,7 +176,9 @@ import vrcpilot
 def tts_chunks():  # float32 NDArray の iterable。(N,) は mono、(N, C) は C ch
     yield np.zeros(48000, dtype=np.float32)  # 1 秒分の無音をプレースホルダとして yield
 
-vrcpilot.Mic().play(tts_chunks(), sample_rate=48000)
+with vrcpilot.Mic(sample_rate=48000, channels=1) as mic:
+    for chunk in tts_chunks():
+        mic.play(chunk)
 ```
 
 ## CLI サブコマンド一覧

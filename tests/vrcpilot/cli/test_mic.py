@@ -30,8 +30,8 @@ def _reset_fake_mic_instances() -> None:
 def fake_mic(mocker: MockerFixture) -> type[FakeMic]:
     """Patch ``vrcpilot.cli.mic.Mic`` to the canonical fake.
 
-    Tests assert against ``FakeMic.instances`` to inspect played chunks
-    and the device argument the CLI forwarded.
+    Tests assert against ``FakeMic.instances`` to inspect played chunks,
+    the device argument, sample rate, channels, and close lifecycle.
     """
     mocker.patch("vrcpilot.cli.mic.Mic", FakeMic)
     return FakeMic
@@ -79,7 +79,6 @@ class TestArgParsing:
         capsys: pytest.CaptureFixture[str],
     ):
         del fake_mic
-        # Simulate an interactive stdin so the default ``-i -`` is refused.
         mocker.patch("vrcpilot.cli.mic.sys.stdin", new=_FakeStdin(b"", isatty=True))
 
         exit_code = main(["mic"])
@@ -126,13 +125,14 @@ class TestWavFileInput:
 
         assert exit_code == 0
         assert len(fake_mic.instances) == 1
-        chunks, sample_rate = fake_mic.instances[0].played[0]
-        assert sample_rate == 24000
-        assert len(chunks) == 1
-        chunk = chunks[0]
+        mic = fake_mic.instances[0]
+        assert mic.sample_rate == 24000
+        assert mic.channels == 2
+        assert mic.closed is True
+        assert len(mic.played) == 1
+        chunk = mic.played[0]
         assert chunk.dtype == np.float32
         assert chunk.shape == (2, 2)
-        # Values are int16 -> float32 / 32768.0.
         assert chunk[0, 1] == pytest.approx(1000 / 32768.0)
         assert chunk[1, 0] == pytest.approx(-1000 / 32768.0)
 
@@ -148,10 +148,11 @@ class TestWavFileInput:
         exit_code = main(["mic", "-i", str(wav_path)])
 
         assert exit_code == 0
-        chunks, sample_rate = fake_mic.instances[0].played[0]
-        assert sample_rate == 16000
-        chunk = chunks[0]
-        # Mono WAV must arrive as a flat (N,) array so Mic.play infers 1 channel.
+        mic = fake_mic.instances[0]
+        assert mic.sample_rate == 16000
+        assert mic.channels == 1
+        chunk = mic.played[0]
+        # Mono WAV must arrive as a flat (N,) array so Mic infers 1 channel.
         assert chunk.ndim == 1
         assert chunk.shape == (4,)
 
@@ -170,7 +171,7 @@ class TestWavFileInput:
         exit_code = main(["mic", "-i", str(wav_path)])
 
         assert exit_code == 0
-        chunk = fake_mic.instances[0].played[0][0][0]
+        chunk = fake_mic.instances[0].played[0]
         # int16 min divided by 32768.0 is exactly -1.0 in float32.
         assert chunk[0, 0] == np.float32(-1.0)
         # Positive max is asymmetric (32767/32768) so it sits just below 1.
@@ -202,7 +203,6 @@ class TestWavFileInput:
         fake_mic: type[FakeMic],
         tmp_path: Path,
     ):
-        # --format wav overrides extension sniffing.
         samples = np.array([[0, 0]], dtype=np.int16)
         path = tmp_path / "audio.bin"
         _write_wav(path, samples, channels=2, rate=48000)
@@ -210,9 +210,9 @@ class TestWavFileInput:
         exit_code = main(["mic", "-i", str(path), "--format", "wav"])
 
         assert exit_code == 0
-        chunks, rate = fake_mic.instances[0].played[0]
-        assert rate == 48000
-        assert chunks[0].shape == (1, 2)
+        mic = fake_mic.instances[0]
+        assert mic.sample_rate == 48000
+        assert mic.played[0].shape == (1, 2)
 
 
 class TestRawFileInput:
@@ -245,14 +245,15 @@ class TestRawFileInput:
         )
 
         assert exit_code == 0
-        chunks, rate = fake_mic.instances[0].played[0]
-        assert rate == 48000
+        mic = fake_mic.instances[0]
+        assert mic.sample_rate == 48000
+        assert mic.channels == 2
         # 480 frames split into 240-frame chunks → 2 yields.
-        assert len(chunks) == 2
-        assert chunks[0].shape == (240, 2)
-        assert chunks[1].shape == (240, 2)
+        assert len(mic.played) == 2
+        assert mic.played[0].shape == (240, 2)
+        assert mic.played[1].shape == (240, 2)
         # Concatenating should reproduce the original int16 payload.
-        joined = np.concatenate(chunks, axis=0)
+        joined = np.concatenate(mic.played, axis=0)
         np.testing.assert_allclose(joined, samples.astype(np.float32) / 32768.0)
 
     def test_s16le_mono_file(
@@ -281,10 +282,11 @@ class TestRawFileInput:
         )
 
         assert exit_code == 0
-        chunks, rate = fake_mic.instances[0].played[0]
-        assert rate == 16000
-        # Mono raw stays 1-D so Mic.play infers mono.
-        assert chunks[0].ndim == 1
+        mic = fake_mic.instances[0]
+        assert mic.sample_rate == 16000
+        assert mic.channels == 1
+        # Mono raw stays 1-D so Mic infers mono.
+        assert mic.played[0].ndim == 1
 
     def test_missing_file_returns_1(
         self,
@@ -298,8 +300,6 @@ class TestRawFileInput:
 
         assert exit_code == 1
         captured = capsys.readouterr()
-        # Either FileNotFoundError or wave.Error message -- both
-        # funnel through the ``vrcpilot:`` prefix.
         assert "vrcpilot:" in captured.err
         assert fake_mic.instances == [] or fake_mic.instances[0].played == []
 
@@ -310,7 +310,7 @@ class TestStdinInput:
         fake_mic: type[FakeMic],
         mocker: MockerFixture,
     ):
-        # 96 stereo frames = 1 ms @ 48000; chunk-ms 1 → 1 chunk of 48 frames.
+        # 48 stereo frames = 1 ms @ 48000; chunk-ms 1 → 1 chunk of 48 frames.
         frame_count = 48
         samples = np.arange(frame_count * 2, dtype=np.int16).reshape(-1, 2)
         mocker.patch(
@@ -323,9 +323,9 @@ class TestStdinInput:
         )
 
         assert exit_code == 0
-        chunks, rate = fake_mic.instances[0].played[0]
-        assert rate == 48000
-        joined = np.concatenate(chunks, axis=0)
+        mic = fake_mic.instances[0]
+        assert mic.sample_rate == 48000
+        joined = np.concatenate(mic.played, axis=0)
         assert joined.shape == (48, 2)
 
     def test_stdin_wav_decoded(
@@ -344,10 +344,10 @@ class TestStdinInput:
         exit_code = main(["mic", "--format", "wav"])
 
         assert exit_code == 0
-        chunks, rate = fake_mic.instances[0].played[0]
+        mic = fake_mic.instances[0]
         # WAV ignores --rate; framerate comes from the header.
-        assert rate == 22050
-        assert chunks[0].shape == (2, 2)
+        assert mic.sample_rate == 22050
+        assert mic.played[0].shape == (2, 2)
 
 
 class TestDeviceArgument:
@@ -384,8 +384,13 @@ class TestErrorPaths:
         tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ):
-        # Patch Mic itself to raise the lookup error on construction.
-        def _boom(_device: str | None = None) -> object:
+        def _boom(
+            device: str | None = None,
+            *,
+            sample_rate: int = 48000,
+            channels: int = 1,
+        ) -> object:
+            del device, sample_rate, channels
             raise MicDeviceNotFoundError("no output device matches 'fake'")
 
         mocker.patch("vrcpilot.cli.mic.Mic", _boom)
@@ -404,7 +409,13 @@ class TestErrorPaths:
         tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ):
-        def _boom(_device: str | None = None) -> object:
+        def _boom(
+            device: str | None = None,
+            *,
+            sample_rate: int = 48000,
+            channels: int = 1,
+        ) -> object:
+            del device, sample_rate, channels
             raise ImportError("sounddevice is not installed")
 
         mocker.patch("vrcpilot.cli.mic.Mic", _boom)
@@ -428,20 +439,30 @@ class TestErrorPaths:
         class PortAudioError(Exception):
             pass
 
-        class _BoomMic:
-            def __init__(self, _device: str | None = None) -> None:
-                pass
-
-            def play(
+        class _PaBoomMic:
+            def __init__(
                 self,
-                stream: object,
+                device: str | None = None,
                 *,
                 sample_rate: int = 48000,
+                channels: int = 1,
             ) -> None:
-                del stream, sample_rate
+                del device, sample_rate, channels
+
+            def __enter__(self) -> _PaBoomMic:
+                return self
+
+            def __exit__(self, *_exc: object) -> None:
+                pass
+
+            def play(self, chunk: object) -> None:
+                del chunk
                 raise PortAudioError("device unavailable")
 
-        mocker.patch("vrcpilot.cli.mic.Mic", _BoomMic)
+            def close(self) -> None:
+                pass
+
+        mocker.patch("vrcpilot.cli.mic.Mic", _PaBoomMic)
         wav_path = tmp_path / "x.wav"
         _write_wav(wav_path, np.zeros((1, 2), dtype=np.int16), channels=2, rate=48000)
 

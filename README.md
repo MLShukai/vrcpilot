@@ -173,10 +173,12 @@ Stream audio chunks (e.g. from an LLM agent's TTS) into VRChat's mic:
 import numpy as np
 import vrcpilot
 
-def tts_chunks():  # any iterable of float32 NDArray; (N,) mono or (N, C)
+def tts_chunks():  # yield float32 NDArray chunks; (N,) mono or (N, C) multi-channel
     yield np.zeros(48000, dtype=np.float32)  # 1s of silence as a placeholder
 
-vrcpilot.Mic().play(tts_chunks(), sample_rate=48000)
+with vrcpilot.Mic(sample_rate=48000, channels=1) as mic:
+    for chunk in tts_chunks():
+        mic.play(chunk)
 ```
 
 ## CLI Subcommands

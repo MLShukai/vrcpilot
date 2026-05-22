@@ -69,9 +69,9 @@ _PLAYBACK_NAME = "CABLE Input"
 _RECORD_NAME = "CABLE Output"
 
 #: Sample rate / channel count for the loopback. 48 kHz matches the
-#: project's pinned :data:`vrcpilot.mic.SAMPLE_RATE`; stereo is the
-#: shape ``Mic.play`` infers from the generator's first ``(N, 2)``
-#: chunk so the playback stream opens in stereo too.
+#: project's pinned :data:`vrcpilot.mic.SAMPLE_RATE`. Stereo is passed
+#: explicitly to ``Mic(..., channels=_CHANNELS)`` so the playback
+#: stream opens in stereo at construction time.
 _SAMPLE_RATE = 48000
 _CHANNELS = 2
 
@@ -311,7 +311,13 @@ def _scenario() -> str | None:
         # of recorded zeros before the tone arrives.
         time.sleep(_RECORD_LEAD_IN_SECONDS)
         _helpers.log(f"playing {_TONE_SECONDS:.2f}s of {_FREQUENCY_HZ:.0f} Hz sine")
-        Mic(_PLAYBACK_NAME).play(_sine_chunks(), sample_rate=_SAMPLE_RATE)
+        with Mic(
+            _PLAYBACK_NAME,
+            sample_rate=_SAMPLE_RATE,
+            channels=_CHANNELS,
+        ) as mic:
+            for chunk in _sine_chunks():
+                mic.play(chunk)
         # Trail-out so the InputStream captures any tail latency.
         time.sleep(_RECORD_TAIL_SECONDS)
         recording = recorder.collected()

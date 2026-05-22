@@ -187,7 +187,7 @@ vrcpilot record -o - --duration 3 | vrcpilot mic --format s16le --channels 2
 
 ### Stream from an LLM agent
 
-Drive `Mic.play` from a generator that yields TTS chunks as they arrive. The session resolves the output device once in the constructor; reuse the `Mic` instance for the lifetime of the agent.
+Open a `Mic` once and pump one chunk per `play()` call as the agent produces them. The session keeps a `sounddevice.OutputStream` alive for the duration of the `with` block, so the constructor pays the device-resolution cost once and `play(chunk)` only does a buffer write per iteration.
 
 ```python
 from collections.abc import Iterator
@@ -202,11 +202,12 @@ def agent_tts_chunks() -> Iterator[NDArray[np.float32]]:
     for _ in range(10):
         yield np.zeros(4800, dtype=np.float32)  # 100 ms of silence per chunk
 
-mic = vrcpilot.Mic()                # picks up CABLE Input on Windows
-mic.play(agent_tts_chunks(), sample_rate=48000)
+with vrcpilot.Mic(sample_rate=48000, channels=1) as mic:  # picks up CABLE Input on Windows
+    for chunk in agent_tts_chunks():
+        mic.play(chunk)
 ```
 
-`Mic.play` infers the channel count from the first chunk's shape (`(N,)` for mono, `(N, C)` for multi-channel) and blocks until both the iterator and the PortAudio buffer have drained.
+The chunk shape must match the channel count chosen at construction time (`(N,)` for mono, `(N, channels)` for multi-channel). `play()` blocks if PortAudio's internal buffer is full, giving the caller natural back-pressure for live streams.
 
 ______________________________________________________________________
 

@@ -21,7 +21,7 @@ from __future__ import annotations
 import argparse
 import sys
 import wave
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import IO, BinaryIO
 
@@ -114,12 +114,15 @@ def register(subparsers: SubParsersAction) -> None:
     )
 
 
-def _wav_to_float32(reader: wave.Wave_read) -> tuple[NDArray[np.float32], int]:
+def _wav_to_float32(
+    reader: wave.Wave_read,
+) -> tuple[NDArray[np.float32], int, int]:
     """Decode an open :class:`wave.Wave_read` to a single float32 chunk.
 
-    Returns the ``(samples, framerate)`` pair where ``samples`` is
-    shape ``(N,)`` for mono input or ``(N, channels)`` for multi-channel
-    input -- matching :meth:`vrcpilot.mic.Mic.play`'s channel inference.
+    Returns ``(samples, framerate, channels)``. ``samples`` is shape
+    ``(N,)`` for mono input or ``(N, channels)`` for multi-channel
+    input -- matching the chunk shape :class:`vrcpilot.mic.Mic`
+    expects for the configured channel count.
 
     Raises:
         wave.Error: ``sampwidth != 2`` (not 16-bit signed PCM).
@@ -136,7 +139,7 @@ def _wav_to_float32(reader: wave.Wave_read) -> tuple[NDArray[np.float32], int]:
     samples = pcm.astype(np.float32) / _INT16_DIVISOR
     if channels > 1:
         samples = samples.reshape(-1, channels)
-    return samples, framerate
+    return samples, framerate, channels
 
 
 def _raw_stream_chunks(
@@ -183,74 +186,88 @@ def _stdin_buffer() -> BinaryIO:
     return sys.stdin.buffer
 
 
-def run(args: argparse.Namespace) -> int:
-    """Execute the ``mic`` subcommand; see module docstring for exits."""
+def _resolve_input(
+    args: argparse.Namespace,
+) -> tuple[Iterable[NDArray[np.float32]], int, int] | int:
+    """Decide ``(chunks, channels, sample_rate)`` from CLI args.
+
+    Returns an exit code instead when the input is unresolvable (tty
+    stdin, ``auto`` against an unknown extension). The chunks iterable
+    is either a one-element list (WAV-decoded into a single array) or
+    a generator (raw s16le streamed in ``chunk_ms`` pieces).
+    """
     input_arg: str = args.input
     fmt: str = args.format
-    chunk_ms: int = args.chunk_ms
-    rate: int = args.rate
-    channels: int = args.channels
 
-    # Build the play() argument pair upfront so the Mic boundary stays
-    # a single try-block. ``stream`` is either a one-element list (for
-    # WAV / single-buffer decodes) or a generator (raw s16le).
-    stream: list[NDArray[np.float32]] | Iterator[NDArray[np.float32]]
-    play_rate: int
+    if input_arg == "-":
+        if sys.stdin.isatty():
+            print(
+                "vrcpilot: no audio piped to stdin; "
+                "pass -i <path> or pipe data into stdin",
+                file=sys.stderr,
+            )
+            return 2
+        if fmt == "wav":
+            with wave.open(_stdin_buffer(), "rb") as reader:
+                samples, framerate, channels = _wav_to_float32(reader)
+            return [samples], channels, framerate
+        # 'auto' on stdin pipes is treated as raw s16le -- there is
+        # no extension to inspect, and the symmetric 'vrcpilot record'
+        # default emits headerless s16le.
+        chunks = _raw_stream_chunks(
+            _stdin_buffer(),
+            rate=args.rate,
+            channels=args.channels,
+            chunk_ms=args.chunk_ms,
+        )
+        return chunks, args.channels, args.rate
+
+    path = Path(input_arg)
+    use_wav = fmt == "wav" or (fmt == "auto" and _is_wav_path(path))
+    if use_wav:
+        with wave.open(str(path), "rb") as reader:
+            samples, framerate, channels = _wav_to_float32(reader)
+        return [samples], channels, framerate
+    if fmt == "s16le":
+        # Generator owns the open file handle so it stays alive until
+        # the Mic finishes consuming it.
+        chunks = _raw_stream_chunks(
+            path.open("rb"),
+            rate=args.rate,
+            channels=args.channels,
+            chunk_ms=args.chunk_ms,
+        )
+        return chunks, args.channels, args.rate
+    print(
+        f"vrcpilot: cannot auto-detect format for {path}; "
+        "pass --format wav or --format s16le",
+        file=sys.stderr,
+    )
+    return 2
+
+
+def run(args: argparse.Namespace) -> int:
+    """Execute the ``mic`` subcommand; see module docstring for exits."""
+    try:
+        resolved = _resolve_input(args)
+    except wave.Error as exc:
+        print(f"vrcpilot: {exc}", file=sys.stderr)
+        return 1
+    except OSError as exc:
+        print(f"vrcpilot: {exc}", file=sys.stderr)
+        return 1
+    if isinstance(resolved, int):
+        return resolved
+    chunks, channels, play_rate = resolved
 
     try:
-        if input_arg == "-":
-            if sys.stdin.isatty():
-                print(
-                    "vrcpilot: no audio piped to stdin; "
-                    "pass -i <path> or pipe data into stdin",
-                    file=sys.stderr,
-                )
-                return 2
-            if fmt == "wav":
-                with wave.open(_stdin_buffer(), "rb") as reader:
-                    samples, framerate = _wav_to_float32(reader)
-                stream = [samples]
-                play_rate = framerate
-            else:
-                # 'auto' on stdin pipes is treated as raw s16le -- there
-                # is no extension to inspect, and the symmetric
-                # 'vrcpilot record' default emits headerless s16le.
-                stream = _raw_stream_chunks(
-                    _stdin_buffer(),
-                    rate=rate,
-                    channels=channels,
-                    chunk_ms=chunk_ms,
-                )
-                play_rate = rate
-        else:
-            path = Path(input_arg)
-            use_wav = fmt == "wav" or (fmt == "auto" and _is_wav_path(path))
-            if use_wav:
-                with wave.open(str(path), "rb") as reader:
-                    samples, framerate = _wav_to_float32(reader)
-                stream = [samples]
-                play_rate = framerate
-            elif fmt == "s16le":
-                # Generator owns the open file handle so it stays alive
-                # until the Mic finishes consuming it.
-                stream = _raw_stream_chunks(
-                    path.open("rb"),
-                    rate=rate,
-                    channels=channels,
-                    chunk_ms=chunk_ms,
-                )
-                play_rate = rate
-            else:
-                # auto + non-.wav: refuse rather than guess.
-                print(
-                    f"vrcpilot: cannot auto-detect format for {path}; "
-                    "pass --format wav or --format s16le",
-                    file=sys.stderr,
-                )
-                return 2
-
-        print(f"Playing audio into mic device at {play_rate} Hz.", file=sys.stderr)
-        Mic(args.device).play(stream, sample_rate=play_rate)
+        print(
+            f"Playing audio into mic device at {play_rate} Hz " f"({channels} ch).",
+            file=sys.stderr,
+        )
+        with Mic(args.device, sample_rate=play_rate, channels=channels) as mic:
+            for chunk in chunks:
+                mic.play(chunk)
     except MicDeviceNotFoundError as exc:
         print(f"vrcpilot: {exc}", file=sys.stderr)
         return 1

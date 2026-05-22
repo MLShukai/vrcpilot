@@ -58,7 +58,7 @@ from __future__ import annotations
 import threading
 import time
 from collections import deque
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
@@ -676,11 +676,12 @@ class FakeRawPcmStdoutSink:
 class FakeOutputStream:
     """Stand-in for :class:`sounddevice.OutputStream`.
 
-    Models the slice of the OutputStream surface
-    :meth:`vrcpilot.mic.Mic.play` invokes: constructor kwargs are
-    captured for assertions, :meth:`write` records every chunk pushed,
-    and the context-manager protocol marks :attr:`closed` so tests can
-    verify that the PortAudio stream was drained.
+    Models the explicit-lifecycle surface
+    :class:`vrcpilot.mic.Mic` drives directly: ``start`` is called from
+    the Mic constructor, ``write`` from each :meth:`Mic.play`, and
+    ``stop`` / ``close`` from :meth:`Mic.close`. Lifecycle flags
+    (:attr:`started`, :attr:`stopped`, :attr:`closed`) let tests assert
+    the ordering without simulating threading.
     """
 
     def __init__(
@@ -696,27 +697,23 @@ class FakeOutputStream:
         self.dtype = dtype
         self.device = device
         self.writes: list[NDArray[np.float32]] = []
+        self.started: bool = False
+        self.stopped: bool = False
         self.closed: bool = False
+
+    def start(self) -> None:
+        self.started = True
 
     def write(self, frame: NDArray[np.float32]) -> None:
         if self.closed:
             raise RuntimeError("write after close")
         self.writes.append(frame)
 
+    def stop(self) -> None:
+        self.stopped = True
+
     def close(self) -> None:
         self.closed = True
-
-    def __enter__(self) -> Self:
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
-    ) -> None:
-        del exc_type, exc_val, exc_tb
-        self.close()
 
 
 class FakeSoundDevice:
@@ -799,18 +796,28 @@ class FakeSoundDevice:
 class FakeMic:
     """Stand-in for :class:`vrcpilot.mic.Mic` for CLI tests.
 
-    The CLI subcommand depends only on :meth:`Mic.play`, so this fake
-    captures every play invocation as a ``(chunks, sample_rate)`` pair
-    in :attr:`played` without touching sounddevice. Construction never
-    raises -- the CLI's device-not-found error path is exercised by
-    patching ``Mic`` to raise on instantiation instead.
+    Mirrors the constructor-opens-stream / single-chunk-play /
+    explicit-close lifecycle so CLI integration tests can assert that
+    the right format was chosen, each chunk was forwarded, and the
+    session was released on the way out. Construction never raises;
+    the CLI's device-not-found path is exercised by patching ``Mic``
+    to raise on instantiation instead.
     """
 
     instances: list[FakeMic] = []
 
-    def __init__(self, device: str | None = None) -> None:
+    def __init__(
+        self,
+        device: str | None = None,
+        *,
+        sample_rate: int = 48000,
+        channels: int = 1,
+    ) -> None:
         self.device_argument = device
-        self.played: list[tuple[list[NDArray[np.float32]], int]] = []
+        self._sample_rate = sample_rate
+        self._channels = channels
+        self.played: list[NDArray[np.float32]] = []
+        self.closed: bool = False
         FakeMic.instances.append(self)
 
     @property
@@ -821,10 +828,30 @@ class FakeMic:
     def device_index(self) -> int:
         return 0
 
-    def play(
+    @property
+    def sample_rate(self) -> int:
+        return self._sample_rate
+
+    @property
+    def channels(self) -> int:
+        return self._channels
+
+    def play(self, chunk: NDArray[np.float32]) -> None:
+        if self.closed:
+            raise RuntimeError("Mic is closed")
+        self.played.append(chunk)
+
+    def close(self) -> None:
+        self.closed = True
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
         self,
-        stream: Iterable[NDArray[np.float32]],
-        *,
-        sample_rate: int = 48000,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
-        self.played.append((list(stream), sample_rate))
+        del exc_type, exc_val, exc_tb
+        self.close()
