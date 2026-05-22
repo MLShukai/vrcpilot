@@ -280,6 +280,101 @@ with (
 
 ______________________________________________________________________
 
+## Mic (audio playback)
+
+Stream float32 PCM into a virtual-cable output device so it appears to VRChat as live microphone input. The primary use case is piping an LLM agent's TTS chunks directly into VRChat without ever touching a real microphone or an intermediate audio file. The design is stream-pull: the caller hands `Mic.play` any iterable of float32 chunks and the session opens / drains a single `sounddevice.OutputStream` for the duration. On Windows the default device is VB-Audio Virtual Cable's `"CABLE Input"`; Linux / macOS work too but require an explicit `device=` (or `$VRCPILOT_MIC_DEVICE`) until a default is settled.
+
+### `vrcpilot.Mic`
+
+```python
+class Mic:
+    def __init__(self, device: str | None = None) -> None: ...
+
+    @property
+    def device_name(self) -> str: ...
+    @property
+    def device_index(self) -> int: ...
+
+    def play(
+        self,
+        stream: Iterable[NDArray[np.float32]],
+        *,
+        sample_rate: int = 48000,
+    ) -> None: ...
+```
+
+`device` is matched as a case-insensitive **substring** against the names PortAudio reports. `None` defers to `$VRCPILOT_MIC_DEVICE`, then to the OS default returned by `default_device_name()`. The constructor resolves and caches the `sounddevice` index once; subsequent `play()` calls reuse it.
+
+`play()` infers the channel layout from the first chunk: `(N,)` is mono, `(N, C)` is `C`-channel. Subsequent chunks must agree on the channel count (otherwise `ValueError`). The call blocks until the iterator is exhausted **and** PortAudio has finished draining, so resources can be released as soon as it returns. An empty iterable is a no-op — no PortAudio stream is opened.
+
+**Raises**:
+
+- `MicDeviceNotFoundError` when no output device matches the resolved name, or no default is configured for this platform.
+- `ImportError` when `sounddevice` is not installed (the lazy import happens during construction).
+- `ValueError` from `play()` when a chunk is not `float32`, `ndim` is neither 1 nor 2, or a later chunk's channel count disagrees with the first.
+
+### `vrcpilot.mic.play`
+
+```python
+def play(
+    stream: Iterable[NDArray[np.float32]],
+    *,
+    device: str | None = None,
+    sample_rate: int = 48000,
+) -> None: ...
+```
+
+One-shot helper equivalent to `Mic(device).play(stream, sample_rate=sample_rate)`. Use this when there is no reason to keep a `Mic` instance around between calls.
+
+### `vrcpilot.MicDeviceNotFoundError`
+
+`RuntimeError` subclass raised when `sounddevice` cannot locate an output device matching the resolved name. The message lists every output device PortAudio currently sees, which makes mis-named VB-Cable installations easy to diagnose.
+
+### `vrcpilot.mic.default_device_name`
+
+```python
+def default_device_name() -> str | None: ...
+```
+
+The OS-specific default output-device substring. Returns `"CABLE Input"` on Windows and `None` elsewhere — Linux / macOS callers must supply `device=` (or `$VRCPILOT_MIC_DEVICE`) explicitly.
+
+### `VRCPILOT_MIC_DEVICE`
+
+Environment variable consulted between the constructor argument and `default_device_name()`. Useful for keeping device names out of source code, or for overriding the Windows default without code changes.
+
+### End-to-end snippets
+
+Send a single preloaded buffer:
+
+```python
+import numpy as np
+import vrcpilot
+
+samples = np.zeros(48000, dtype=np.float32)  # 1 second of silence
+vrcpilot.Mic().play([samples])
+```
+
+Stream chunks from a generator (the shape an LLM agent's incremental TTS typically produces):
+
+```python
+from collections.abc import Iterator
+
+import numpy as np
+from numpy.typing import NDArray
+
+import vrcpilot
+
+def tts_chunks() -> Iterator[NDArray[np.float32]]:
+    # Replace with the agent's actual chunk iterator.
+    for _ in range(10):
+        yield np.zeros(4800, dtype=np.float32)  # 100 ms of silence per chunk
+
+mic = vrcpilot.Mic()                  # resolves the device once
+mic.play(tts_chunks(), sample_rate=48000)
+```
+
+______________________________________________________________________
+
 ## Screenshot
 
 ### `vrcpilot.Screenshot`

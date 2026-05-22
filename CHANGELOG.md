@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Virtual mic output** (`vrcpilot.mic`): `Mic` and module-level `play()` stream
+  float32 chunk iterables into a virtual cable output device. Windows uses
+  VB-Audio Virtual Cable as the default ("CABLE Input"); Linux/macOS require
+  an explicit `device=` / `$VRCPILOT_MIC_DEVICE` (default device names are
+  reserved for a follow-up).
+- **CLI**: `vrcpilot mic` subcommand. Reads stdin by default so
+  `vrcpilot record -o - | vrcpilot mic` works; also accepts `-i path.wav` for
+  16-bit signed PCM WAV files, with `--format {auto,wav,s16le}`,
+  `--rate`, `--channels`, `--chunk-ms`, and `--device` overrides.
+- `vrcpilot.MicDeviceNotFoundError` raised when sounddevice cannot find a
+  matching output device.
+- `VRCPILOT_MIC_DEVICE` environment variable to override the resolved device
+  name.
+
 ## [0.1.0] - 2026-05-15
 
 First stable release. The release pipeline rehearsed in `0.1.0rc1` is now promoted to stable; the Python and CLI surfaces are unchanged from the release candidate.

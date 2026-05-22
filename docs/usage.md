@@ -160,7 +160,57 @@ When a menu is open, the cursor returns to UI-click mode.
 
 ______________________________________________________________________
 
-## 8. Pipeline patterns
+## 8. Send audio into VRChat's mic
+
+`vrcpilot mic` plays a float32 PCM stream into a virtual-cable output device. With VRChat configured to use that cable as its mic, anything the CLI plays reaches other players as if you had spoken into a real microphone. The primary use case is hooking an LLM agent's TTS up to VRChat.
+
+### One-time setup (Windows)
+
+1. Install [VB-Audio Virtual Cable](https://vb-audio.com/Cable/) and reboot if prompted.
+2. Open **Settings → System → Sound** and confirm that the playback device `CABLE Input` and the recording device `CABLE Output` are both listed.
+3. In VRChat's **Audio** settings, switch the microphone input to **`CABLE Output (VB-Audio Virtual Cable)`**. `vrcpilot mic` writes to `CABLE Input`, and VRChat reads that audio back through `CABLE Output`.
+
+On Linux / macOS, `sounddevice` is not a `vrcpilot` dependency yet, so install it yourself and pass an explicit `--device` (or set `$VRCPILOT_MIC_DEVICE`).
+
+### Smoke test
+
+```bash
+vrcpilot mic -i greeting.wav
+```
+
+The CLI logs progress (sample rate, etc.) to stderr and blocks until the WAV has finished playing. Stdout is silent so the command can sit downstream of `vrcpilot record` without polluting its byte stream:
+
+```bash
+# Record VRChat's own audio for 3 seconds, then play it back into the mic.
+vrcpilot record -o - --duration 3 | vrcpilot mic --format s16le --channels 2
+```
+
+### Stream from an LLM agent
+
+Drive `Mic.play` from a generator that yields TTS chunks as they arrive. The session resolves the output device once in the constructor; reuse the `Mic` instance for the lifetime of the agent.
+
+```python
+from collections.abc import Iterator
+
+import numpy as np
+from numpy.typing import NDArray
+
+import vrcpilot
+
+def agent_tts_chunks() -> Iterator[NDArray[np.float32]]:
+    # Replace with the agent's incremental TTS output.
+    for _ in range(10):
+        yield np.zeros(4800, dtype=np.float32)  # 100 ms of silence per chunk
+
+mic = vrcpilot.Mic()                # picks up CABLE Input on Windows
+mic.play(agent_tts_chunks(), sample_rate=48000)
+```
+
+`Mic.play` infers the channel count from the first chunk's shape (`(N,)` for mono, `(N, C)` for multi-channel) and blocks until both the iterator and the PortAudio buffer have drained.
+
+______________________________________________________________________
+
+## 9. Pipeline patterns
 
 ### Probe → act → re-probe
 
@@ -208,7 +258,7 @@ This launches VRChat, captures and OCRs the Launch Pad, then shuts down — a us
 
 ______________________________________________________________________
 
-## 9. Recovering from common failures
+## 10. Recovering from common failures
 
 | Symptom                                      | Likely cause                                                | Fix                                                     |
 | -------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------- |
@@ -223,7 +273,7 @@ ______________________________________________________________________
 
 ______________________________________________________________________
 
-## 10. Python equivalents
+## 11. Python equivalents
 
 Everything above has a Python counterpart in [`python-api.md`](python-api.md). The end-to-end flow:
 
