@@ -22,8 +22,13 @@ and hosts without ``pulsectl`` can still write the persistent config.
 from __future__ import annotations
 
 import sys
+from typing import TYPE_CHECKING
 
-if sys.platform != "linux":
+# Runtime guard: importing this module off-Linux is a programming
+# error. Skip the raise during type-checking so pyright analyses the
+# module on every platform (otherwise the CLI wrapper module sees
+# Unknown symbols when checked from Windows).
+if not TYPE_CHECKING and sys.platform != "linux":
     raise RuntimeError("vrcpilot.mic.linux is Linux-only")
 
 import logging
