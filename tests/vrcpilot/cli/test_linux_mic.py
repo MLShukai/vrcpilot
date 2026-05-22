@@ -310,6 +310,67 @@ class TestStatusAction:
         assert "sounddevice: error:" in captured.err
         assert "sounddevice not installed" in captured.err
 
+    def test_status_sounddevice_portaudio_missing_reports_error(
+        self,
+        isolate_config: Path,
+        mocker: MockerFixture,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """``import sounddevice`` raises ``OSError`` when PortAudio is absent.
+
+        Real-world failure observed on a fresh Linux dev box without
+        ``libportaudio2`` installed: the wheel imports fine via
+        ``sys.modules`` lookup but raises ``OSError("PortAudio library
+        not found")`` from its initialiser. Status must funnel that
+        through the same ``unavailable`` + stderr-detail contract as
+        ``ImportError``.
+        """
+        del isolate_config
+
+        # Stand-in module that raises OSError on attribute access, the
+        # closest in-process analogue of sounddevice's behaviour when
+        # the underlying shared library is missing.
+        class _PortAudioMissingModule:
+            def __getattr__(self, _name: str) -> object:
+                raise OSError("PortAudio library not found")
+
+        # The CLI's ``import sounddevice`` is inside a ``try`` block; a
+        # bare module that raises on every attribute access is not enough
+        # because import succeeds. Patching the import itself to raise
+        # OSError directly captures the failure mode users hit.
+        original_import = __import__
+
+        def fake_import(
+            name: str,
+            globals: dict[str, object] | None = None,
+            locals: dict[str, object] | None = None,
+            fromlist: tuple[str, ...] = (),
+            level: int = 0,
+        ) -> object:
+            if name == "sounddevice":
+                raise OSError("PortAudio library not found")
+            return original_import(name, globals, locals, fromlist, level)
+
+        mocker.patch("builtins.__import__", side_effect=fake_import)
+        # Keep pulsectl side green so the failure attributes to sounddevice.
+        mocker.patch.object(
+            mic_linux,
+            "open_pulse_control",
+            return_value=mocker.MagicMock(module_list=lambda: [], close=lambda: None),
+        )
+
+        exit_code = main(["linux-mic", "status"])
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "sounddevice: unavailable" in captured.out
+        assert "sounddevice: error:" in captured.err
+        assert "PortAudio" in captured.err
+        # Hint to install libportaudio2 is part of the contract for
+        # this branch -- without it, users on a clean Linux box are
+        # left guessing.
+        assert "libportaudio2" in captured.err
+
     def test_status_pulsectl_missing_reports_error(
         self,
         isolate_config: Path,

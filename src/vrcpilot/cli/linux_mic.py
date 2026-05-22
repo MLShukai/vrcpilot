@@ -179,6 +179,14 @@ def _sounddevice_visible(sink_name: str) -> tuple[bool, str | None]:
         import sounddevice as sd  # pyright: ignore[reportMissingTypeStubs]
     except ImportError as exc:
         return False, f"sounddevice not installed ({exc})"
+    except OSError as exc:
+        # sounddevice raises OSError on import when the PortAudio shared
+        # library is missing (libportaudio2 on Debian/Ubuntu, portaudio
+        # on Fedora). Surface a hint along with the underlying error.
+        return False, (
+            f"sounddevice import failed ({exc}); install PortAudio "
+            "(e.g. 'sudo apt-get install libportaudio2')"
+        )
 
     try:
         devices = sd.query_devices()  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
