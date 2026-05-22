@@ -11,8 +11,6 @@
 
 Python automation toolkit for the VRChat desktop client on Windows / Linux. It can launch, focus, capture, OCR, detect image templates, and synthesize input through both a typed Python API and the `vrcpilot` CLI.
 
-> **Breaking change (`0.1.0a2`)** — coordinates are now uniformly **VRChat window-local**. `mouse.move(x, y)` (and `vrcpilot mouse move X Y`) interprets its arguments as window-local pixels, and OCR / detect results expose only the window-local `pos` field. The previous `display_pos.{polygon,bbox}` keys and the `OCRResult.display_polygon` / `display_bbox` (and `DetectResult.*`) helpers have been removed. Pass `pos.bbox` (or `word.bbox` / `detection.bbox`) into `mouse.move` directly — no per-coordinate translation is needed.
-
 ## Features
 
 - **Process control** — launch VRChat through Steam (`vrcpilot.launch`), detect running PIDs, and terminate the process.

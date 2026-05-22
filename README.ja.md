@@ -11,8 +11,6 @@
 
 Windows / Linux 上の VRChat デスクトップクライアントを Python から自動操作するためのツールキットです。起動、フォーカス、画面キャプチャ、OCR、画像テンプレート検出、合成入力を、型付きの Python API と `vrcpilot` CLI から扱えます。
 
-> **破壊的変更 (`0.1.0a2`)** — 座標系が **VRChat ウィンドウローカル** に一本化されました。`mouse.move(x, y)`（および `vrcpilot mouse move X Y`）はウィンドウローカル座標として解釈され、OCR / detect の結果もウィンドウローカルな `pos` のみを返します。従来の `display_pos.{polygon,bbox}` キーや、`OCRResult.display_polygon` / `display_bbox`（`DetectResult` 側も同様）は撤廃されました。OCR / detect の `pos.bbox`（あるいは `word.bbox` / `detection.bbox`）をそのまま `mouse.move` に渡せます。座標を手動で平行移動する必要はありません。
-
 ## 機能
 
 - **プロセス制御** — Steam 経由で VRChat を起動 (`vrcpilot.launch`)。起動中プロセスの PID 検出と終了処理にも対応
