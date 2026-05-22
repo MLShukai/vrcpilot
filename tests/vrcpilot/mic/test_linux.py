@@ -2,8 +2,11 @@
 
 The module raises ``RuntimeError`` on import for non-Linux platforms,
 so collect-time skip is mandatory. ``pulsectl`` is never imported
-directly -- :func:`vrcpilot.mic.linux._open_pulse` is the single seam,
-substituted with :class:`tests.fakes.FakePulse` via ``mocker.patch``.
+directly -- :func:`vrcpilot.mic.linux.open_pulse_control` is the single
+seam, substituted with :class:`tests.fakes.FakePulse` via
+``mocker.patch``. State is shared across the
+``register_virtual_mic`` / ``unregister_virtual_mic`` cycle via
+:class:`tests.fakes.FakePulseRegistry`.
 """
 
 from __future__ import annotations
@@ -19,7 +22,7 @@ from pathlib import Path  # noqa: E402
 
 from pytest_mock import MockerFixture  # noqa: E402
 
-from tests.fakes import FakePulse, FakePulseModuleInfo  # noqa: E402
+from tests.fakes import FakePulse, FakePulseModuleInfo, FakePulseRegistry  # noqa: E402
 from vrcpilot.mic import linux as mic_linux  # noqa: E402
 from vrcpilot.mic.base import VIRTUAL_MIC_SINK_NAME  # noqa: E402
 
@@ -31,80 +34,17 @@ def isolate_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
-class _PulseRegistry:
-    """Track every FakePulse handed out by the patched ``_open_pulse``.
-
-    ``mic_linux._open_pulse`` is called once per public API entry point
-    (``register_virtual_mic`` opens one, ``unregister_virtual_mic``
-    opens another). Reusing a single FakePulse is awkward because the
-    production code calls ``.close()`` on it, which is non-reversible
-    in the fake. This registry hands out a fresh FakePulse each call,
-    but preserves persistent state (``modules`` / ``next_module_id``)
-    across calls so unload-after-load chains behave like a real
-    PulseAudio server that survives between connections. The accumulated
-    ``module_load_calls`` / ``module_unload_calls`` lists let tests
-    assert across the entire scenario.
-    """
-
-    def __init__(self) -> None:
-        self.instances: list[FakePulse] = []
-        self.modules: list[FakePulseModuleInfo] = []
-        self.next_module_id: int = 0
-
-    @property
-    def module_load_calls(self) -> list[tuple[str, str]]:
-        return [call for inst in self.instances for call in inst.module_load_calls]
-
-    @property
-    def module_unload_calls(self) -> list[int]:
-        return [idx for inst in self.instances for idx in inst.module_unload_calls]
-
-    def open(self) -> FakePulse:
-        pulse = FakePulse("vrcpilot-mic-register")
-        pulse.modules = list(self.modules)
-        pulse.next_module_id = self.next_module_id
-        original_load = pulse.module_load
-        original_unload = pulse.module_unload
-        original_close = pulse.close
-
-        def load(name: str, args: str) -> int:
-            idx = original_load(name, args)
-            self.modules = list(pulse.modules)
-            self.next_module_id = pulse.next_module_id
-            return idx
-
-        def unload(index: int) -> None:
-            original_unload(index)
-            self.modules = list(pulse.modules)
-
-        def close() -> None:
-            self.modules = list(pulse.modules)
-            self.next_module_id = pulse.next_module_id
-            original_close()
-
-        pulse.module_load = load  # pyright: ignore[reportAttributeAccessIssue]
-        pulse.module_unload = unload  # pyright: ignore[reportAttributeAccessIssue]
-        pulse.close = close  # pyright: ignore[reportAttributeAccessIssue]
-        self.instances.append(pulse)
-        return pulse
-
-
 @pytest.fixture
-def fake_pulse(mocker: MockerFixture) -> _PulseRegistry:
-    """Hand out a fresh FakePulse on every ``_open_pulse`` call.
+def fake_pulse(mocker: MockerFixture) -> FakePulseRegistry:
+    """Hand out a fresh FakePulse on every ``open_pulse_control`` call.
 
-    The returned :class:`_PulseRegistry` aggregates state across calls
-    so tests can assert on the full ``module_load`` / ``module_unload``
-    trace without caring how many connections the production code
-    opened.
+    The returned :class:`FakePulseRegistry` aggregates state across
+    calls so tests can assert on the full ``module_load`` /
+    ``module_unload`` trace without caring how many connections the
+    production code opened.
     """
-    registry = _PulseRegistry()
-
-    def _open() -> FakePulse:
-        pulse = registry.open()
-        return pulse
-
-    mocker.patch.object(mic_linux, "_open_pulse", side_effect=_open)
+    registry = FakePulseRegistry()
+    mocker.patch.object(mic_linux, "open_pulse_control", side_effect=registry.open)
     return registry
 
 
@@ -115,7 +55,7 @@ class TestConfigPathResolution:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-        path = mic_linux._config_path()
+        path = mic_linux.config_path()
         assert path == tmp_path / "pipewire" / "pipewire.conf.d" / "vrcpilot-mic.conf"
 
     def test_falls_back_to_home_config_when_xdg_unset(
@@ -125,7 +65,7 @@ class TestConfigPathResolution:
     ) -> None:
         monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
         monkeypatch.setenv("HOME", str(tmp_path))
-        path = mic_linux._config_path()
+        path = mic_linux.config_path()
         assert path == (
             tmp_path / ".config" / "pipewire" / "pipewire.conf.d" / "vrcpilot-mic.conf"
         )
@@ -137,7 +77,7 @@ class TestConfigPathResolution:
     ) -> None:
         monkeypatch.setenv("XDG_CONFIG_HOME", "")
         monkeypatch.setenv("HOME", str(tmp_path))
-        path = mic_linux._config_path()
+        path = mic_linux.config_path()
         assert path.parent.parent.parent == tmp_path / ".config"
 
 
@@ -186,7 +126,7 @@ class TestRegisterVirtualMic:
         del isolate_config
         mocker.patch.object(
             mic_linux,
-            "_open_pulse",
+            "open_pulse_control",
             side_effect=ImportError("No module named 'pulsectl'"),
         )
         result = mic_linux.register_virtual_mic()
@@ -208,7 +148,7 @@ class TestRegisterVirtualMic:
             raise RuntimeError("control plane error")
 
         mocker.patch.object(pulse, "module_load", side_effect=boom)
-        mocker.patch.object(mic_linux, "_open_pulse", return_value=pulse)
+        mocker.patch.object(mic_linux, "open_pulse_control", return_value=pulse)
         result = mic_linux.register_virtual_mic()
         assert result.runtime_loaded is False
         assert result.runtime_warning is not None
@@ -217,7 +157,7 @@ class TestRegisterVirtualMic:
     def test_reregister_unloads_stale_module_before_loading(
         self,
         isolate_config: Path,
-        fake_pulse: _PulseRegistry,
+        fake_pulse: FakePulseRegistry,
     ) -> None:
         del isolate_config
         # Pre-seed a stale VRCPilotMic null-sink as if a prior run had
@@ -241,7 +181,7 @@ class TestRegisterVirtualMic:
     def test_idempotent_config_write_does_not_rewrite(
         self,
         isolate_config: Path,
-        fake_pulse: _PulseRegistry,
+        fake_pulse: FakePulseRegistry,
     ) -> None:
         del isolate_config
         first = mic_linux.register_virtual_mic(runtime_load=False)
@@ -255,20 +195,20 @@ class TestUnregisterVirtualMic:
     def test_removes_config_file_and_unloads_module(
         self,
         isolate_config: Path,
-        fake_pulse: _PulseRegistry,
+        fake_pulse: FakePulseRegistry,
     ) -> None:
         del isolate_config
         mic_linux.register_virtual_mic()
         loaded_index = fake_pulse.modules[-1].index
         removed = mic_linux.unregister_virtual_mic()
         assert removed is True
-        assert not mic_linux._config_path().exists()
+        assert not mic_linux.config_path().exists()
         assert loaded_index in fake_pulse.module_unload_calls
 
     def test_returns_false_when_nothing_to_remove(
         self,
         isolate_config: Path,
-        fake_pulse: _PulseRegistry,
+        fake_pulse: FakePulseRegistry,
     ) -> None:
         del isolate_config
         # Fresh state: no config file, no loaded module.
@@ -285,13 +225,13 @@ class TestUnregisterVirtualMic:
         # Write config without runtime load so no fake pulse state exists.
         mocker.patch.object(
             mic_linux,
-            "_open_pulse",
+            "open_pulse_control",
             side_effect=ImportError("pulsectl missing"),
         )
         mic_linux.register_virtual_mic(runtime_load=False)
         removed = mic_linux.unregister_virtual_mic()
         assert removed is True
-        assert not mic_linux._config_path().exists()
+        assert not mic_linux.config_path().exists()
 
 
 class TestIsRegistered:
@@ -305,7 +245,7 @@ class TestIsRegistered:
     def test_true_after_register(
         self,
         isolate_config: Path,
-        fake_pulse: _PulseRegistry,
+        fake_pulse: FakePulseRegistry,
     ) -> None:
         del isolate_config, fake_pulse
         mic_linux.register_virtual_mic(runtime_load=False)
@@ -314,7 +254,7 @@ class TestIsRegistered:
     def test_false_after_unregister(
         self,
         isolate_config: Path,
-        fake_pulse: _PulseRegistry,
+        fake_pulse: FakePulseRegistry,
     ) -> None:
         del isolate_config
         mic_linux.register_virtual_mic()
@@ -331,7 +271,7 @@ class TestRoundTrip:
     def test_register_then_unregister_cycle(
         self,
         isolate_config: Path,
-        fake_pulse: _PulseRegistry,
+        fake_pulse: FakePulseRegistry,
     ) -> None:
         del isolate_config
         assert mic_linux.is_registered() is False

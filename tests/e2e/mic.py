@@ -87,16 +87,31 @@ import _helpers  # noqa: E402
 #: which the library *does* read.
 _LOOPBACK_DEVICE_ENV_VAR = "VRCPILOT_MIC_LOOPBACK_DEVICE"
 
-#: Map from playback substring -> matching recording substring. Keyed by
-#: the canonical playback names produced by
-#: :func:`vrcpilot.mic.default_device_name`. For Linux the same
-#: ``VRCPilotMic`` substring matches both the null-sink itself and its
-#: ``Monitor of VRCPilot Virtual Mic`` source (PortAudio surfaces the
-#: monitor with ``VRCPilotMic`` in its name), so a single entry suffices.
-_DEFAULT_LOOPBACK_RECORD: dict[str, str] = {
-    "CABLE Input": "CABLE Output",
-    "VRCPilotMic": "VRCPilotMic",
-}
+
+def _default_loopback_record() -> dict[str, str]:
+    """Map playback substring -> matching recording substring.
+
+    Keyed by the canonical playback names produced by
+    :func:`vrcpilot.mic.default_device_name`. For Linux the same
+    :data:`vrcpilot.mic.VIRTUAL_MIC_SINK_NAME` substring matches both
+    the null-sink itself and its ``Monitor of VRCPilot Virtual Mic``
+    source (PortAudio surfaces the monitor with ``VRCPilotMic`` in its
+    name), so a single entry suffices. The Linux key is read from
+    ``vrcpilot.mic.VIRTUAL_MIC_SINK_NAME`` so the e2e harness never
+    drifts away from the production constant.
+
+    Built lazily inside a function so the ``vrcpilot.mic`` import (and
+    its OS-conditional sub-imports) is deferred until ``main()`` runs
+    -- collection still works on hosts where the package fails to
+    construct module-level state.
+    """
+    from vrcpilot.mic import VIRTUAL_MIC_SINK_NAME
+
+    return {
+        "CABLE Input": "CABLE Output",
+        VIRTUAL_MIC_SINK_NAME: VIRTUAL_MIC_SINK_NAME,
+    }
+
 
 #: Sample rate / channel count for the loopback. 48 kHz matches the
 #: project's pinned :data:`vrcpilot.mic.SAMPLE_RATE`. Stereo is passed
@@ -183,13 +198,15 @@ def _resolve_device_index(
 def _resolve_device_names() -> tuple[str, str] | str:
     """Pick the playback / record substrings for this host.
 
-    Returns ``(playback, record)`` on success, or a skip-reason string
-    when the host lacks the prerequisites (unsupported platform, Linux
-    setup not run, etc.). The scenario uses the returned tuple to drive
-    :func:`_resolve_device_index`; substrings come from environment
-    overrides first and OS defaults second.
+    Returns either ``(playback, record)`` on success **or** a
+    skip-reason string when the host lacks the prerequisites
+    (unsupported platform, Linux setup not run, no derivable loopback
+    pair). The caller distinguishes the two cases via
+    :func:`isinstance` -- the string carries enough context for the
+    scenario to print a ``PASS: mic (skipped: ...)`` line. Substrings
+    come from environment overrides first and OS defaults second.
     """
-    from vrcpilot.mic import default_device_name
+    from vrcpilot.mic import VIRTUAL_MIC_SINK_NAME, default_device_name
 
     env_playback = os.environ.get("VRCPILOT_MIC_DEVICE")
     if env_playback:
@@ -200,20 +217,24 @@ def _resolve_device_names() -> tuple[str, str] | str:
             return f"no default mic device for platform {sys.platform!r}"
         playback = default
 
-    # Linux pre-flight: the default substring ("VRCPilotMic") only resolves
-    # after the null-sink has been registered. Import lazily so non-Linux
-    # hosts never touch vrcpilot.mic.linux (its top-level raises off-Linux).
-    if sys.platform == "linux" and playback == "VRCPilotMic":
+    # Linux pre-flight: the default substring (VIRTUAL_MIC_SINK_NAME) only
+    # resolves after the null-sink has been registered. Import lazily so
+    # non-Linux hosts never touch vrcpilot.mic.linux (its top-level raises
+    # off-Linux).
+    if sys.platform == "linux" and playback == VIRTUAL_MIC_SINK_NAME:
         from vrcpilot.mic.linux import is_registered
 
         if not is_registered():
-            return "VRCPilotMic not registered " "(run 'vrcpilot linux-mic register')"
+            return (
+                f"{VIRTUAL_MIC_SINK_NAME} not registered "
+                "(run 'vrcpilot linux-mic register')"
+            )
 
     env_record = os.environ.get(_LOOPBACK_DEVICE_ENV_VAR)
     if env_record:
         record = env_record
     else:
-        derived = _DEFAULT_LOOPBACK_RECORD.get(playback)
+        derived = _default_loopback_record().get(playback)
         if derived is None:
             return (
                 f"no default loopback record substring for playback "
@@ -362,6 +383,9 @@ def _scenario() -> str | None:
     resolved = _resolve_device_names()
     if isinstance(resolved, str):
         return resolved
+    # Narrow for pyright + readers: post-isinstance the tuple branch is
+    # the only remaining option, so spell it out before destructuring.
+    assert not isinstance(resolved, str)
     playback_name, record_name = resolved
 
     playback_idx = _resolve_device_index(

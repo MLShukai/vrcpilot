@@ -330,6 +330,96 @@ class FakePulse:
         self.event_callback = None
 
 
+class FakePulseRegistry:
+    """Hand out a fresh :class:`FakePulse` on every ``open_pulse_control``
+    call.
+
+    :class:`FakePulse.close` flips ``closed=True`` irreversibly (it
+    mirrors the real ``pulsectl.Pulse.close()`` contract that the
+    PipeWire speaker tests assert against), so test code that drives a
+    production path which opens *and* closes multiple control
+    connections back-to-back -- as ``vrcpilot.mic.linux``'s
+    ``register_virtual_mic`` + ``unregister_virtual_mic`` cycle does --
+    cannot reuse a single fake.
+
+    This registry produces a new :class:`FakePulse` per call, but
+    preserves the in-memory PulseAudio model
+    (``modules`` / ``next_module_id``) across calls so an
+    ``unregister`` after a prior ``register`` still sees the
+    null-sink the earlier connection loaded. The accumulated
+    :attr:`module_load_calls` / :attr:`module_unload_calls` lists span
+    every instance so assertions read the full scenario trace without
+    caring how many control connections the production code opened.
+
+    Usage::
+
+        registry = FakePulseRegistry()
+        mocker.patch.object(
+            mic_linux, "open_pulse_control", side_effect=registry.open
+        )
+
+    Attributes:
+        instances: Every :class:`FakePulse` handed out, in order.
+        modules: Server-state snapshot kept in sync between opens.
+        next_module_id: Monotonic counter shared across instances so
+            re-opens never collide on a previously-assigned index.
+    """
+
+    def __init__(self) -> None:
+        self.instances: list[FakePulse] = []
+        self.modules: list[FakePulseModuleInfo] = []
+        self.next_module_id: int = 0
+
+    @property
+    def module_load_calls(self) -> list[tuple[str, str]]:
+        """Concatenated ``module_load`` trace across every handed-out
+        instance."""
+        return [call for inst in self.instances for call in inst.module_load_calls]
+
+    @property
+    def module_unload_calls(self) -> list[int]:
+        """Concatenated ``module_unload`` trace across every handed-out
+        instance."""
+        return [idx for inst in self.instances for idx in inst.module_unload_calls]
+
+    def open(self, client_name: str = "vrcpilot-mic") -> FakePulse:
+        """Build a fresh :class:`FakePulse` wired to the shared server state.
+
+        Each produced fake starts from the registry's persisted
+        ``modules`` / ``next_module_id`` snapshot, then writes back
+        through wrapped ``module_load`` / ``module_unload`` / ``close``
+        so the next ``open()`` sees the most recent state -- including
+        modules loaded by the previous instance.
+        """
+        pulse = FakePulse(client_name)
+        pulse.modules = list(self.modules)
+        pulse.next_module_id = self.next_module_id
+        original_load = pulse.module_load
+        original_unload = pulse.module_unload
+        original_close = pulse.close
+
+        def load(name: str, args: str) -> int:
+            idx = original_load(name, args)
+            self.modules = list(pulse.modules)
+            self.next_module_id = pulse.next_module_id
+            return idx
+
+        def unload(index: int) -> None:
+            original_unload(index)
+            self.modules = list(pulse.modules)
+
+        def close() -> None:
+            self.modules = list(pulse.modules)
+            self.next_module_id = pulse.next_module_id
+            original_close()
+
+        pulse.module_load = load  # pyright: ignore[reportAttributeAccessIssue]
+        pulse.module_unload = unload  # pyright: ignore[reportAttributeAccessIssue]
+        pulse.close = close  # pyright: ignore[reportAttributeAccessIssue]
+        self.instances.append(pulse)
+        return pulse
+
+
 class _FakePwRecordStdout:
     """Stdout half of :class:`FakePwRecordProcess`.
 

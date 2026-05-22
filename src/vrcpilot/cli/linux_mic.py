@@ -78,6 +78,8 @@ def register(subparsers: SubParsersAction) -> None:
 
 def _run_register(args: argparse.Namespace) -> int:
     """Execute the ``register`` action."""
+    # Lazy: top-level import raises on non-Linux; the OS guard above
+    # must short-circuit first.
     from vrcpilot.mic import linux as mic_linux
 
     result = mic_linux.register_virtual_mic(runtime_load=not args.no_runtime_load)
@@ -104,6 +106,8 @@ def _run_register(args: argparse.Namespace) -> int:
 
 def _run_unregister() -> int:
     """Execute the ``unregister`` action."""
+    # Lazy: top-level import raises on non-Linux; the OS guard above
+    # must short-circuit first.
     from vrcpilot.mic import linux as mic_linux
 
     removed = mic_linux.unregister_virtual_mic()
@@ -126,16 +130,19 @@ def _runtime_loaded(sink_name: str) -> tuple[bool, str | None]:
     pulsectl probe itself failed (missing dependency, control-plane
     error); the caller surfaces this alongside the ``not loaded``
     answer so ``status`` never raises.
+
+    Uses :func:`vrcpilot.mic.linux.open_pulse_control` so the
+    ``register`` / ``unregister`` / ``status`` paths all funnel through
+    the same seam -- unit tests can patch one symbol and cover all three.
     """
-    try:
-        from pulsectl import Pulse  # pyright: ignore[reportMissingTypeStubs]
-    except ImportError as exc:
-        return False, f"pulsectl not installed ({exc})"
+    # Lazy: top-level import raises on non-Linux; the OS guard above
+    # must short-circuit first.
+    from vrcpilot.mic import linux as mic_linux
 
     try:
-        pulse = Pulse(  # pyright: ignore[reportUnknownVariableType]
-            "vrcpilot-mic-status"
-        )
+        pulse = mic_linux.open_pulse_control("vrcpilot-mic-status")
+    except ImportError as exc:
+        return False, f"pulsectl not installed ({exc})"
     except Exception as exc:  # noqa: BLE001
         return False, f"could not open pulsectl ({exc})"
 
@@ -195,27 +202,41 @@ def _sounddevice_visible(sink_name: str) -> tuple[bool, str | None]:
 
 
 def _run_status() -> int:
-    """Execute the ``status`` action."""
+    """Execute the ``status`` action.
+
+    Machine-readable state lands on stdout in a stable vocabulary
+    (``present``/``absent`` for config, ``loaded``/``unavailable``/
+    ``not loaded`` for runtime, ``visible``/``unavailable``/``not
+    visible`` for sounddevice); human-readable error detail goes to
+    stderr so scripts can ``grep`` stdout without seeing import-failure
+    parentheticals. ``unavailable`` is the fixed label used whenever
+    the probe itself blew up; the matching stderr line carries the
+    underlying ``error: <message>``.
+    """
+    # Lazy: top-level import raises on non-Linux; the OS guard above
+    # must short-circuit first.
     from vrcpilot.mic import linux as mic_linux
     from vrcpilot.mic.base import VIRTUAL_MIC_SINK_NAME
 
     config_present = mic_linux.is_registered()
-    config_path = mic_linux.get_config_path()
+    cfg_path = mic_linux.config_path()
 
     print(f"config: {'present' if config_present else 'absent'}")
-    print(f"config_path: {config_path}")
+    print(f"config_path: {cfg_path}")
 
     loaded, runtime_err = _runtime_loaded(VIRTUAL_MIC_SINK_NAME)
-    runtime_line = f"runtime: {'loaded' if loaded else 'not loaded'}"
     if runtime_err is not None:
-        runtime_line += f" (error: {runtime_err})"
-    print(runtime_line)
+        print("runtime: unavailable")
+        print(f"runtime: error: {runtime_err}", file=sys.stderr)
+    else:
+        print(f"runtime: {'loaded' if loaded else 'not loaded'}")
 
     visible, sd_err = _sounddevice_visible(VIRTUAL_MIC_SINK_NAME)
-    sd_line = f"sounddevice: {'visible' if visible else 'not visible'}"
     if sd_err is not None:
-        sd_line += f" (error: {sd_err})"
-    print(sd_line)
+        print("sounddevice: unavailable")
+        print(f"sounddevice: error: {sd_err}", file=sys.stderr)
+    else:
+        print(f"sounddevice: {'visible' if visible else 'not visible'}")
 
     return 0
 

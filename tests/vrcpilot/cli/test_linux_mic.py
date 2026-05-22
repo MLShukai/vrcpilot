@@ -2,12 +2,14 @@
 
 The CLI front-end calls into :mod:`vrcpilot.mic.linux` (which raises
 on import outside Linux) and probes ``pulsectl`` / ``sounddevice``
-directly inside ``status``. Linux-only behaviour is module-skip-gated
-the same way as ``tests/vrcpilot/mic/test_linux.py``; a single
-``TestNonLinuxGuard`` class exercises the entry-point guard via a
-local ``sys.platform`` patch -- this is the *CLI entry* guard test
-(not a cross-platform claim about ``vrcpilot.mic.linux`` itself), so
-the broad ``sys.platform`` mocking ban in
+indirectly via :func:`vrcpilot.mic.linux.open_pulse_control` -- the
+same seam ``register`` / ``unregister`` use, so unit tests patch one
+symbol and cover all three code paths. Linux-only behaviour is
+module-skip-gated the same way as ``tests/vrcpilot/mic/test_linux.py``;
+a single ``TestNonLinuxGuard`` class exercises the entry-point guard
+via a local ``sys.platform`` patch -- this is the *CLI entry* guard
+test (not a cross-platform claim about ``vrcpilot.mic.linux`` itself),
+so the broad ``sys.platform`` mocking ban in
 ``memory/feedback_test_strategy.md`` does not apply.
 """
 
@@ -19,7 +21,12 @@ from pathlib import Path
 import pytest
 from pytest_mock import MockerFixture
 
-from tests.fakes import FakePulse, FakePulseModuleInfo, FakeSoundDevice
+from tests.fakes import (
+    FakePulse,
+    FakePulseModuleInfo,
+    FakePulseRegistry,
+    FakeSoundDevice,
+)
 from vrcpilot.cli import linux_mic as cli_linux_mic, main
 
 
@@ -95,63 +102,17 @@ def isolate_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
-class _PulseRegistry:
-    """Hand out a fresh FakePulse on each ``_open_pulse`` call.
-
-    Mirrors the registry pattern used by ``tests/vrcpilot/mic/test_linux.py``:
-    each FakePulse hands out is wired to share module / id state with
-    the registry so unload-after-load chains behave like a real
-    PulseAudio server that survives across short-lived connections.
-    """
-
-    def __init__(self) -> None:
-        self.instances: list[FakePulse] = []
-        self.modules: list[FakePulseModuleInfo] = []
-        self.next_module_id: int = 0
-
-    @property
-    def module_load_calls(self) -> list[tuple[str, str]]:
-        return [call for inst in self.instances for call in inst.module_load_calls]
-
-    @property
-    def module_unload_calls(self) -> list[int]:
-        return [idx for inst in self.instances for idx in inst.module_unload_calls]
-
-    def open(self) -> FakePulse:
-        pulse = FakePulse("vrcpilot-mic-register")
-        pulse.modules = list(self.modules)
-        pulse.next_module_id = self.next_module_id
-        original_load = pulse.module_load
-        original_unload = pulse.module_unload
-        original_close = pulse.close
-
-        def load(name: str, args: str) -> int:
-            idx = original_load(name, args)
-            self.modules = list(pulse.modules)
-            self.next_module_id = pulse.next_module_id
-            return idx
-
-        def unload(index: int) -> None:
-            original_unload(index)
-            self.modules = list(pulse.modules)
-
-        def close() -> None:
-            self.modules = list(pulse.modules)
-            self.next_module_id = pulse.next_module_id
-            original_close()
-
-        pulse.module_load = load  # pyright: ignore[reportAttributeAccessIssue]
-        pulse.module_unload = unload  # pyright: ignore[reportAttributeAccessIssue]
-        pulse.close = close  # pyright: ignore[reportAttributeAccessIssue]
-        self.instances.append(pulse)
-        return pulse
-
-
 @pytest.fixture
-def fake_pulse(mocker: MockerFixture) -> _PulseRegistry:
-    """Substitute ``_open_pulse`` with a registry-backed FakePulse factory."""
-    registry = _PulseRegistry()
-    mocker.patch.object(mic_linux, "_open_pulse", side_effect=registry.open)
+def fake_pulse(mocker: MockerFixture) -> FakePulseRegistry:
+    """Substitute ``open_pulse_control`` with a registry-backed factory.
+
+    Matches :func:`tests.vrcpilot.mic.test_linux.fake_pulse` so unit
+    behaviour and CLI behaviour share the same control-plane model;
+    both register / unregister / status routes funnel through
+    :func:`vrcpilot.mic.linux.open_pulse_control` in production.
+    """
+    registry = FakePulseRegistry()
+    mocker.patch.object(mic_linux, "open_pulse_control", side_effect=registry.open)
     return registry
 
 
@@ -159,7 +120,7 @@ class TestRegisterAction:
     def test_register_writes_config_and_loads_runtime(
         self,
         isolate_config: Path,
-        fake_pulse: _PulseRegistry,
+        fake_pulse: FakePulseRegistry,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         exit_code = main(["linux-mic", "register"])
@@ -179,7 +140,7 @@ class TestRegisterAction:
     def test_register_no_runtime_load_skips_runtime(
         self,
         isolate_config: Path,
-        fake_pulse: _PulseRegistry,
+        fake_pulse: FakePulseRegistry,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         exit_code = main(["linux-mic", "register", "--no-runtime-load"])
@@ -206,7 +167,7 @@ class TestRegisterAction:
         del isolate_config
         mocker.patch.object(
             mic_linux,
-            "_open_pulse",
+            "open_pulse_control",
             side_effect=ImportError("No module named 'pulsectl'"),
         )
 
@@ -226,7 +187,7 @@ class TestUnregisterAction:
     def test_unregister_after_register_reports_removal(
         self,
         isolate_config: Path,
-        fake_pulse: _PulseRegistry,
+        fake_pulse: FakePulseRegistry,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         register_code = main(["linux-mic", "register"])
@@ -246,7 +207,7 @@ class TestUnregisterAction:
     def test_unregister_when_nothing_present(
         self,
         isolate_config: Path,
-        fake_pulse: _PulseRegistry,
+        fake_pulse: FakePulseRegistry,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         del isolate_config, fake_pulse
@@ -270,7 +231,9 @@ class TestStatusAction:
         cfg.parent.mkdir(parents=True, exist_ok=True)
         cfg.write_text("placeholder")
 
-        # runtime: loaded -- pulsectl.Pulse returns a fake with our sink.
+        # runtime: loaded -- patch the shared open_pulse_control seam so
+        # status sees a control connection backed by a fake whose
+        # module_list reports our sink.
         pulse = FakePulse("vrcpilot-mic-status")
         pulse.modules.append(
             FakePulseModuleInfo(
@@ -279,10 +242,7 @@ class TestStatusAction:
                 argument="sink_name=VRCPilotMic rate=48000",
             )
         )
-        mocker.patch(
-            "pulsectl.Pulse",
-            return_value=pulse,
-        )
+        mocker.patch.object(mic_linux, "open_pulse_control", return_value=pulse)
 
         # sounddevice: visible -- the fake exposes our device by name.
         fake_sd = FakeSoundDevice()
@@ -297,6 +257,8 @@ class TestStatusAction:
         assert f"config_path: {cfg}" in captured.out
         assert "runtime: loaded" in captured.out
         assert "sounddevice: visible" in captured.out
+        # No error -> stderr stays empty on the happy path.
+        assert captured.err == ""
 
     def test_status_all_absent(
         self,
@@ -307,10 +269,7 @@ class TestStatusAction:
         del isolate_config
         # runtime: not loaded -- the fake has no matching module.
         pulse = FakePulse("vrcpilot-mic-status")
-        mocker.patch(
-            "pulsectl.Pulse",
-            return_value=pulse,
-        )
+        mocker.patch.object(mic_linux, "open_pulse_control", return_value=pulse)
 
         # sounddevice: not visible -- no matching device registered.
         fake_sd = FakeSoundDevice()
@@ -324,6 +283,7 @@ class TestStatusAction:
         assert "config: absent" in captured.out
         assert "runtime: not loaded" in captured.out
         assert "sounddevice: not visible" in captured.out
+        assert captured.err == ""
 
     def test_status_sounddevice_missing_reports_error(
         self,
@@ -333,32 +293,22 @@ class TestStatusAction:
     ) -> None:
         del isolate_config
         pulse = FakePulse("vrcpilot-mic-status")
-        mocker.patch("pulsectl.Pulse", return_value=pulse)
+        mocker.patch.object(mic_linux, "open_pulse_control", return_value=pulse)
 
-        # Force the sounddevice import inside status to fail.
-        original_import = (
-            __builtins__["__import__"] if isinstance(__builtins__, dict) else __import__
-        )
-
-        def fake_import(
-            name: str,
-            globals: dict[str, object] | None = None,  # noqa: A002
-            locals: dict[str, object] | None = None,  # noqa: A002
-            fromlist: tuple[str, ...] = (),
-            level: int = 0,
-        ) -> object:
-            if name == "sounddevice":
-                raise ImportError("no sounddevice in this fake env")
-            return original_import(name, globals, locals, fromlist, level)
-
-        mocker.patch("builtins.__import__", side_effect=fake_import)
+        # Force the lazy ``import sounddevice`` to fail by parking ``None``
+        # in ``sys.modules`` -- Python raises ``ImportError`` on the next
+        # ``import sounddevice`` without involving ``builtins.__import__``.
+        mocker.patch.dict(sys.modules, {"sounddevice": None})
 
         exit_code = main(["linux-mic", "status"])
 
         assert exit_code == 0
         captured = capsys.readouterr()
-        assert "sounddevice: not visible" in captured.out
-        assert "error:" in captured.out
+        # Machine-readable label on stdout (fixed vocabulary).
+        assert "sounddevice: unavailable" in captured.out
+        # Human-readable detail on stderr.
+        assert "sounddevice: error:" in captured.err
+        assert "sounddevice not installed" in captured.err
 
     def test_status_pulsectl_missing_reports_error(
         self,
@@ -367,31 +317,26 @@ class TestStatusAction:
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         del isolate_config
-        # sounddevice must still resolve -- patch it before forcing the
-        # pulsectl import error so only one branch goes red.
+        # sounddevice must still resolve so only one branch goes red.
         fake_sd = FakeSoundDevice()
         mocker.patch.dict(sys.modules, {"sounddevice": fake_sd})
 
-        original_import = (
-            __builtins__["__import__"] if isinstance(__builtins__, dict) else __import__
+        # The status action funnels through ``open_pulse_control``; raising
+        # ``ImportError`` from that seam is the seamless way to fake a
+        # missing ``pulsectl`` install. The ban on patching
+        # ``builtins.__import__`` (and on patching ``sys.modules`` mid-import
+        # for already-loaded modules) is sidestepped because the seam itself
+        # is the canonical control point.
+        mocker.patch.object(
+            mic_linux,
+            "open_pulse_control",
+            side_effect=ImportError("No module named 'pulsectl'"),
         )
-
-        def fake_import(
-            name: str,
-            globals: dict[str, object] | None = None,  # noqa: A002
-            locals: dict[str, object] | None = None,  # noqa: A002
-            fromlist: tuple[str, ...] = (),
-            level: int = 0,
-        ) -> object:
-            if name == "pulsectl":
-                raise ImportError("no pulsectl in this fake env")
-            return original_import(name, globals, locals, fromlist, level)
-
-        mocker.patch("builtins.__import__", side_effect=fake_import)
 
         exit_code = main(["linux-mic", "status"])
 
         assert exit_code == 0
         captured = capsys.readouterr()
-        assert "runtime: not loaded" in captured.out
-        assert "error:" in captured.out
+        assert "runtime: unavailable" in captured.out
+        assert "runtime: error:" in captured.err
+        assert "pulsectl not installed" in captured.err

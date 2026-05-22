@@ -20,9 +20,11 @@ The implementation has two planes:
   warning on failure rather than raising -- the persistent config is
   the source of truth.
 
-``pulsectl`` is imported lazily inside :func:`_open_pulse` so a missing
-``pulsectl`` install only blocks the runtime-load step and not the
-config write.
+``pulsectl`` is imported lazily inside :func:`open_pulse_control` so a
+missing ``pulsectl`` install only blocks the runtime-load step and not
+the config write. The same helper is the single seam every caller
+(``register`` / ``unregister`` / ``status``) goes through so unit tests
+can patch one symbol and cover all three code paths.
 """
 
 from __future__ import annotations
@@ -97,11 +99,15 @@ class RegisterResult:
     runtime_warning: str | None
 
 
-def _config_path() -> Path:
+def config_path() -> Path:
     """Return the absolute path of the PipeWire config fragment.
 
     Honours ``$XDG_CONFIG_HOME`` per the XDG Base Directory Spec; falls
-    back to ``~/.config`` when the variable is unset or empty.
+    back to ``~/.config`` when the variable is unset or empty. Public
+    because the ``vrcpilot linux-mic status`` CLI action surfaces the
+    persisted-config location to the user, and per the
+    ``feedback_private_module_convention`` rule any symbol that has
+    direct unit tests must not carry a ``_`` prefix.
     """
     base = os.environ.get("XDG_CONFIG_HOME")
     if base:
@@ -111,37 +117,31 @@ def _config_path() -> Path:
     return root / "pipewire" / "pipewire.conf.d" / _CONF_FILENAME
 
 
-def _open_pulse() -> Any:
+def open_pulse_control(client_name: str = "vrcpilot-mic") -> Any:
     """Construct the ``pulsectl.Pulse`` control connection.
 
-    Test seam: substituted via :func:`mocker.patch` with a duck-typed
-    :class:`tests.fakes.FakePulse`. The import is local so installs
+    Single seam every PulseAudio-touching path (``register`` /
+    ``unregister`` / ``status``) uses. The import is local so installs
     without ``pulsectl`` (e.g. minimal CI containers) still get to
-    write the persistent config.
+    write the persistent config -- the missing dependency is surfaced
+    as a runtime warning instead of an import error.
+
+    Tests substitute this symbol via
+    ``mocker.patch.object(mic_linux, "open_pulse_control", ...)`` and
+    return a duck-typed :class:`tests.fakes.FakePulse`. ``client_name``
+    is forwarded so each entry point can identify itself in
+    ``pactl list short clients``.
     """
     from pulsectl import (  # pyright: ignore[reportMissingTypeStubs]
         Pulse,
     )
 
-    return Pulse(  # pyright: ignore[reportUnknownVariableType]
-        "vrcpilot-mic-register"
-    )
-
-
-def get_config_path() -> Path:
-    """Return the absolute path of the PipeWire config fragment.
-
-    Public alias for :func:`_config_path`; intended for callers (such
-    as the ``vrcpilot linux-mic status`` CLI action) that need to
-    surface the persisted-config location to the user without writing
-    or removing it.
-    """
-    return _config_path()
+    return Pulse(client_name)  # pyright: ignore[reportUnknownVariableType]
 
 
 def is_registered() -> bool:
     """Return whether the persistent config fragment exists."""
-    return _config_path().exists()
+    return config_path().exists()
 
 
 def _write_config(path: Path) -> bool:
@@ -153,6 +153,51 @@ def _write_config(path: Path) -> bool:
     return True
 
 
+def _unload_matching_null_sinks(pulse: Any) -> int:
+    """Unload every ``module-null-sink`` whose ``argument`` targets the sink.
+
+    Walks ``pulse.module_list()`` once, looking for entries whose
+    ``name`` is ``"module-null-sink"`` and whose ``argument`` carries
+    ``sink_name=<VIRTUAL_MIC_SINK_NAME>``, and calls
+    ``pulse.module_unload(index)`` on each. Returns the number of
+    successful unloads so callers can decide whether anything actually
+    changed.
+
+    Both ``register`` (stale-cleanup before a fresh load) and
+    ``unregister`` (full teardown) need this exact filter+unload
+    sequence; centralising it keeps the matching predicate canonical
+    and ensures both code paths log identical warnings on the same
+    failures. Failures inside ``module_list`` / ``module_unload`` are
+    logged and treated as "this entry not unloaded" -- the function
+    never raises.
+    """
+    try:
+        modules: list[Any] = pulse.module_list()  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
+    except Exception as exc:  # noqa: BLE001
+        _logger.warning("module_list failed: %s", exc)
+        return 0
+
+    unloaded = 0
+    for module in modules:  # pyright: ignore[reportUnknownVariableType]
+        module_obj: object = module
+        name = getattr(module_obj, "name", None)
+        arg = getattr(module_obj, "argument", None) or ""
+        if (
+            name != "module-null-sink"
+            or f"sink_name={VIRTUAL_MIC_SINK_NAME}" not in arg
+        ):
+            continue
+        index = getattr(module_obj, "index", None)
+        if not isinstance(index, int):
+            continue
+        try:
+            pulse.module_unload(index)  # pyright: ignore[reportUnknownMemberType]
+            unloaded += 1
+        except Exception as exc:  # noqa: BLE001
+            _logger.warning("Failed to unload module-null-sink %d: %s", index, exc)
+    return unloaded
+
+
 def _runtime_load_null_sink() -> str | None:
     """Load (or reload) the ``VRCPilotMic`` null-sink via ``pulsectl``.
 
@@ -161,7 +206,7 @@ def _runtime_load_null_sink() -> str | None:
     caller surfaces the warning through :attr:`RegisterResult.runtime_warning`.
     """
     try:
-        pulse = _open_pulse()
+        pulse = open_pulse_control("vrcpilot-mic-register")
     except ImportError as exc:
         msg = (
             "pulsectl is not installed; the persistent config was written "
@@ -179,33 +224,11 @@ def _runtime_load_null_sink() -> str | None:
         return msg
 
     try:
-        # Unload any stale module with the same sink_name so a re-run
-        # never stacks two null-sinks. Mirrors the
-        # ``_reset_stale_modules`` pattern in
-        # ``src/vrcpilot/speaker/pipewire.py``.
-        try:
-            modules: list[Any] = pulse.module_list()  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
-        except Exception as exc:  # noqa: BLE001
-            _logger.warning("module_list failed during stale reset: %s", exc)
-            modules = []
-        for module in modules:
-            name = getattr(module, "name", None)
-            arg = getattr(module, "argument", None) or ""
-            if (
-                name == "module-null-sink"
-                and f"sink_name={VIRTUAL_MIC_SINK_NAME}" in arg
-            ):
-                index = getattr(module, "index", None)
-                if not isinstance(index, int):
-                    continue
-                try:
-                    pulse.module_unload(index)  # pyright: ignore[reportUnknownMemberType]
-                except Exception as exc:  # noqa: BLE001
-                    _logger.warning(
-                        "Failed to unload stale module-null-sink %d: %s",
-                        index,
-                        exc,
-                    )
+        # Unload any stale VRCPilotMic null-sink so a re-run never
+        # stacks two; mirrors ``_reset_stale_modules`` in
+        # ``src/vrcpilot/speaker/pipewire.py``. The return value is
+        # discarded because the fresh load happens unconditionally.
+        _unload_matching_null_sinks(pulse)
 
         try:
             pulse.module_load(  # pyright: ignore[reportUnknownMemberType]
@@ -245,7 +268,7 @@ def register_virtual_mic(*, runtime_load: bool = True) -> RegisterResult:
         persistent config is always written successfully or an
         :class:`OSError` is propagated.
     """
-    path = _config_path()
+    path = config_path()
     created_config = _write_config(path)
 
     if not runtime_load:
@@ -273,7 +296,7 @@ def _runtime_unload_null_sink() -> bool:
     and treated as "nothing unloaded".
     """
     try:
-        pulse = _open_pulse()
+        pulse = open_pulse_control("vrcpilot-mic-unregister")
     except ImportError as exc:
         _logger.warning(
             "pulsectl is not installed; cannot runtime-unload VRCPilotMic (%s)",
@@ -286,36 +309,14 @@ def _runtime_unload_null_sink() -> bool:
         )
         return False
 
-    unloaded = False
     try:
-        try:
-            modules: list[Any] = pulse.module_list()  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
-        except Exception as exc:  # noqa: BLE001
-            _logger.warning("module_list failed during unload: %s", exc)
-            return False
-        for module in modules:
-            name = getattr(module, "name", None)
-            arg = getattr(module, "argument", None) or ""
-            if (
-                name == "module-null-sink"
-                and f"sink_name={VIRTUAL_MIC_SINK_NAME}" in arg
-            ):
-                index = getattr(module, "index", None)
-                if not isinstance(index, int):
-                    continue
-                try:
-                    pulse.module_unload(index)  # pyright: ignore[reportUnknownMemberType]
-                    unloaded = True
-                except Exception as exc:  # noqa: BLE001
-                    _logger.warning(
-                        "Failed to unload module-null-sink %d: %s", index, exc
-                    )
+        count = _unload_matching_null_sinks(pulse)
     finally:
         try:
             pulse.close()  # pyright: ignore[reportUnknownMemberType]
         except Exception as exc:  # noqa: BLE001
             _logger.warning("pulse close failed: %s", exc)
-    return unloaded
+    return count > 0
 
 
 def unregister_virtual_mic() -> bool:
@@ -325,7 +326,7 @@ def unregister_virtual_mic() -> bool:
     deleted, runtime module unloaded, or both). ``False`` when neither
     artefact existed.
     """
-    path = _config_path()
+    path = config_path()
     removed_file = False
     if path.exists():
         path.unlink()
