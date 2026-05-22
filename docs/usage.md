@@ -160,7 +160,33 @@ When a menu is open, the cursor returns to UI-click mode.
 
 ______________________________________________________________________
 
-## 8. Pipeline patterns
+## 8. Recording video and audio
+
+`vrcpilot record` captures video, audio, or both. File output picks the container from the resolved mode (MP4 for anything with video, WAV for audio only); stdout is always a self-describing Matroska (MKV) byte stream so downstream tools like `ffmpeg` can consume it without extra format flags.
+
+```bash
+# Video + audio MP4, 10 seconds
+vrcpilot record -o /tmp/vrc.mp4 --duration 10
+
+# Video only
+vrcpilot record --video -o /tmp/vrc_video.mp4 --duration 10
+
+# Audio only (proc-tap process loopback — VRChat-only, no system audio)
+vrcpilot record --audio -o /tmp/vrc_audio.wav --duration 10
+
+# Stream MKV to ffmpeg for re-encoding without temp files
+vrcpilot record --duration 5 | ffmpeg -i - -c copy /tmp/vrc.mkv
+```
+
+- The extension of `-o PATH` must match the mode (`.mp4` for video / both, `.wav` for audio-only); a mismatch exits `2`.
+- `--fps` defaults to 30 and is rejected (exit `2`) when combined with `--audio` alone.
+- Omit `--duration` to keep recording until Ctrl+C.
+
+See [`cli.md` record](cli.md#record) for the full flag reference and exit codes.
+
+______________________________________________________________________
+
+## 9. Pipeline patterns
 
 ### Probe → act → re-probe
 
@@ -208,7 +234,7 @@ This launches VRChat, captures and OCRs the Launch Pad, then shuts down — a us
 
 ______________________________________________________________________
 
-## 9. Recovering from common failures
+## 10. Recovering from common failures
 
 | Symptom                                      | Likely cause                                                | Fix                                                     |
 | -------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------- |
@@ -223,7 +249,7 @@ ______________________________________________________________________
 
 ______________________________________________________________________
 
-## 10. Python equivalents
+## 11. Python equivalents
 
 Everything above has a Python counterpart in [`python-api.md`](python-api.md). The end-to-end flow:
 

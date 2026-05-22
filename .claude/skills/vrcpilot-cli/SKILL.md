@@ -1,6 +1,6 @@
 ---
 name: vrcpilot-cli
-description: vrcpilot CLI (uv run vrcpilot ...) のサブコマンド表、screenshot → ocr / detect 標準パイプライン、record で音声を WAV / s16le stdout pipe する典型例、osc 7 アクションの典型例、OCR/detect/mouse の座標系（すべて VRChat window-local）。CLI を実行する／引数を組み立てる／パイプラインを書く前に読む
+description: vrcpilot CLI (uv run vrcpilot ...) のサブコマンド表、screenshot → ocr / detect 標準パイプライン、record で映像/音声/両方を MP4 / WAV / MKV self-describing stdout に流す典型例、osc 7 アクションの典型例、OCR/detect/mouse の座標系（すべて VRChat window-local）。CLI を実行する／引数を組み立てる／パイプラインを書く前に読む
 ---
 
 # vrcpilot CLI 参照リファレンス
@@ -10,22 +10,21 @@ description: vrcpilot CLI (uv run vrcpilot ...) のサブコマンド表、scree
 
 ## サブコマンド一覧
 
-| サブコマンド | 用途                                                                                                   | 状態系の出力                                                                                 |
-| ------------ | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
-| `launch`     | Steam 経由で VRChat を起動。`--no-vr` / `--screen-{width,height}` / `--osc-in-port` / `--wait-timeout` | stdout に PID（待機完了時）、`--wait-timeout 0` で即時 return                                |
-| `pid`        | 動作中 VRChat の PID 一覧                                                                              | 1 行 1 PID。誰もいなければ exit 1                                                            |
-| `terminate`  | VRChat を強制終了（idempotent）                                                                        | 殺した PID のみ stdout、対象なしは無音で exit 0                                              |
-| `focus`      | VRChat ウィンドウを前面に                                                                              | 成功は無音、失敗は stderr 1 行                                                               |
-| `unfocus`    | VRChat ウィンドウを z-order 末尾に                                                                     | 同上                                                                                         |
-| `screenshot` | 1 枚撮って `Screenshot` を YAML で吐く                                                                 | `-o <path>` で PNG を書き出し YAML に `path:` を、未指定で base64 PNG を埋め込む（`image:`） |
-| `capture`    | 一定 FPS で録画                                                                                        | `-o <path>` で mp4、未指定で y4m を stdout（TTY なら拒否）                                   |
-| `record`     | VRChat の音声を録音 (`proc-tap` 経由で VRChat.exe の音のみ抽出)                                        | `-o <path>` で WAV、未指定で RAW PCM s16le を stdout（TTY なら拒否）                         |
-| `mouse`      | `move` / `click` / `scroll`（`press` / `release` は意図的に未公開）                                    | guard 失敗で exit 1                                                                          |
-| `keyboard`   | `press` のみ公開（`down` / `up` をプロセスに跨いで持てないため）                                       | `--duration` のデフォルト 0.1（VRChat に届く下限。0.0 にしない）                             |
-| `paste`      | クリップボード経由で文字列を Ctrl+V 投入（非 ASCII 用）                                                | 引数 or stdin から読む。tty かつ引数なしは exit 2                                            |
-| `ocr`        | `Screenshot` を入力に RapidOCR を回し、認識単語を YAML で返す                                          | `--viz` で bbox 重ね PNG。**`--screenshot` か stdin pipe が必須**                            |
-| `detect`     | `Screenshot` 内をクエリ画像でテンプレート検索                                                          | `-q <png>` 必須。`--threshold` / `--top-k` / `--viz`。同じく入力 YAML 必須                   |
-| `osc`        | VRChat OSC 送信 (`send` / `axis` / `tap` / `hold` / `chatbox` / `typing` / `avatar` の 7 アクション)   | 成功は無音。range / name 違反で exit 1、`chatbox` は tty かつ引数なしで exit 2               |
+| サブコマンド | 用途                                                                                                   | 状態系の出力                                                                                                             |
+| ------------ | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `launch`     | Steam 経由で VRChat を起動。`--no-vr` / `--screen-{width,height}` / `--osc-in-port` / `--wait-timeout` | stdout に PID（待機完了時）、`--wait-timeout 0` で即時 return                                                            |
+| `pid`        | 動作中 VRChat の PID 一覧                                                                              | 1 行 1 PID。誰もいなければ exit 1                                                                                        |
+| `terminate`  | VRChat を強制終了（idempotent）                                                                        | 殺した PID のみ stdout、対象なしは無音で exit 0                                                                          |
+| `focus`      | VRChat ウィンドウを前面に                                                                              | 成功は無音、失敗は stderr 1 行                                                                                           |
+| `unfocus`    | VRChat ウィンドウを z-order 末尾に                                                                     | 同上                                                                                                                     |
+| `screenshot` | 1 枚撮って `Screenshot` を YAML で吐く                                                                 | `-o <path>` で PNG を書き出し YAML に `path:` を、未指定で base64 PNG を埋め込む（`image:`）                             |
+| `record`     | VRChat の映像 / 音声を録画。`--video` / `--audio` でモード選択（両方 / 未指定はどちらも記録）          | `-o file.mp4` (映像 / 両方) または `-o file.wav` (音声のみ)。`-o` 未指定で self-describing MKV を stdout（TTY なら拒否） |
+| `mouse`      | `move` / `click` / `scroll`（`press` / `release` は意図的に未公開）                                    | guard 失敗で exit 1                                                                                                      |
+| `keyboard`   | `press` のみ公開（`down` / `up` をプロセスに跨いで持てないため）                                       | `--duration` のデフォルト 0.1（VRChat に届く下限。0.0 にしない）                                                         |
+| `paste`      | クリップボード経由で文字列を Ctrl+V 投入（非 ASCII 用）                                                | 引数 or stdin から読む。tty かつ引数なしは exit 2                                                                        |
+| `ocr`        | `Screenshot` を入力に RapidOCR を回し、認識単語を YAML で返す                                          | `--viz` で bbox 重ね PNG。**`--screenshot` か stdin pipe が必須**                                                        |
+| `detect`     | `Screenshot` 内をクエリ画像でテンプレート検索                                                          | `-q <png>` 必須。`--threshold` / `--top-k` / `--viz`。同じく入力 YAML 必須                                               |
+| `osc`        | VRChat OSC 送信 (`send` / `axis` / `tap` / `hold` / `chatbox` / `typing` / `avatar` の 7 アクション)   | 成功は無音。range / name 違反で exit 1、`chatbox` は tty かつ引数なしで exit 2                                           |
 
 ## 標準パイプライン（重要）
 
@@ -50,35 +49,54 @@ uv run vrcpilot detect -q ./assets/button.png --screenshot /tmp/shot.yaml > /tmp
 - `-o <path>` あり: PNG を書き出し、YAML には `path:` で絶対パスを記録（履歴を残す pipeline 向け）
 - `-o` なし（デフォルト）: PNG ファイルは作らず、YAML 内 `image:` に base64 PNG を埋め込む（pipe で消費する想定）
 
-## 音声録音 (`record`)
+## 録画 (`record`)
 
-`vrcpilot record` は `proc-tap` 経由で **VRChat.exe からの音だけ** を抽出する
-（Discord / OBS / 他アプリの音は混ざらない）。出力先で挙動が分かれる:
+`vrcpilot record` は VRChat の映像 / 音声 / 両方を統合的に録画する。
+映像は `Capture` と同じく focus-free（Win32 WGC / X11 Composite）で取得し、
+音声は `proc-tap` (Windows / macOS) または PipeWire (Linux) 経由で
+**VRChat の音だけ** を抽出する（Discord / OBS / 他アプリは混ざらない）。
 
-- `-o <path>` あり: 48 kHz / stereo / 16-bit PCM の WAV ファイルに書き出し、
-  完了時に stdout に絶対パスを 1 行
-- `-o` なし: ヘッダ無し RAW PCM s16le (48 kHz / stereo / interleaved /
-  little-endian) を stdout に流す。**自己記述しないので受け側で
-  `-f s16le -ar 48000 -ac 2` の指定必須**。TTY に流そうとすると exit 1
+モードは `--video` / `--audio` フラグで決まる（両方付与 or どちらも無しは
+`both`）。`-o` 指定時は拡張子がモードと一致しないと exit 2。
 
-```bash
-# WAV ファイルに 5 秒録音
-uv run vrcpilot record -o /tmp/vrc.wav --duration 5
-
-# ディレクトリ指定 → vrcpilot_record_<UTC>.wav が中に作られる
-uv run vrcpilot record -o /tmp/
-
-# RAW PCM を ffmpeg に投げて好きな形式に再エンコード
-uv run vrcpilot record --duration 5 \
-  | ffmpeg -f s16le -ar 48000 -ac 2 -i - -y /tmp/vrc.opus
-
-# Ctrl+C 停止モード（duration 無し）
-uv run vrcpilot record -o /tmp/vrc.wav
+```
+vrcpilot record [-o PATH] [--video] [--audio] [--fps FLOAT] [--duration SECONDS]
 ```
 
-VRChat 未起動なら `vrcpilot: VRChat is not running` を stderr に出して exit 1。
-進捗メッセージは常に stderr で、stdout は WAV モードでは絶対パス 1 行、
-pipe モードでは PCM バイト列だけが流れる（パイプ整合性を担保）。
+| `--video` | `--audio` | mode    | 必須拡張子 |
+| --------- | --------- | ------- | ---------- |
+| なし      | なし      | `both`  | `.mp4`     |
+| あり      | なし      | `video` | `.mp4`     |
+| なし      | あり      | `audio` | `.wav`     |
+| あり      | あり      | `both`  | `.mp4`     |
+
+- `-o PATH` がディレクトリなら `<dir>/vrcpilot_record_<YYYYMMDD_HHMMSS>.{mp4,wav}`
+  を内部で組み立てる
+- `-o` 未指定なら **モードに関わらず常に self-describing MKV (matroska,
+  libx264 + AAC)** を stdout に流す。TTY 出力は exit 1
+- `--fps` の既定値は 30.0。`--audio` 単独で `--fps` を渡すと exit 2
+- 進捗メッセージは常に stderr、stdout はファイルモードで絶対パス 1 行、
+  pipe モードで MKV バイト列のみが流れる（パイプ整合性を担保）
+
+```bash
+# 映像 + 音声 MP4 を 10 秒
+uv run vrcpilot record -o /tmp/vrc.mp4 --duration 10
+
+# 映像のみ MP4
+uv run vrcpilot record --video -o /tmp/vrc_video.mp4 --duration 10
+
+# 音声のみ WAV
+uv run vrcpilot record --audio -o /tmp/vrc_audio.wav --duration 10
+
+# 自己記述 MKV を stdout に流して ffmpeg に直接渡す
+uv run vrcpilot record --duration 5 | ffmpeg -i - -c copy /tmp/vrc.mkv
+
+# Ctrl+C 停止モード（duration 無し）
+uv run vrcpilot record -o /tmp/vrc.mp4
+```
+
+VRChat 未起動 / フレーム or サンプルがゼロ件 / pipe で TTY のいずれかは
+exit 1。引数不整合（拡張子ミスマッチ、`--fps` + `--audio` 単独）は exit 2。
 
 ## OSC コマンドの典型例
 

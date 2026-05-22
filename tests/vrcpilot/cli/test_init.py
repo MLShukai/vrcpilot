@@ -76,22 +76,6 @@ class TestArgcompleteIntegration:
 
         assert exit_code == 1
 
-    def test_capture_output_has_files_completer(self):
-        parser = build_parser()
-
-        subparsers_action = parser._subparsers._group_actions[0]  # type: ignore[union-attr]
-        capture_parser = subparsers_action.choices["capture"]
-        output_action = next(
-            action
-            for action in capture_parser._actions
-            if "--output" in action.option_strings
-        )
-
-        completer = output_action.completer  # type: ignore[attr-defined]
-        assert isinstance(completer, FilesCompleter)
-        allowednames = completer.allowednames
-        assert any("mp4" in name for name in allowednames)
-
     def test_record_output_has_files_completer(self):
         parser = build_parser()
 

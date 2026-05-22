@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking
+
+- Removed the `vrcpilot capture` subcommand. Its functionality is folded into `vrcpilot record --video` (MP4 file output) and `vrcpilot record --video` without `-o` (self-describing MKV byte stream over stdout). The legacy `y4m` stdout format is gone.
+- Removed `vrcpilot.speaker.WavFileSink` and `vrcpilot.speaker.RawPcmStdoutSink` from the public API (they were re-exported by mistake; `vrcpilot.capture.Mp4FrameSink` / `Y4mStdoutFrameSink` were never public). The CLI now uses internal PyAV-backed muxers (`vrcpilot.cli.record.muxer`, intentionally not part of the public surface). Users who composed the old sinks directly should write their own writer on top of `CaptureLoop` / `SpeakerLoop` — see [`docs/python-api.md`](docs/python-api.md).
+
+### Added
+
+- `vrcpilot record` now records video, audio, or both in a single subcommand. The `--video` / `--audio` flags select the mode (passing both, or neither, records both video and audio). File output is MP4 for video / both modes (`-o file.mp4` or a directory argument) and WAV for audio-only mode (`--audio -o file.wav`); a mismatched extension exits `2`. With `-o` omitted, the recording is streamed to stdout as a self-describing Matroska (MKV) container (libx264 + AAC) regardless of mode, so downstream tools like `ffmpeg -i -` can consume it directly.
+- New `--fps FLOAT` flag on `vrcpilot record` (default `30.0`); combining it with `--audio` alone is rejected with exit `2` and `vrcpilot: --fps is not meaningful with --audio (drop --fps or remove --audio)`.
+
+### Changed
+
+- PyAV (`av>=12,<16`) is now a runtime dependency, replacing `cv2.VideoWriter` and the standard `wave` module for the record subcommand's muxing path.
+
 ## [0.1.0] - 2026-05-15
 
 First stable release. The release pipeline rehearsed in `0.1.0rc1` is now promoted to stable; the Python and CLI surfaces are unchanged from the release candidate.
