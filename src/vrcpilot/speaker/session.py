@@ -5,13 +5,15 @@ mirroring :class:`vrcpilot.capture.Capture`. The wrapper owns the
 closed-state flag so backend implementations only have to honour the
 ABC contract.
 
-Linux dispatches to :class:`vrcpilot.speaker.pipewire.PipeWireSpeakerBackend`
-(native PipeWire CLIs + ``pulsectl`` control plane). Windows and macOS
-fall through to :class:`vrcpilot.speaker.proctap.ProcTapSpeakerBackend`,
-which delegates process-loopback to the cross-platform ``proc-tap``
-package (Windows is stable upstream; macOS is experimental). Both
-backends are imported lazily so a missing optional dependency on one
-platform never breaks ``import vrcpilot.speaker`` on the other.
+Strict two-way platform dispatch: Linux uses
+:class:`vrcpilot.speaker.linux.PipeWireSpeakerBackend` (native PipeWire
+CLIs + ``pulsectl`` control plane) and Windows uses
+:class:`vrcpilot.speaker.windows.ProcTapSpeakerBackend` (process
+loopback via the ``proc-tap`` package, which is Windows-only here).
+Every other platform raises :class:`NotImplementedError` at dispatch
+time. Both backends are imported lazily so a missing optional
+dependency on one platform never breaks ``import vrcpilot.speaker``
+on the other.
 """
 
 from __future__ import annotations
@@ -33,21 +35,21 @@ def _select_speaker_backend(
     """Return a started :class:`SpeakerBackend` for the host platform.
 
     Imports the chosen backend lazily so platform-specific dependencies
-    (``proc-tap`` on Windows / macOS, ``pulsectl`` and the PipeWire CLIs
-    on Linux) never need to be importable on the other platform. Linux
-    selects :class:`PipeWireSpeakerBackend`; every other platform falls
-    through to :class:`ProcTapSpeakerBackend`, whose own error message
-    (raised from ``proctap.backends.get_backend``) surfaces the most
-    useful diagnosis if the host OS is unsupported.
+    (``proc-tap`` on Windows, ``pulsectl`` and the PipeWire CLIs on
+    Linux) never need to be importable on the other platform. Linux
+    selects :class:`PipeWireSpeakerBackend`, Windows selects
+    :class:`ProcTapSpeakerBackend`, and every other platform raises
+    :class:`NotImplementedError` -- there is no fall-through path.
     """
     if sys.platform == "linux":
-        from vrcpilot.speaker.pipewire import PipeWireSpeakerBackend
+        from vrcpilot.speaker.linux import PipeWireSpeakerBackend
 
         return PipeWireSpeakerBackend(read_timeout=read_timeout)
+    if sys.platform == "win32":
+        from vrcpilot.speaker.windows import ProcTapSpeakerBackend
 
-    from vrcpilot.speaker.proctap import ProcTapSpeakerBackend
-
-    return ProcTapSpeakerBackend(read_timeout=read_timeout)
+        return ProcTapSpeakerBackend(read_timeout=read_timeout)
+    raise NotImplementedError(f"Speaker is not supported on {sys.platform}")
 
 
 class Speaker:
@@ -66,8 +68,10 @@ class Speaker:
 
     Raises:
         RuntimeError: Backend cannot start (VRChat is not running, or
-            the underlying ``proc-tap`` capture failed to open).
+            the underlying platform-specific capture failed to open).
         ValueError: ``read_timeout`` is not strictly positive.
+        NotImplementedError: The host platform is neither Linux nor
+            Windows.
     """
 
     _backend: SpeakerBackend
