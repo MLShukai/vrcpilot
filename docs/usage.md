@@ -170,7 +170,21 @@ ______________________________________________________________________
 2. Open **Settings → System → Sound** and confirm that the playback device `CABLE Input` and the recording device `CABLE Output` are both listed.
 3. In VRChat's **Audio** settings, switch the microphone input to **`CABLE Output (VB-Audio Virtual Cable)`**. `vrcpilot mic` writes to `CABLE Input`, and VRChat reads that audio back through `CABLE Output`.
 
-On Linux / macOS, `sounddevice` is not a `vrcpilot` dependency yet, so install it yourself and pass an explicit `--device` (or set `$VRCPILOT_MIC_DEVICE`).
+### One-time setup (Linux)
+
+1. Ensure PipeWire (with `pipewire-pulse`) and `libpulse0` are installed.
+   On Debian/Ubuntu: `sudo apt-get install pipewire pipewire-pulse libpulse0`.
+2. Register the virtual mic once: `vrcpilot linux-mic register`. This writes
+   `~/.config/pipewire/pipewire.conf.d/vrcpilot-mic.conf` and loads the
+   `module-null-sink` immediately so the device is usable in the current
+   session.
+3. In VRChat's **Audio** settings, switch the microphone input to
+   **`Monitor of VRCPilot Virtual Mic`**. `vrcpilot mic` writes to
+   `VRCPilotMic` (the sink) and VRChat picks up that audio from
+   `VRCPilotMic.monitor` (the matching monitor source).
+
+Check the status anytime with `vrcpilot linux-mic status`; remove the
+registration with `vrcpilot linux-mic unregister`.
 
 ### Smoke test
 
@@ -187,7 +201,7 @@ vrcpilot record -o - --duration 3 | vrcpilot mic --format s16le --channels 2
 
 ### Stream from an LLM agent
 
-Open a `Mic` once and pump one chunk per `play()` call as the agent produces them. The session keeps a `sounddevice.OutputStream` alive for the duration of the `with` block, so the constructor pays the device-resolution cost once and `play(chunk)` only does a buffer write per iteration.
+Open a `Mic` once and pump one chunk per `play()` call as the agent produces them. The session keeps a `soundcard` player alive for the duration of the `with` block, so the constructor pays the device-resolution cost once and `play(chunk)` only does a buffer write per iteration.
 
 ```python
 from collections.abc import Iterator
@@ -202,12 +216,12 @@ def agent_tts_chunks() -> Iterator[NDArray[np.float32]]:
     for _ in range(10):
         yield np.zeros(4800, dtype=np.float32)  # 100 ms of silence per chunk
 
-with vrcpilot.Mic(sample_rate=48000, channels=1) as mic:  # picks up CABLE Input on Windows
+with vrcpilot.Mic(sample_rate=48000, channels=1) as mic:  # picks up CABLE Input on Windows, VRCPilotMic on Linux
     for chunk in agent_tts_chunks():
         mic.play(chunk)
 ```
 
-The chunk shape must match the channel count chosen at construction time (`(N,)` for mono, `(N, channels)` for multi-channel). `play()` blocks if PortAudio's internal buffer is full, giving the caller natural back-pressure for live streams.
+The chunk shape must match the channel count chosen at construction time (`(N,)` for mono, `(N, channels)` for multi-channel). `play()` blocks if the backend's internal buffer is full, giving the caller natural back-pressure for live streams.
 
 ______________________________________________________________________
 

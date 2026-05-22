@@ -9,23 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Virtual mic output** (`vrcpilot.mic`): `Mic` opens a sounddevice
-  OutputStream in its constructor for a fixed `(sample_rate, channels)`
-  and writes one float32 chunk per `play(chunk)` call, so callers drive
-  the cadence (`for chunk in tts.stream(): mic.play(chunk)`). The
-  session is released via context manager, explicit `close()`, or the
-  finaliser. Windows uses VB-Audio Virtual Cable as the default
-  (`"CABLE Input"`); Linux/macOS require an explicit `device=` /
-  `$VRCPILOT_MIC_DEVICE` (default device names are reserved for a
-  follow-up).
+- **Virtual mic output** (`vrcpilot.mic`): `Mic` opens a `soundcard`
+  player in its constructor for a fixed `(sample_rate, channels)` and
+  writes one float32 chunk per `play(chunk)` call, so callers drive the
+  cadence (`for chunk in tts.stream(): mic.play(chunk)`). The session is
+  released via context manager, explicit `close()`, or the finaliser.
+  Windows uses VB-Audio Virtual Cable as the default (`"CABLE Input"`);
+  Linux uses `VRCPilotMic` after `vrcpilot linux-mic register`.
 - **CLI**: `vrcpilot mic` subcommand. Reads stdin by default so
   `vrcpilot record -o - | vrcpilot mic` works; also accepts `-i path.wav` for
   16-bit signed PCM WAV files, with `--format {auto,wav,s16le}`,
   `--rate`, `--channels`, `--chunk-ms`, and `--device` overrides.
-- `vrcpilot.MicDeviceNotFoundError` raised when sounddevice cannot find a
+- **CLI**: `vrcpilot linux-mic register / unregister / status`
+  subcommand for managing the persistent `VRCPilotMic` PipeWire virtual
+  mic on Linux. `register` writes
+  `~/.config/pipewire/pipewire.conf.d/vrcpilot-mic.conf` and (unless
+  `--no-runtime-load` is passed) loads `module-null-sink` immediately
+  so the sink is usable in the current session.
+- **Python API**: `vrcpilot.mic.linux.register_virtual_mic`,
+  `unregister_virtual_mic`, `is_registered`, and the `RegisterResult`
+  dataclass. The submodule is Linux-only and raises `RuntimeError` at
+  import time on other platforms.
+- `vrcpilot.MicDeviceNotFoundError` raised when `soundcard` cannot find a
   matching output device.
 - `VRCPILOT_MIC_DEVICE` environment variable to override the resolved device
   name.
+
+### Changed
+
+- **Virtual mic backend**: replaced `sounddevice` (PortAudio) with
+  `soundcard` (libpulse on Linux, WASAPI on Windows). Linux now
+  enumerates individual PulseAudio sinks, so `vrcpilot mic` can resolve
+  `VRCPilotMic` by name and `vrcpilot.mic.default_device_name()`
+  returns `"VRCPilotMic"` on Linux. **Breaking**: `Mic.device_index: int` is replaced by `Mic.device_id: str` (the `soundcard` `Speaker.id`
+  -- PulseAudio sink name on Linux, WASAPI device id on Windows). On
+  Linux this also adds a `libpulse0` system dependency (already pulled
+  in by `pipewire-pulse` on most distros).
 
 ## [0.1.0] - 2026-05-15
 

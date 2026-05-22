@@ -210,14 +210,14 @@ vrcpilot mic [-i PATH] [--device NAME] [--rate HZ] [--channels {1,2}]
              [--format {auto,wav,s16le}] [--chunk-ms MS]
 ```
 
-| Option                      | Default | Description                                                                                                                                                                                                    |
-| --------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `-i PATH`, `--input PATH`   | `-`     | Audio source. `-` reads from stdin. A `.wav` path is decoded with the stdlib `wave` module (16-bit signed PCM required). Any other path needs `--format s16le`.                                                |
-| `--device NAME`             | unset   | Output-device name substring (passed to `sounddevice` matching). When unset, falls back to `$VRCPILOT_MIC_DEVICE`, then the OS default (`CABLE Input` on Windows; Linux / macOS require an explicit value).    |
-| `--rate HZ`                 | `48000` | Sample rate for raw `s16le` input. Ignored for WAV (the WAV header wins).                                                                                                                                      |
-| `--channels {1,2}`          | `2`     | Channel count for raw `s16le` input. Default is `2` to match `vrcpilot record`'s stereo `s16le` pipe output. Ignored for WAV.                                                                                  |
-| `--format {auto,wav,s16le}` | `auto`  | Force input interpretation. `auto` + file → decoded as WAV iff the extension is `.wav` (other extensions exit `2`). `auto` + stdin → raw `s16le` (matches `vrcpilot record`'s pipe mode, which is headerless). |
-| `--chunk-ms MS`             | `100`   | Chunk size in milliseconds for raw `s16le` streaming. Only affects pull cadence; PortAudio drains across chunks regardless.                                                                                    |
+| Option                      | Default | Description                                                                                                                                                                                                                  |
+| --------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `-i PATH`, `--input PATH`   | `-`     | Audio source. `-` reads from stdin. A `.wav` path is decoded with the stdlib `wave` module (16-bit signed PCM required). Any other path needs `--format s16le`.                                                              |
+| `--device NAME`             | unset   | Output-device name substring (passed to `soundcard` matching). When unset, falls back to `$VRCPILOT_MIC_DEVICE`, then the OS default (`CABLE Input` on Windows; `VRCPilotMic` on Linux after `vrcpilot linux-mic register`). |
+| `--rate HZ`                 | `48000` | Sample rate for raw `s16le` input. Ignored for WAV (the WAV header wins).                                                                                                                                                    |
+| `--channels {1,2}`          | `2`     | Channel count for raw `s16le` input. Default is `2` to match `vrcpilot record`'s stereo `s16le` pipe output. Ignored for WAV.                                                                                                |
+| `--format {auto,wav,s16le}` | `auto`  | Force input interpretation. `auto` + file → decoded as WAV iff the extension is `.wav` (other extensions exit `2`). `auto` + stdin → raw `s16le` (matches `vrcpilot record`'s pipe mode, which is headerless).               |
+| `--chunk-ms MS`             | `100`   | Chunk size in milliseconds for raw `s16le` streaming. Only affects pull cadence; the backend drains across chunks regardless.                                                                                                |
 
 **Input resolution**:
 
@@ -227,11 +227,11 @@ vrcpilot mic [-i PATH] [--device NAME] [--rate HZ] [--channels {1,2}]
 
 **Output**: progress messages are written to stderr (sample rate, etc.). Stdout is **silent** so this subcommand can sit downstream of a `record` pipe without polluting its byte stream.
 
-**Exit codes**: `0` on success. `1` for device-lookup failure (`MicDeviceNotFoundError`), unsupported WAV (non-16-bit signed PCM), PortAudio runtime failure, file-open errors, or `sounddevice` not installed. `2` for argument-shape errors: `-i -` against a TTY, or `--format auto` against a non-WAV file path.
+**Exit codes**: `0` on success. `1` for device-lookup failure (`MicDeviceNotFoundError`), unsupported WAV (non-16-bit signed PCM), `soundcard` / libpulse / WASAPI runtime failure, file-open errors, or `soundcard` not installed. `2` for argument-shape errors: `-i -` against a TTY, or `--format auto` against a non-WAV file path.
 
-**Side effects**: opens a PortAudio output stream on the resolved device and writes the float-converted payload to it. On Windows + VB-Cable, this means VRChat (configured to use `CABLE Output` as its mic) receives the audio as if it were live microphone input.
+**Side effects**: opens a `soundcard` output player on the resolved device and writes the float-converted payload to it. On Windows + VB-Cable, this means VRChat (configured to use `CABLE Output` as its mic) receives the audio as if it were live microphone input. On Linux + PipeWire, the audio reaches VRChat through `Monitor of VRCPilot Virtual Mic`.
 
-**Requirements**: on Windows, install [VB-Audio Virtual Cable](https://vb-audio.com/Cable/) and switch VRChat's microphone to `CABLE Output`. On Linux / macOS, install `sounddevice` yourself and supply `--device` (or `$VRCPILOT_MIC_DEVICE`) — no default device is configured.
+**Requirements**: on Windows, install [VB-Audio Virtual Cable](https://vb-audio.com/Cable/) and switch VRChat's microphone to `CABLE Output`. On Linux, run `vrcpilot linux-mic register` first (this creates the `VRCPilotMic` PipeWire sink) and switch VRChat's microphone to `Monitor of VRCPilot Virtual Mic`; `libpulse0` must also be installed because `soundcard` links against it via CFFI.
 
 **Examples**:
 
@@ -245,6 +245,52 @@ vrcpilot record -o - --duration 3 | vrcpilot mic --format s16le --channels 2
 # Raw PCM file with an explicit format
 vrcpilot mic -i tts.raw --format s16le --rate 24000 --channels 1
 ```
+
+______________________________________________________________________
+
+## linux-mic
+
+Manage the persistent `VRCPilotMic` virtual mic on Linux (PipeWire
+`module-null-sink`). Three actions are exposed under the same parent
+subparser:
+
+```
+vrcpilot linux-mic register [--no-runtime-load]
+vrcpilot linux-mic unregister
+vrcpilot linux-mic status
+```
+
+| Action       | Description                                                                                                                                        |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `register`   | Write the persistent PipeWire config fragment and (by default) load `module-null-sink` now so the sink is usable in the current session.           |
+| `unregister` | Remove the config fragment and unload any matching runtime module. Idempotent — exits `0` even when nothing was registered.                        |
+| `status`     | Report whether the config is present, whether the runtime module is loaded, and whether `soundcard` can see the device. Always exits `0` on Linux. |
+
+| Option              | Applies to | Default | Description                                                                                                                                  |
+| ------------------- | ---------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--no-runtime-load` | `register` | off     | Skip the immediate `pulsectl` `module_load` step. The persistent config is still written; restart PipeWire to pick it up on a later session. |
+
+**Output**: human-readable progress goes to stderr (config path, runtime
+load result, VRChat-side hint). The `status` action additionally writes
+a machine-readable summary to stdout with the fixed vocabulary
+`config: {present|absent}`, `config_path: <path>`, `runtime: {loaded|not loaded|unavailable}`, and `soundcard: {visible|not visible|unavailable}` (one key per line). `unavailable` is paired with
+an `error: <message>` line on stderr describing the underlying probe
+failure.
+
+**Exit codes**:
+
+- `0` on success (including `register`/`unregister` when the runtime
+  step degrades to a warning, and `status` on any Linux probe outcome).
+- `2` on non-Linux platforms — the command short-circuits with a hint
+  pointing at VB-Cable for Windows.
+
+**Side effects**: writes / removes
+`$XDG_CONFIG_HOME/pipewire/pipewire.conf.d/vrcpilot-mic.conf` (or
+`~/.config/...` when the variable is unset). When the runtime load is
+enabled, calls `pulsectl.Pulse.module_load("module-null-sink", ...)` —
+runtime failures (missing `pulsectl`, control-plane error) degrade to a
+warning on stderr without changing the exit code, because the
+persistent config is the source of truth.
 
 ______________________________________________________________________
 
