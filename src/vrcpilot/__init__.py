@@ -27,6 +27,7 @@ from vrcpilot.detect import (
     TemplateDetectEngine,
     detect,
 )
+from vrcpilot.mic import Mic, MicDeviceNotFoundError
 
 # Importing ``ocr`` here shadows the ``vrcpilot.ocr`` submodule attribute
 # so ``vrcpilot.ocr(shot)`` calls the function; submodule imports still
@@ -67,6 +68,8 @@ __all__ = [
     "Key",
     "keyboard",
     "launch",
+    "Mic",
+    "MicDeviceNotFoundError",
     "mouse",
     "MouseButton",
     "ocr",
