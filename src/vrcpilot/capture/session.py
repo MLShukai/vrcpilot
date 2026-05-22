@@ -19,11 +19,11 @@ def _select_capture_backend(*, frame_timeout: float) -> CaptureBackend:
     importable on the other platform.
     """
     if sys.platform == "win32":
-        from .win32 import Win32CaptureBackend
+        from .windows import Win32CaptureBackend
 
         return Win32CaptureBackend(frame_timeout=frame_timeout)
     if sys.platform == "linux":
-        from .x11 import X11CaptureBackend
+        from .linux import X11CaptureBackend
 
         return X11CaptureBackend()
     raise NotImplementedError(f"Capture is not supported on {sys.platform}")

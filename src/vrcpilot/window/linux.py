@@ -13,9 +13,9 @@ import Xlib.error
 import Xlib.protocol.event
 from Xlib import X
 
+from vrcpilot.linux import find_vrchat_window, x11_display
 from vrcpilot.process import find_pid
 from vrcpilot.session import is_wayland_native
-from vrcpilot.x11 import find_vrchat_window, x11_display
 
 
 def focus_window() -> bool:

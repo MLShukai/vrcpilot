@@ -1,4 +1,4 @@
-"""Tests for :mod:`vrcpilot.win32`.
+"""Tests for :mod:`vrcpilot.windows`.
 
 The module under test imports Windows-only DLLs (``pywintypes``,
 ``win32gui``, ``win32process``) and raises ``ImportError`` on any
@@ -18,7 +18,7 @@ if sys.platform != "win32":
 
 from pytest_mock import MockerFixture
 
-from vrcpilot.win32 import find_vrchat_hwnd, get_window_rect
+from vrcpilot.windows import find_vrchat_hwnd, get_window_rect
 
 
 class TestFindVrchatHwnd:
@@ -51,7 +51,7 @@ class TestGetWindowRect:
         import pywintypes
 
         mocker.patch(
-            "vrcpilot.win32.win32gui.GetWindowRect",
+            "vrcpilot.windows.win32gui.GetWindowRect",
             side_effect=pywintypes.error(
                 1400, "GetWindowRect", "Invalid window handle."
             ),
@@ -76,6 +76,6 @@ class TestGetWindowRect:
         # Degenerate rectangles cannot occur for a real visible HWND but
         # are cheap to drive via a patch and document the boundary
         # contract (``width <= 0 or height <= 0`` -> ``None``).
-        mocker.patch("vrcpilot.win32.win32gui.GetWindowRect", return_value=rect)
+        mocker.patch("vrcpilot.windows.win32gui.GetWindowRect", return_value=rect)
 
         assert get_window_rect(12345) is None

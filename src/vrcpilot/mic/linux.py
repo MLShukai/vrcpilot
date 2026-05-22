@@ -22,14 +22,9 @@ and hosts without ``pulsectl`` can still write the persistent config.
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING
 
-# Runtime guard: importing this module off-Linux is a programming
-# error. Skip the raise during type-checking so pyright analyses the
-# module on every platform (otherwise the CLI wrapper module sees
-# Unknown symbols when checked from Windows).
-if not TYPE_CHECKING and sys.platform != "linux":
-    raise RuntimeError("vrcpilot.mic.linux is Linux-only")
+if sys.platform != "linux":
+    raise ImportError("vrcpilot.mic.linux is Linux-only")
 
 import logging
 import os
@@ -66,7 +61,7 @@ _CONF_FILENAME: Final[str] = "vrcpilot-mic.conf"
 #: accepts PulseAudio-style ``module-null-sink`` args via libpulse, and
 #: ``device.description`` is written with an underscore so the value
 #: stays a single PulseAudio token (matches
-#: ``src/vrcpilot/speaker/pipewire.py``'s style).
+#: ``src/vrcpilot/speaker/linux.py``'s style).
 _NULL_SINK_ARGS: Final[str] = (
     f"sink_name={VIRTUAL_MIC_SINK_NAME} "
     "sink_properties=device.description=VRCPilot_Virtual_Mic "
@@ -128,8 +123,8 @@ def open_pulse_control(client_name: str = "vrcpilot-mic") -> Any:
     """
     # ``pulsectl`` is a Linux-only conditional dependency
     # (``sys_platform == 'linux'`` in pyproject.toml); silence the
-    # missing-import + unknown-type fallout when pyright runs on Windows.
-    from pulsectl import (  # pyright: ignore[reportMissingTypeStubs, reportMissingImports]
+    # unknown-type fallout from its missing inline annotations.
+    from pulsectl import (  # pyright: ignore[reportMissingTypeStubs]
         Pulse,  # pyright: ignore[reportUnknownVariableType]
     )
 
@@ -213,7 +208,7 @@ def _runtime_load_null_sink() -> str | None:
 
     try:
         # Re-runs must not stack two null-sinks; mirrors
-        # ``_reset_stale_modules`` in ``src/vrcpilot/speaker/pipewire.py``.
+        # ``_reset_stale_modules`` in ``src/vrcpilot/speaker/linux.py``.
         _unload_matching_null_sinks(pulse)
 
         try:

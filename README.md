@@ -103,7 +103,8 @@ as the microphone input.
 
 ### macOS
 
-Not supported.
+Not supported. `import vrcpilot` raises `ImportError` on `sys.platform`
+values other than `"win32"` and `"linux"`.
 
 ## Quick Start (CLI)
 

@@ -1,7 +1,7 @@
-"""Integration-real tests for :mod:`vrcpilot.speaker.proctap`.
+"""Integration-real tests for :mod:`vrcpilot.speaker.windows`.
 
 These tests drive the *real* proc-tap backend against a running VRChat
-process. Unlike :mod:`tests.vrcpilot.speaker.test_proctap` they perform
+process. Unlike :mod:`tests.vrcpilot.speaker.test_windows` they perform
 no factory substitution -- the only purpose here is to catch
 regressions the fakes cannot see (proc-tap initialisation, real packet
 shapes, lifecycle on a live device).
@@ -9,14 +9,12 @@ shapes, lifecycle on a live device).
 Run requirements (any unmet condition causes a test-level
 ``pytest.skip``):
 
+* Host OS is Windows. proc-tap is installed only on Windows here, so
+  module-level skip on any other platform keeps Linux CI green.
 * VRChat is running. The autouse ``_no_real_vrchat`` fixture in
   :mod:`tests.conftest` forces ``find_pid`` to return ``None`` by
   patching ``psutil.process_iter``; each test undoes that patch via
   ``monkeypatch.undo`` so the live process can be observed.
-* Host OS has a proc-tap native backend (Windows/Linux are stable;
-  macOS is experimental). Import failures from proc-tap surface as a
-  test failure rather than a silent skip so an environment regression
-  is loud.
 
 The tests assert only the public contract (dtype, shape, channel
 count, idempotent close). They deliberately do not assert anything
@@ -26,14 +24,26 @@ goal here is plumbing, not audio quality.
 
 from __future__ import annotations
 
+import sys
+
+import pytest
+
+# vrcpilot.speaker.windows raises ImportError on non-Windows hosts
+# (proc-tap is Windows-only-installed), so skip before the production
+# import below would crash pytest collection on Linux CI.
+if sys.platform != "win32":
+    pytest.skip(
+        "vrcpilot.speaker.windows is Windows-only",
+        allow_module_level=True,
+    )
+
 import time
 
 import numpy as np
-import pytest
 
 from vrcpilot import process
 from vrcpilot.speaker.base import CHANNELS, SAMPLE_RATE
-from vrcpilot.speaker.proctap import ProcTapSpeakerBackend
+from vrcpilot.speaker.windows import ProcTapSpeakerBackend
 
 
 @pytest.fixture

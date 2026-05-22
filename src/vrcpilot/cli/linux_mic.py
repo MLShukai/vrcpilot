@@ -5,17 +5,20 @@ Wraps :mod:`vrcpilot.mic.linux` with three actions: ``register``
 ``status`` (config / runtime module / soundcard visibility). The
 parent-subparser shape matches :mod:`vrcpilot.cli.osc`.
 
-Non-Linux invocations short-circuit with exit code ``2`` and a hint
-pointing Windows users at VB-Cable. :mod:`vrcpilot.mic.linux` is
-imported lazily inside the per-action helpers so this module itself
-stays importable on every platform (the top-level CLI builds the parser
-unconditionally).
+The top-level CLI only registers ``linux-mic`` when
+``sys.platform == "linux"``; on other platforms this module is never
+imported. The defensive ``ImportError`` guard below makes a direct
+``import vrcpilot.cli.linux_mic`` off-Linux fail loudly.
 """
 
 from __future__ import annotations
 
-import argparse
 import sys
+
+if sys.platform != "linux":
+    raise ImportError("vrcpilot.cli.linux_mic is Linux-only")
+
+import argparse
 from typing import cast
 
 from vrcpilot.mic.base import LIBPULSE_HINT
@@ -70,8 +73,6 @@ def register(subparsers: SubParsersAction) -> None:
 
 def _run_register(args: argparse.Namespace) -> int:
     """Execute the ``register`` action."""
-    # Lazy import: ``vrcpilot.mic.linux`` raises off-Linux. The OS
-    # guard in :func:`run` must short-circuit before reaching here.
     from vrcpilot.mic import linux as mic_linux
 
     result = mic_linux.register_virtual_mic(runtime_load=not args.no_runtime_load)
@@ -98,8 +99,6 @@ def _run_register(args: argparse.Namespace) -> int:
 
 def _run_unregister() -> int:
     """Execute the ``unregister`` action."""
-    # Lazy import: ``vrcpilot.mic.linux`` raises off-Linux. The OS
-    # guard in :func:`run` must short-circuit before reaching here.
     from vrcpilot.mic import linux as mic_linux
 
     removed = mic_linux.unregister_virtual_mic()
@@ -125,8 +124,6 @@ def _runtime_loaded(sink_name: str) -> tuple[bool, str | None]:
     Goes through :func:`vrcpilot.mic.linux.open_pulse_control` -- the
     seam ``register`` / ``unregister`` / ``status`` all share.
     """
-    # Lazy import: ``vrcpilot.mic.linux`` raises off-Linux. The OS
-    # guard in :func:`run` must short-circuit before reaching here.
     from vrcpilot.mic import linux as mic_linux
 
     try:
@@ -203,8 +200,6 @@ def _run_status() -> int:
     keeps scripts free to ``grep`` stdout without parsing
     failure-detail parentheticals.
     """
-    # Lazy import: ``vrcpilot.mic.linux`` raises off-Linux. The OS
-    # guard in :func:`run` must short-circuit before reaching here.
     from vrcpilot.mic import linux as mic_linux
     from vrcpilot.mic.base import VIRTUAL_MIC_SINK_NAME
 
@@ -234,19 +229,11 @@ def _run_status() -> int:
 def run(args: argparse.Namespace) -> int:
     """Dispatch the requested ``linux-mic`` action.
 
-    Off-Linux returns exit ``2`` with a hint pointing at the Windows
-    alternative; this is a CLI-entry guard, so the ``sys.platform``
-    check stays here and :mod:`vrcpilot.mic.linux` is imported lazily
-    inside the per-action helpers (it raises on import off-Linux).
+    Reaching this function already implies ``sys.platform == "linux"``
+    because :mod:`vrcpilot.cli` only registers ``linux-mic`` in
+    ``_COMMANDS`` on Linux and this module's import-time guard would
+    have raised :class:`ImportError` otherwise.
     """
-    if sys.platform != "linux":
-        print(
-            "vrcpilot: linux-mic is Linux-only; Windows uses VB-Cable, "
-            "see docs/usage.md",
-            file=sys.stderr,
-        )
-        return 2
-
     match args.action:
         case "register":
             return _run_register(args)

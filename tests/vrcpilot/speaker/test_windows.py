@@ -1,10 +1,9 @@
-"""Tests for :mod:`vrcpilot.speaker.proctap`.
+"""Tests for :mod:`vrcpilot.speaker.windows`.
 
 The backend talks to :mod:`proctap` only via its ``_open_capture``
 factory; tests patch that factory with a duck-typed
 :class:`tests.fakes.FakeProcessAudioCapture` so we never need a real
-WASAPI / PulseAudio / CoreAudio device to exercise the read / close
-plumbing.
+WASAPI device to exercise the read / close plumbing.
 
 The autouse ``_no_real_vrchat`` fixture in :mod:`tests.conftest` pins
 :func:`vrcpilot.process.find_pid` to ``None``. Tests that need a real
@@ -13,22 +12,34 @@ PID branch override that via :func:`patch_pid` below.
 
 from __future__ import annotations
 
+import sys
+
+import pytest
+
+# vrcpilot.speaker.windows raises ImportError on non-Windows hosts
+# (proc-tap is Windows-only-installed), so skip before the production
+# import below would crash pytest collection on Linux CI.
+if sys.platform != "win32":
+    pytest.skip(
+        "vrcpilot.speaker.windows is Windows-only",
+        allow_module_level=True,
+    )
+
 import logging
 
 import numpy as np
-import pytest
 from pytest_mock import MockerFixture
 
 from tests.fakes import FakeProcessAudioCapture
 from vrcpilot.speaker.base import CHANNELS
-from vrcpilot.speaker.proctap import ProcTapSpeakerBackend
+from vrcpilot.speaker.windows import ProcTapSpeakerBackend
 
 
 @pytest.fixture
 def patch_pid(mocker: MockerFixture) -> int:
     """Override the autouse ``find_pid`` patch with a deterministic PID."""
     pid = 4242
-    mocker.patch("vrcpilot.speaker.proctap.process.find_pid", return_value=pid)
+    mocker.patch("vrcpilot.speaker.windows.process.find_pid", return_value=pid)
     return pid
 
 
@@ -186,7 +197,7 @@ class TestRead:
         )
         fake.enqueue_bytes(bad_payload.tobytes())
 
-        with caplog.at_level(logging.WARNING, logger="vrcpilot.speaker.proctap"):
+        with caplog.at_level(logging.WARNING, logger="vrcpilot.speaker.windows"):
             try:
                 buf = backend.read()
             finally:

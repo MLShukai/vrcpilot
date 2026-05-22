@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Removed the `vrcpilot capture` subcommand. Its functionality is folded into `vrcpilot record --video` (MP4 file output) and `vrcpilot record --video` without `-o` (self-describing MKV byte stream over stdout). The legacy `y4m` stdout format is gone.
 - Removed `vrcpilot.speaker.WavFileSink` and `vrcpilot.speaker.RawPcmStdoutSink` from the public API (they were re-exported by mistake; `vrcpilot.capture.Mp4FrameSink` / `Y4mStdoutFrameSink` were never public). The CLI now uses internal PyAV-backed muxers (`vrcpilot.cli.record.muxer`, intentionally not part of the public surface). Users who composed the old sinks directly should write their own writer on top of `CaptureLoop` / `SpeakerLoop` — see [`docs/python-api.md`](docs/python-api.md).
+- **Platform support narrowed to Windows / Linux only.** `import vrcpilot` now raises `ImportError` on any other `sys.platform` (macOS, FreeBSD, etc.) — what used to be a runtime `NotImplementedError` from a backend dispatcher is now a hard import-time failure. Platform implementation files were renamed to `windows.py` / `linux.py` (formerly `win32.py` / `x11.py` / `proctap.py` / `pipewire.py`) and `controls/keyboard` / `controls/mouse` became subpackages (`controls/keyboard/{base,windows,linux}.py`, etc.). The `proc-tap` dependency is now confined to Windows via `sys_platform == 'win32'`. CLI: `vrcpilot linux-mic` is no longer registered as a subcommand on non-Linux hosts.
 
 ### Added
 

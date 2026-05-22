@@ -7,6 +7,14 @@ geometry, for GUI automation). :func:`ocr` consumes a captured
 keeping capture and recognition as orthogonal steps.
 """
 
+import sys
+
+if sys.platform not in ("win32", "linux"):
+    raise ImportError(
+        f"vrcpilot supports only Windows and Linux "
+        f"(got sys.platform={sys.platform!r})"
+    )
+
 from importlib import metadata
 
 from vrcpilot import clipboard

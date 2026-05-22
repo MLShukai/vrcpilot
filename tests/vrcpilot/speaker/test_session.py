@@ -12,6 +12,10 @@ than ``mocker.Mock`` - :class:`ImplSpeakerBackend` is that impl.
 
 from __future__ import annotations
 
+import sys
+from types import ModuleType
+from unittest.mock import MagicMock
+
 import numpy as np
 import pytest
 from pytest_mock import MockerFixture
@@ -121,20 +125,51 @@ class _CountingBackend(ImplSpeakerBackend):
         super().close()
 
 
+def _install_stub_backend_module(
+    mocker: MockerFixture, dotted_path: str, class_name: str
+) -> MagicMock:
+    """Install a stub module at ``dotted_path`` with ``class_name`` mocked.
+
+    The backend modules (``vrcpilot.speaker.linux`` /
+    ``vrcpilot.speaker.windows``) refuse to import on the wrong host
+    platform thanks to their module-level ``sys.platform`` guards, so
+    a dispatch test that patches a real attribute on those modules
+    would trip the guard during the patch's own import step. Parking
+    a synthetic :class:`ModuleType` carrying just the mocked backend
+    constructor at ``sys.modules[dotted_path]`` lets the lazy
+    ``from ... import ...`` inside ``_select_speaker_backend`` resolve
+    to our mock without ever touching the real module.
+
+    Returns the :class:`MagicMock` standing in for the backend class
+    so tests can assert call arguments.
+    """
+    stub = ModuleType(dotted_path)
+    mock_backend = MagicMock()
+    setattr(stub, class_name, mock_backend)
+    mocker.patch.dict(sys.modules, {dotted_path: stub})
+    return mock_backend
+
+
 class TestBackendDispatch:
     """``_select_speaker_backend`` picks the right backend per platform.
 
-    The native backend constructors are patched so the test only
-    verifies the seam (platform check + kwargs forwarding) without
-    needing the real audio stack to be importable in CI.
+    The native backend constructors are patched via ``sys.modules``
+    stubs so the test only verifies the seam (platform check + kwargs
+    forwarding) without needing the real audio stack to be importable
+    in CI -- including on the wrong host, where the production modules
+    deliberately refuse to import.
     """
 
     def test_linux_dispatches_to_pipewire(self, mocker: MockerFixture):
         mocker.patch("sys.platform", "linux")
-        pipewire_mock = mocker.patch("vrcpilot.speaker.pipewire.PipeWireSpeakerBackend")
-        # Ensure a hypothetical regression that also calls proctap is
-        # surfaced; Linux must not fall through.
-        proctap_mock = mocker.patch("vrcpilot.speaker.proctap.ProcTapSpeakerBackend")
+        pipewire_mock = _install_stub_backend_module(
+            mocker, "vrcpilot.speaker.linux", "PipeWireSpeakerBackend"
+        )
+        # Ensure a hypothetical regression that also calls the Windows
+        # backend is surfaced; Linux must not fall through.
+        proctap_mock = _install_stub_backend_module(
+            mocker, "vrcpilot.speaker.windows", "ProcTapSpeakerBackend"
+        )
 
         from vrcpilot.speaker.session import _select_speaker_backend
 
@@ -145,26 +180,41 @@ class TestBackendDispatch:
 
     def test_win32_dispatches_to_proctap(self, mocker: MockerFixture):
         mocker.patch("sys.platform", "win32")
-        proctap_mock = mocker.patch("vrcpilot.speaker.proctap.ProcTapSpeakerBackend")
+        proctap_mock = _install_stub_backend_module(
+            mocker, "vrcpilot.speaker.windows", "ProcTapSpeakerBackend"
+        )
+        # Symmetric guard against a regression that also calls the
+        # Linux backend; Windows must not fall through.
+        pipewire_mock = _install_stub_backend_module(
+            mocker, "vrcpilot.speaker.linux", "PipeWireSpeakerBackend"
+        )
 
         from vrcpilot.speaker.session import _select_speaker_backend
 
         _select_speaker_backend(read_timeout=2.0)
 
         proctap_mock.assert_called_once_with(read_timeout=2.0)
+        pipewire_mock.assert_not_called()
 
-    def test_darwin_falls_through_to_proctap(self, mocker: MockerFixture):
-        # macOS is intentionally a fall-through case: proctap's own
-        # error surface is the right place for an "unsupported host"
-        # diagnosis if upstream cannot load a backend.
+    def test_unsupported_platform_raises(self, mocker: MockerFixture):
+        # macOS / FreeBSD / cygwin etc. have no speaker backend in
+        # vrcpilot. The dispatch must raise NotImplementedError rather
+        # than fall through to either backend.
         mocker.patch("sys.platform", "darwin")
-        proctap_mock = mocker.patch("vrcpilot.speaker.proctap.ProcTapSpeakerBackend")
+        pipewire_mock = _install_stub_backend_module(
+            mocker, "vrcpilot.speaker.linux", "PipeWireSpeakerBackend"
+        )
+        proctap_mock = _install_stub_backend_module(
+            mocker, "vrcpilot.speaker.windows", "ProcTapSpeakerBackend"
+        )
 
         from vrcpilot.speaker.session import _select_speaker_backend
 
-        _select_speaker_backend(read_timeout=2.0)
+        with pytest.raises(NotImplementedError, match="darwin"):
+            _select_speaker_backend(read_timeout=2.0)
 
-        proctap_mock.assert_called_once_with(read_timeout=2.0)
+        pipewire_mock.assert_not_called()
+        proctap_mock.assert_not_called()
 
 
 class TestClose:
