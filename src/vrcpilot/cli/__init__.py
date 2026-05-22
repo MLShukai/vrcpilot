@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import sys
 from importlib import metadata
+from types import ModuleType
 
 import argcomplete
 
@@ -33,7 +34,7 @@ from . import (
     unfocus,
 )
 
-_COMMANDS = {
+_COMMANDS: dict[str, ModuleType] = {
     "launch": launch,
     "pid": pid,
     "terminate": terminate,
@@ -42,18 +43,27 @@ _COMMANDS = {
     "screenshot": screenshot,
     "record": record,
     "mic": mic,
-    "mouse": mouse,
-    "keyboard": keyboard,
-    "paste": paste,
-    "ocr": ocr,
-    "osc": osc,
-    "detect": detect,
 }
 
+# ``linux-mic`` is registered between ``mic`` and ``mouse`` only on
+# Linux. Inserting it here (rather than appending) preserves the
+# original ``vrcpilot --help`` ordering -- argcomplete and the help
+# text iterate ``_COMMANDS`` in insertion order.
 if sys.platform == "linux":
     from . import linux_mic
 
     _COMMANDS["linux-mic"] = linux_mic
+
+_COMMANDS.update(
+    {
+        "mouse": mouse,
+        "keyboard": keyboard,
+        "paste": paste,
+        "ocr": ocr,
+        "osc": osc,
+        "detect": detect,
+    }
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
