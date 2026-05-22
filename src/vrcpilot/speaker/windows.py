@@ -96,8 +96,11 @@ class ProcTapSpeakerBackend(SpeakerBackend):
         exposes ``start`` / ``stop`` / ``close`` / ``read(timeout)`` --
         the same surface as :class:`proctap.ProcessAudioCapture`.
         """
-        from proctap import (  # pyright: ignore[reportMissingTypeStubs]
-            ProcessAudioCapture,
+        # ``proc-tap`` is a Windows-only conditional dependency
+        # (``sys_platform == 'win32'`` in pyproject.toml); silence the
+        # missing-import + missing-stub fallout when pyright runs on Linux.
+        from proctap import (  # pyright: ignore[reportMissingTypeStubs, reportMissingImports]
+            ProcessAudioCapture,  # pyright: ignore[reportUnknownVariableType]
         )
 
         return ProcessAudioCapture(pid=pid)  # pyright: ignore[reportUnknownVariableType]

@@ -1,9 +1,12 @@
 """Tests for :mod:`vrcpilot` package top-level."""
 
+import importlib
+import sys
 import tomllib
 from pathlib import Path
 
 import pytest
+from pytest_mock import MockerFixture
 
 import vrcpilot
 
@@ -89,3 +92,34 @@ class TestOcrAttributeAndSubmoduleCoexist:
 
     def test_ocr_is_in_all(self):
         assert "ocr" in vrcpilot.__all__
+
+
+class TestUnsupportedPlatformGate:
+    """``import vrcpilot`` must reject non-Windows / non-Linux hosts.
+
+    The guard sits at the very top of :mod:`vrcpilot.__init__`, before
+    any submodule import, so any host besides ``win32`` / ``linux``
+    fails fast with a clear diagnostic instead of hitting a missing
+    backend import deeper in the package.
+
+    Because ``vrcpilot`` is already imported by the time pytest reaches
+    this test, the guard is retriggered with :func:`importlib.reload`
+    inside a patched-``sys.platform`` context.
+    """
+
+    @pytest.mark.parametrize("platform", ["darwin", "freebsd", "openbsd"])
+    def test_reimport_raises_on_unsupported_platform(
+        self, mocker: MockerFixture, platform: str
+    ) -> None:
+        mocker.patch.object(sys, "platform", platform)
+        with pytest.raises(ImportError, match="vrcpilot supports only"):
+            importlib.reload(vrcpilot)
+
+    def test_supported_platform_reimports_cleanly(self, mocker: MockerFixture) -> None:
+        # Reloading without the patch (or with a supported platform) is
+        # a no-op for the gate; this pins that the reload path itself
+        # is healthy so a failing parametrized case above is attributable
+        # to the gate and not to ``importlib.reload`` machinery.
+        mocker.patch.object(sys, "platform", sys.platform)
+        reloaded = importlib.reload(vrcpilot)
+        assert reloaded is vrcpilot

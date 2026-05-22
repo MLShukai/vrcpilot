@@ -23,8 +23,8 @@ class TestDefaultDeviceName:
         mocker.patch.object(sys, "platform", "linux")
         assert default_device_name() == "VRCPilotMic"
 
-    def test_macos_has_no_default(self, mocker: MockerFixture) -> None:
-        mocker.patch.object(sys, "platform", "darwin")
+    def test_unsupported_platform_has_no_default(self, mocker: MockerFixture) -> None:
+        mocker.patch.object(sys, "platform", "freebsd")
         assert default_device_name() is None
 
 
@@ -77,7 +77,7 @@ class TestResolveDeviceName:
         mocker: MockerFixture,
     ) -> None:
         monkeypatch.delenv(DEVICE_ENV_VAR, raising=False)
-        mocker.patch.object(sys, "platform", "darwin")
+        mocker.patch.object(sys, "platform", "freebsd")
         with pytest.raises(MicDeviceNotFoundError) as exc_info:
             resolve_device_name(None)
         assert DEVICE_ENV_VAR in str(exc_info.value)
