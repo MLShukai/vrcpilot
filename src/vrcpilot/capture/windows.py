@@ -30,7 +30,7 @@ from windows_capture import (  # pyright: ignore[reportMissingTypeStubs]
 )
 
 from vrcpilot.process import find_pid
-from vrcpilot.win32 import find_vrchat_hwnd
+from vrcpilot.windows import find_vrchat_hwnd
 
 from .base import CaptureBackend
 
