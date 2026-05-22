@@ -1,6 +1,6 @@
 # Python API Reference
 
-This is a hand-curated reference for every symbol exposed at `vrcpilot.<name>`. For runnable examples see [`usage.md`](usage.md); for the equivalent CLI see [`cli.md`](cli.md). Function signatures match the source as of `0.1.0a1`.
+This is a hand-curated reference for every symbol exposed at `vrcpilot.<name>`. For runnable examples see [`usage.md`](usage.md); for the equivalent CLI see [`cli.md`](cli.md). Function signatures match the source as of `0.2.0rc1`.
 
 ## Conventions
 
@@ -282,7 +282,7 @@ class Mic:
 
 `device` is matched as a case-insensitive **substring** against the names `soundcard` reports (matching covers both `Speaker.name` and `Speaker.id`, with fuzzy id matching). `None` defers to `$VRCPILOT_MIC_DEVICE`, then to the OS default returned by `default_device_name()`. The constructor resolves the device, opens a `soundcard` player for `(sample_rate, channels)`, and enters it — those values are baked in for the lifetime of the session, so reconfiguring means constructing a new `Mic`.
 
-`device_id` exposes the underlying `soundcard` `Speaker.id` as a string. On Linux this is the PulseAudio sink name (e.g. `"VRCPilotMic"`); on Windows it is the WASAPI device id string surfaced by `soundcard`. (This replaces the integer `device_index` from the PortAudio-backed prototype.)
+`device_id` exposes the underlying `soundcard` `Speaker.id` as a string. On Linux this is the PulseAudio sink name (e.g. `"VRCPilotMic"`); on Windows it is the WASAPI device id string surfaced by `soundcard`.
 
 `play(chunk)` writes one float32 array per call. The chunk shape must match the configured channel count (`(N,)` for mono, `(N, channels)` for multi-channel) or `ValueError` is raised. The call blocks if the backend's internal buffer is full, giving the caller natural back-pressure for live TTS streams.
 
