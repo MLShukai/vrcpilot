@@ -12,7 +12,7 @@ from argcomplete.completers import FilesCompleter
 
 from vrcpilot.speaker import RawPcmStdoutSink, SpeakerLoop, WavFileSink
 
-from ._common import SubParsersAction, attach_completer
+from .._common import SubParsersAction, attach_completer
 
 
 def register(subparsers: SubParsersAction) -> None:
