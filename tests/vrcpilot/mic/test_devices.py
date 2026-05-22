@@ -19,9 +19,9 @@ class TestDefaultDeviceName:
         mocker.patch.object(sys, "platform", "win32")
         assert default_device_name() == "CABLE Input"
 
-    def test_linux_has_no_default(self, mocker: MockerFixture) -> None:
+    def test_linux_default_is_vrcpilot_mic(self, mocker: MockerFixture) -> None:
         mocker.patch.object(sys, "platform", "linux")
-        assert default_device_name() is None
+        assert default_device_name() == "VRCPilotMic"
 
     def test_macos_has_no_default(self, mocker: MockerFixture) -> None:
         mocker.patch.object(sys, "platform", "darwin")
@@ -53,6 +53,15 @@ class TestResolveDeviceName:
         mocker.patch.object(sys, "platform", "win32")
         assert resolve_device_name(None) == "CABLE Input"
 
+    def test_resolve_uses_linux_default(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        mocker: MockerFixture,
+    ) -> None:
+        monkeypatch.delenv(DEVICE_ENV_VAR, raising=False)
+        mocker.patch.object(sys, "platform", "linux")
+        assert resolve_device_name(None) == "VRCPilotMic"
+
     def test_empty_env_falls_through_to_default(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -68,7 +77,7 @@ class TestResolveDeviceName:
         mocker: MockerFixture,
     ) -> None:
         monkeypatch.delenv(DEVICE_ENV_VAR, raising=False)
-        mocker.patch.object(sys, "platform", "linux")
+        mocker.patch.object(sys, "platform", "darwin")
         with pytest.raises(MicDeviceNotFoundError) as exc_info:
             resolve_device_name(None)
         assert DEVICE_ENV_VAR in str(exc_info.value)
@@ -109,7 +118,10 @@ class TestLookupOutputDevice:
         self._install_fake(mocker, fake)
         assert lookup_output_device("CABLE Input") == 1
 
-    def test_raises_when_no_output_device_matches(self, mocker: MockerFixture) -> None:
+    def test_raises_when_no_output_device_matches_on_windows(
+        self, mocker: MockerFixture
+    ) -> None:
+        mocker.patch.object(sys, "platform", "win32")
         fake = FakeSoundDevice()
         fake.add_output_device("Speakers (Realtek)")
         self._install_fake(mocker, fake)
@@ -120,9 +132,23 @@ class TestLookupOutputDevice:
         assert "vb-audio.com/Cable" in msg
         assert "Speakers (Realtek)" in msg
 
+    def test_lookup_error_message_on_linux(self, mocker: MockerFixture) -> None:
+        mocker.patch.object(sys, "platform", "linux")
+        fake = FakeSoundDevice()
+        fake.add_output_device("Built-in Audio Analog Stereo")
+        self._install_fake(mocker, fake)
+        with pytest.raises(MicDeviceNotFoundError) as exc_info:
+            lookup_output_device("VRCPilotMic")
+        msg = str(exc_info.value)
+        assert "VRCPilotMic" in msg
+        assert "vrcpilot linux-mic register" in msg
+        assert "vb-audio.com" not in msg
+        assert "Built-in Audio Analog Stereo" in msg
+
     def test_lists_none_when_no_output_devices_present(
         self, mocker: MockerFixture
     ) -> None:
+        mocker.patch.object(sys, "platform", "win32")
         fake = FakeSoundDevice()
         fake.add_input_device("Mic only")
         self._install_fake(mocker, fake)

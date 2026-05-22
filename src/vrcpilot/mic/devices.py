@@ -12,14 +12,20 @@ import os
 import sys
 from typing import Any, Final
 
-from vrcpilot.mic.base import DEVICE_ENV_VAR, MicDeviceNotFoundError
+from vrcpilot.mic.base import (
+    DEVICE_ENV_VAR,
+    VIRTUAL_MIC_SINK_NAME,
+    MicDeviceNotFoundError,
+)
 
-# OS-specific default output-device substring. Linux / macOS entries
-# will be added once a virtual-mic convention is settled; until then
-# callers on those platforms must pass ``--device`` or set
-# ``$VRCPILOT_MIC_DEVICE`` explicitly.
+# OS-specific default output-device substring. Windows ships with
+# VB-Audio Virtual Cable's ``CABLE Input`` and Linux uses the
+# ``VRCPilotMic`` PipeWire sink registered by ``vrcpilot.mic.linux``.
+# macOS has no convention yet; callers there must pass ``--device`` or
+# set ``$VRCPILOT_MIC_DEVICE`` explicitly.
 _DEFAULT_DEVICE_BY_PLATFORM: Final[dict[str, str]] = {
     "win32": "CABLE Input",
+    "linux": VIRTUAL_MIC_SINK_NAME,
 }
 
 
@@ -81,9 +87,15 @@ def lookup_output_device(name: str) -> int:
         for i, d in enumerate(devices)
         if int(d.get("max_output_channels", 0)) > 0
     )
+    if sys.platform == "linux":
+        setup_hint = (
+            "Run 'vrcpilot linux-mic register' to create the VRCPilotMic "
+            "PipeWire sink, "
+        )
+    else:
+        setup_hint = "Install VB-Audio Virtual Cable (https://vb-audio.com/Cable/) "
     raise MicDeviceNotFoundError(
         f"no output device matches {name!r}. "
-        f"Install VB-Audio Virtual Cable (https://vb-audio.com/Cable/) "
-        f"or set ${DEVICE_ENV_VAR}.\nAvailable output devices:\n"
+        f"{setup_hint}or set ${DEVICE_ENV_VAR}.\nAvailable output devices:\n"
         f"{listing or '  (none)'}"
     )
