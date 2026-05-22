@@ -15,6 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Audio capture** (`vrcpilot.speaker`): `Speaker` + `SpeakerLoop`
+  capture VRChat-only audio via process loopback. Linux uses a native
+  PipeWire pipeline (virtual null-sink + `pw-link` + `pw-record`) driven
+  by a `pulsectl` control plane; Windows uses the `proc-tap` extension.
+  Linux runtime now requires the PipeWire CLIs (`pw-link`, `pw-record`)
+  and `libpulse0` — both already pulled in by `pipewire-pulse` on most
+  desktops. Windows adds the `proc-tap` dependency via
+  `sys_platform == 'win32'`.
 - **Virtual mic output** (`vrcpilot.mic`): `Mic` opens a `soundcard`
   player in its constructor for a fixed `(sample_rate, channels)` and
   writes one float32 chunk per `play(chunk)` call, so callers drive the
@@ -46,12 +54,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Linux speaker backend**: replaced `proc-tap` process loopback with
-  a native PipeWire pipeline (virtual null-sink + `pw-link` + `pw-record`)
-  driven by a `pulsectl` control plane. Windows still uses `proc-tap`.
-  Linux runtime now requires the PipeWire CLIs (`pw-link`, `pw-record`)
-  and `libpulse0` — both already pulled in by `pipewire-pulse` on most
-  desktops.
 - **Virtual mic backend**: replaced `sounddevice` (PortAudio) with
   `soundcard` (libpulse on Linux, WASAPI on Windows). Linux now
   enumerates individual PulseAudio sinks, so `vrcpilot mic` can resolve
