@@ -1,11 +1,4 @@
-"""Background-thread driver that pumps :class:`Speaker` reads to a callback.
-
-Modelled on :class:`vrcpilot.capture.CaptureLoop`. The structural
-difference is chunk pacing: audio reads are timeout-driven (the
-backend already blocks for up to ``read_timeout`` seconds), so the
-loop sleeps ``chunk_seconds`` between drains instead of trying to hit
-a wall-clock deadline.
-"""
+"""Background-thread driver that pumps :class:`Speaker` reads to a callback."""
 
 from __future__ import annotations
 
@@ -25,19 +18,14 @@ type AudioCallback = Callable[[NDArray[np.float32]], None]
 class SpeakerLoop:
     """Run a :class:`Speaker` on a background thread.
 
-    Constructs and owns its own :class:`Speaker`, so VRChat must
-    already be running when the loop is instantiated (the same
-    constraint as :class:`Speaker`). Each tick drains one chunk and
-    forwards it to ``callback``; exceptions raised by the callback or
-    by :meth:`Speaker.read` are captured and re-raised on the next
-    :meth:`stop` / :meth:`close` so the worker thread never dies
-    silently. Empty chunks (``N == 0``) are forwarded verbatim so
-    consumers can use them as a "silence tick" signal.
+    Constructs and owns its own :class:`Speaker`; VRChat must already
+    be running. Each tick drains one chunk and forwards it to
+    ``callback``. Empty chunks (``N == 0``) are forwarded verbatim as a
+    "silence tick" signal. Exceptions from the callback or
+    :meth:`Speaker.read` are stashed and re-raised on the next
+    :meth:`stop` / :meth:`close` so the worker never dies silently.
 
-    ``chunk_seconds`` (default 50 ms) is the inter-tick sleep - chosen
-    to match the proc-tap buffer cadence (~10-20 ms) so each drain
-    usually returns a full buffer. ``read_timeout`` is forwarded to
-    :class:`Speaker` unchanged.
+    ``chunk_seconds`` is the inter-tick sleep, in seconds.
 
     Raises:
         RuntimeError: The internal :class:`Speaker` cannot start.
@@ -103,12 +91,10 @@ class SpeakerLoop:
     def stop(self) -> None:
         """Signal the worker to stop and join it.
 
-        Idempotent. Re-raises any exception captured from the
-        background thread (callback or :meth:`Speaker.read` failure)
-        and clears it so subsequent calls do not raise twice. Safe to
-        call from inside the callback — the self-join is skipped to
-        avoid deadlock; the worker exits once control returns to its
-        own frame.
+        Idempotent. Re-raises any exception captured from the worker
+        once, then clears it. Safe to call from inside the callback: the
+        self-join is skipped to avoid deadlock and the worker exits when
+        control returns to its own frame.
         """
         with self._lock:
             self._stop_event.set()
@@ -130,8 +116,8 @@ class SpeakerLoop:
         """Stop the loop and release the underlying :class:`Speaker`.
 
         Idempotent. Does not swallow exceptions surfaced by
-        :meth:`stop` — callers must be able to observe a worker
-        failure even when they only called :meth:`close`.
+        :meth:`stop`; callers must be able to observe worker failures
+        even when they only called :meth:`close`.
         """
         if self._closed:
             return

@@ -20,21 +20,20 @@ DTYPE: Final = np.float32
 
 
 class SpeakerBackend(ABC):
-    """Platform-specific audio source for the speaker modality.
+    """Platform-specific audio source for :class:`Speaker`.
 
-    Implementations stream VRChat application audio and expose it as
-    float32 PCM. The public wrapper owns closed-state checks and the
-    context-manager protocol; backends only need to open in
-    ``__init__`` and release in :meth:`close`.
+    Backends open in ``__init__`` and release in :meth:`close`; the
+    public wrapper handles closed-state checks and the context-manager
+    protocol.
     """
 
     @abstractmethod
     def read(self) -> NDArray[np.float32]:
-        """Return all samples accumulated since the previous read.
+        """Return every sample buffered since the previous read.
 
-        Shape ``(N, CHANNELS)``, dtype ``float32``, sample rate
-        ``SAMPLE_RATE`` Hz. ``N`` may be ``0`` if no samples are
-        available yet.
+        Shape ``(N, CHANNELS)``; ``N == 0`` is the valid "no new audio"
+        signal (used when the underlying source stays quiet within the
+        backend's timeout).
         """
 
     @abstractmethod

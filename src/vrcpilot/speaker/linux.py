@@ -1,28 +1,20 @@
 """Linux PipeWire-native speaker backend.
 
-Splits the work across three planes so a crash in one cannot wedge
-the others:
+Three-plane design so a crash in one cannot wedge the others:
 
-* Control plane -- ``pulsectl.Pulse`` (libpulse via ctypes) loads /
-  unloads the ``vrcpilot_tap`` null-sink and subscribes to
-  ``sink_input`` events for late-joining VRChat streams.
-* Data plane -- ``pw-record --target=vrcpilot_tap.monitor`` runs
-  out-of-process and writes interleaved ``float32`` LE / 48 kHz /
-  stereo to its stdout, which a background thread drains into a
-  shared buffer. Matches the constants in
-  :mod:`vrcpilot.speaker.base` so no resampling is needed.
-* Routing -- additive ``pw-link`` calls from every VRChat
-  ``Stream/Output/Audio`` node's ``output_FL`` / ``output_FR`` to the
-  tap's playback ports. The user's existing links to real speakers
-  are left alone, so VRChat is still audible while we record.
+* Control: ``pulsectl.Pulse`` loads / unloads the ``vrcpilot_tap``
+  null-sink and watches for late-joining VRChat streams.
+* Data: ``pw-record --target=vrcpilot_tap.monitor`` writes raw
+  float32/48k/stereo PCM to stdout; a drain thread feeds a shared
+  buffer. The format matches :mod:`vrcpilot.speaker.base` exactly so
+  no resampling is needed.
+* Routing: additive ``pw-link`` calls from each VRChat output node to
+  the tap. The user's existing links to real speakers are untouched.
 
-A breadcrumb at ``$XDG_RUNTIME_DIR/vrcpilot/tap.json`` carries the
-PID + module id so an out-of-band janitor can unload the null-sink
-after an ungraceful exit; start-up also idempotently unloads any
-leftover ``vrcpilot_tap`` module from a previous crashed run.
-
-``pulsectl`` is imported lazily inside :meth:`_open_pulse` so
-non-Linux platforms never need it installed.
+A breadcrumb at ``$XDG_RUNTIME_DIR/vrcpilot/tap.json`` lets an
+out-of-band janitor unload the null-sink after an ungraceful exit;
+start-up also idempotently removes any stale ``vrcpilot_tap`` from a
+previous crashed run.
 """
 
 from __future__ import annotations
@@ -89,33 +81,12 @@ _DRAIN_CHUNK_BYTES: Final[int] = 4096
 
 
 class PipeWireSpeakerBackend(SpeakerBackend):
-    """SpeakerBackend that captures VRChat audio via native PipeWire on Linux.
+    """SpeakerBackend that captures VRChat audio via native PipeWire.
 
-    Linux-only. The constructor performs the full three-plane setup
-    described in the module docstring:
-
-    1. Verify required CLIs are on ``$PATH`` (``pw-record``,
-       ``pw-link``, ``pw-dump``, ``pactl``) and resolve VRChat's PID.
-    2. Open a ``pulsectl`` connection, unload any stale
-       ``vrcpilot_tap`` null-sink, then load a fresh one. The user
-       keeps hearing VRChat on their real speakers because the
-       existing graph is untouched -- we only *add* links into the
-       tap.
-    3. Spawn ``pw-record`` against the tap's monitor source, drain
-       its stdout from a background thread, and subscribe to
-       ``sink_input`` events so VRChat streams created mid-session
-       get auto-linked too.
-
-    Every successful step registers a rollback callback on an
-    ``ExitStack``; a partial start-up never leaks a null-sink or a
-    ``pw-record`` subprocess. :meth:`close` runs the same cleanup in
-    teardown order and is registered with :func:`atexit` so an
-    interpreter exit cannot strand the null-sink either.
-
-    Args:
-        read_timeout: Per-:meth:`read` timeout in seconds. A quiet
-            VRChat stream surfaces as an empty ``(0, CHANNELS)`` ndarray
-            rather than an exception. Must be strictly positive.
+    Constructor performs the full three-plane setup (see module
+    docstring) under an ``ExitStack`` so a partial start-up never
+    leaks the null-sink or the ``pw-record`` subprocess. :meth:`close`
+    is also registered with :func:`atexit` for the same reason.
 
     Raises:
         ValueError: ``read_timeout`` is not strictly positive.
@@ -223,9 +194,8 @@ class PipeWireSpeakerBackend(SpeakerBackend):
     def _open_pulse(self, client_name: str) -> Any:
         """Construct the ``pulsectl.Pulse`` control connection.
 
-        Test seam: substituted via :func:`mocker.patch.object` with a
-        duck-typed :class:`tests.fakes.FakePulse`. The import is local
-        so non-Linux test runs do not require ``pulsectl``.
+        Test seam (``mocker.patch.object``) — also keeps the
+        ``pulsectl`` import local so non-Linux test runs never need it.
         """
         from pulsectl import (  # pyright: ignore[reportMissingTypeStubs]
             Pulse,
@@ -236,9 +206,8 @@ class PipeWireSpeakerBackend(SpeakerBackend):
     def _run_pw_dump(self) -> list[Any]:
         """Return the parsed ``pw-dump`` JSON array.
 
-        Test seam: tests substitute a fixture-driven list of dicts
-        mirroring real ``pw-dump`` output so no PipeWire daemon is
-        needed.
+        Test seam: tests substitute a fixture list of dicts so no live
+        PipeWire daemon is required.
         """
         result = subprocess.run(
             ["pw-dump"],
@@ -255,8 +224,7 @@ class PipeWireSpeakerBackend(SpeakerBackend):
         """Invoke ``pw-link <source> <target>``.
 
         ``check=False`` because PipeWire reaps gone nodes async, so a
-        missing endpoint at link time is not fatal. Test seam: a
-        recording :class:`unittest.mock.MagicMock` replaces this.
+        missing endpoint at link time is not fatal. Test seam.
         """
         subprocess.run(["pw-link", source, target], check=False)
 
@@ -264,9 +232,7 @@ class PipeWireSpeakerBackend(SpeakerBackend):
         """Spawn the ``pw-record`` subprocess piped to stdout.
 
         ``bufsize=0`` keeps the OS pipe un-double-buffered so the
-        :meth:`_drain_stdout` thread can pull 4 KiB chunks at the
-        latency we want. Test seam: substituted with
-        :class:`tests.fakes.FakePwRecordProcess`.
+        drain thread can pull at the latency we want. Test seam.
         """
         return subprocess.Popen(
             list(_PW_RECORD_ARGV),
@@ -333,8 +299,8 @@ class PipeWireSpeakerBackend(SpeakerBackend):
         """Persist the PID + module id so external janitors can recover.
 
         Best-effort: write failures degrade to ``None`` with a warning.
-        The state file is only a recovery aid for crashes -- normal
-        shutdown still releases the sink via :meth:`close`.
+        Normal shutdown still releases the sink via :meth:`close`; the
+        file only matters when the process dies ungracefully.
         """
         try:
             state_dir = self._resolve_state_dir()

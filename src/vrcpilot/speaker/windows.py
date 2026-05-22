@@ -1,24 +1,9 @@
 """Windows process-loopback backend backed by ``proc-tap``.
 
-``proc-tap`` is a small Python package that ships a native extension
-per platform and wraps the OS-specific process-loopback API; on
-Windows it drives ``ActivateAudioInterfaceAsync`` + Process Loopback.
-Linux uses :mod:`vrcpilot.speaker.linux` (native PipeWire) instead, so
-this module is Windows-only.
-
-We delegate the OS-specific COM plumbing to ``proc-tap`` and keep this
-module to a thin adapter:
-
-1. Resolve the VRChat PID via :func:`vrcpilot.process.find_pid`.
-2. Construct a ``proctap.ProcessAudioCapture`` and start it.
-3. Decode the ``bytes`` chunks proc-tap produces into ``(N, 2)``
-   ``float32`` ndarrays so the rest of the speaker stack stays in
-   the ndarray-of-float32 contract documented on
-   :class:`vrcpilot.speaker.base.SpeakerBackend`.
-
-The standard format proc-tap guarantees (48 kHz / stereo / float32)
-matches the constants in :mod:`vrcpilot.speaker.base` exactly, so we
-don't carry our own resampling or format negotiation.
+Thin adapter: ``proc-tap`` owns the COM plumbing
+(``ActivateAudioInterfaceAsync`` + Process Loopback) and emits raw
+float32/48k/stereo PCM, matching :mod:`vrcpilot.speaker.base` exactly
+so no resampling or format negotiation is needed here.
 """
 
 from __future__ import annotations
@@ -45,21 +30,8 @@ _logger = logging.getLogger(__name__)
 class ProcTapSpeakerBackend(SpeakerBackend):
     """SpeakerBackend backed by :class:`proctap.ProcessAudioCapture`.
 
-    Windows-only. proc-tap is installed only on Windows (see the
-    ``proc-tap`` environment marker in ``pyproject.toml``); the
-    module-level guard above raises :class:`ImportError` on any other
-    platform so this class is never reached off-Windows.
-
-    Args:
-        read_timeout: Per-:meth:`read` timeout forwarded to
-            :meth:`proctap.ProcessAudioCapture.read`, in seconds.
-            Quiet periods on the audio stream surface as an empty
-            ``(0, CHANNELS)`` ndarray rather than an exception. Must
-            be strictly positive.
-
     Raises:
-        RuntimeError: VRChat is not running (``find_pid`` returned
-            ``None``).
+        RuntimeError: VRChat is not running.
         ValueError: ``read_timeout`` is not strictly positive.
     """
 
@@ -91,10 +63,9 @@ class ProcTapSpeakerBackend(SpeakerBackend):
     def _open_capture(self, *, pid: int) -> Any:
         """Construct the underlying ``proc-tap`` capture object.
 
-        This is the seam tests substitute via
-        :func:`mocker.patch.object` to inject a duck-typed fake that
-        exposes ``start`` / ``stop`` / ``close`` / ``read(timeout)`` --
-        the same surface as :class:`proctap.ProcessAudioCapture`.
+        Test seam: substituted via :func:`mocker.patch.object` with a
+        duck-typed fake exposing ``start`` / ``stop`` / ``close`` /
+        ``read(timeout)``.
         """
         # ``proc-tap`` is Windows-only (``sys_platform == 'win32'`` in
         # pyproject.toml). This module's top-of-file guard makes the body
