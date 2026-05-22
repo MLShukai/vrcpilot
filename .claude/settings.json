@@ -160,7 +160,8 @@
       "Bash(tar -tvf:*)",
       "WebSearch",
       "WebFetch",
-      "Bash(git cherry-pick *)"
+      "Bash(git cherry-pick *)",
+      "Bash(git worktree *)"
     ],
     "deny": [
       "Bash(git -C:*)",
