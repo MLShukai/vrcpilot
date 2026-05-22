@@ -26,14 +26,26 @@ goal here is plumbing, not audio quality.
 
 from __future__ import annotations
 
+import sys
 import time
 
 import numpy as np
 import pytest
 
-from vrcpilot import process
-from vrcpilot.speaker.base import CHANNELS, SAMPLE_RATE
-from vrcpilot.speaker.proctap import ProcTapSpeakerBackend
+# proc-tap is a Windows-only dependency post-M1 (see pyproject.toml).
+# Importing ``ProcTapSpeakerBackend`` is fine off-Windows because the
+# native ``proctap`` package is loaded lazily inside ``_open_capture``,
+# but the *real* tests in this module hit that path, so they must be
+# skipped on hosts where proc-tap is not installed.
+if sys.platform != "win32":
+    pytest.skip(
+        "proc-tap is a Windows-only dependency; real backend tests need it.",
+        allow_module_level=True,
+    )
+
+from vrcpilot import process  # noqa: E402
+from vrcpilot.speaker.base import CHANNELS, SAMPLE_RATE  # noqa: E402
+from vrcpilot.speaker.proctap import ProcTapSpeakerBackend  # noqa: E402
 
 
 @pytest.fixture
