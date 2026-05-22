@@ -1,4 +1,4 @@
-"""Tests for :mod:`vrcpilot.window.win32`.
+"""Tests for :mod:`vrcpilot.window.windows`.
 
 The module under test imports Windows-only DLLs (``pywintypes``,
 ``win32gui``, ``win32api``) and raises ``ImportError`` on any other
@@ -25,7 +25,7 @@ if sys.platform != "win32":
 import pywintypes
 from pytest_mock import MockerFixture
 
-from vrcpilot.window.win32 import focus_window, is_window_foreground, unfocus_window
+from vrcpilot.window.windows import focus_window, is_window_foreground, unfocus_window
 
 
 class TestFocusWindow:
@@ -48,10 +48,10 @@ class TestUnfocusWindow:
         # rather than propagated. ``find_pid`` and ``find_vrchat_hwnd``
         # have to be patched to get past the early short-circuits since
         # we are on a host where VRChat is not running.
-        mocker.patch("vrcpilot.window.win32.find_pid", return_value=4242)
-        mocker.patch("vrcpilot.window.win32.find_vrchat_hwnd", return_value=12345)
+        mocker.patch("vrcpilot.window.windows.find_pid", return_value=4242)
+        mocker.patch("vrcpilot.window.windows.find_vrchat_hwnd", return_value=12345)
         mocker.patch(
-            "vrcpilot.window.win32.win32gui.SetWindowPos",
+            "vrcpilot.window.windows.win32gui.SetWindowPos",
             side_effect=pywintypes.error(0, "SetWindowPos", "msg"),
         )
 
@@ -69,18 +69,18 @@ class TestIsWindowForeground:
         # could not be located (e.g. the window is not yet created).
         # The helper must report ``False`` without invoking
         # ``GetForegroundWindow``.
-        mocker.patch("vrcpilot.window.win32.find_pid", return_value=4242)
-        mocker.patch("vrcpilot.window.win32.find_vrchat_hwnd", return_value=None)
+        mocker.patch("vrcpilot.window.windows.find_pid", return_value=4242)
+        mocker.patch("vrcpilot.window.windows.find_vrchat_hwnd", return_value=None)
 
         assert is_window_foreground() is False
 
     def test_returns_true_when_hwnd_matches_foreground(self, mocker: MockerFixture):
         # Happy path: the located HWND equals the OS-reported
         # foreground HWND, so the helper reports ``True``.
-        mocker.patch("vrcpilot.window.win32.find_pid", return_value=4242)
-        mocker.patch("vrcpilot.window.win32.find_vrchat_hwnd", return_value=12345)
+        mocker.patch("vrcpilot.window.windows.find_pid", return_value=4242)
+        mocker.patch("vrcpilot.window.windows.find_vrchat_hwnd", return_value=12345)
         mocker.patch(
-            "vrcpilot.window.win32.win32gui.GetForegroundWindow",
+            "vrcpilot.window.windows.win32gui.GetForegroundWindow",
             return_value=12345,
         )
 
@@ -91,10 +91,10 @@ class TestIsWindowForeground:
     ):
         # A different window owns the foreground - the helper reports
         # ``False`` so callers know to call ``focus()``.
-        mocker.patch("vrcpilot.window.win32.find_pid", return_value=4242)
-        mocker.patch("vrcpilot.window.win32.find_vrchat_hwnd", return_value=12345)
+        mocker.patch("vrcpilot.window.windows.find_pid", return_value=4242)
+        mocker.patch("vrcpilot.window.windows.find_vrchat_hwnd", return_value=12345)
         mocker.patch(
-            "vrcpilot.window.win32.win32gui.GetForegroundWindow",
+            "vrcpilot.window.windows.win32gui.GetForegroundWindow",
             return_value=99999,
         )
 
@@ -105,10 +105,10 @@ class TestIsWindowForeground:
         # converted to a ``False`` return rather than propagated, so
         # the helper plays the same defensive contract as
         # ``focus_window`` / ``unfocus_window``.
-        mocker.patch("vrcpilot.window.win32.find_pid", return_value=4242)
-        mocker.patch("vrcpilot.window.win32.find_vrchat_hwnd", return_value=12345)
+        mocker.patch("vrcpilot.window.windows.find_pid", return_value=4242)
+        mocker.patch("vrcpilot.window.windows.find_vrchat_hwnd", return_value=12345)
         mocker.patch(
-            "vrcpilot.window.win32.win32gui.GetForegroundWindow",
+            "vrcpilot.window.windows.win32gui.GetForegroundWindow",
             side_effect=pywintypes.error(0, "GetForegroundWindow", "msg"),
         )
 

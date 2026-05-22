@@ -15,7 +15,7 @@ import win32con
 import win32gui
 
 from vrcpilot.process import find_pid
-from vrcpilot.win32 import find_vrchat_hwnd
+from vrcpilot.windows import find_vrchat_hwnd
 
 
 def focus_window() -> bool:
