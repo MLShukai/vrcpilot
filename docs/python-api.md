@@ -7,7 +7,7 @@ This is a hand-curated reference for every symbol exposed at `vrcpilot.<name>`. 
 - All `vrcpilot.<name>` symbols are listed in [`src/vrcpilot/__init__.py::__all__`](../src/vrcpilot/__init__.py).
 - Module attributes `vrcpilot.keyboard`, `vrcpilot.mouse`, and `vrcpilot.clipboard` are also part of the public surface.
 - Most call sites that send synthetic input or interact with the VRChat window expect VRChat to be **running and focused**. That requirement is enforced by [`ensure_target()`](#ensure_target), and the high-level helpers call it for you. The relevant exceptions (`VRChatNotRunningError`, `VRChatNotFocusedError`) are re-raised so callers can recover.
-- Coordinate-bearing types (`Screenshot`, `OCRWord`, `OCRResult`, `Detection`, `DetectResult`) keep both window-local (`pos*`) and desktop-absolute (`display_pos*`) views. Always feed `display_pos.bbox` into `mouse.move()` — see [coordinate system](cli.md#coordinate-system).
+- Coordinate-bearing types (`OCRWord`, `OCRResult`, `Detection`, `DetectResult`) expose only **window-local** coordinates (`polygon` / `bbox`, origin at the VRChat window's top-left). `mouse.move(x, y)` consumes the same window-local frame, so OCR / detect bboxes feed in directly without translation — see [coordinate system](cli.md#coordinate-system).
 - Code blocks use `...` as the body of every signature so they paste back cleanly into a Python REPL or stub file.
 
 ______________________________________________________________________
@@ -300,7 +300,7 @@ class Screenshot:
     def load(cls, text: str) -> Screenshot: ...
 ```
 
-Pixel data plus the on-screen geometry needed to translate window-local coordinates back to the desktop. `eq=False` because numpy arrays cannot be compared element-wise in `__eq__`.
+Pixel data plus the window's on-screen geometry (`x` / `y` are the window's top-left in desktop-absolute pixels; `monitor_index` records the `mss` monitor the capture came from). OCR / detect results are window-local, so this geometry is informational rather than required for clicking. `eq=False` because numpy arrays cannot be compared element-wise in `__eq__`.
 
 `save()` returns a YAML string. When `png_path` is provided the PNG is written there and the YAML stores `path:`; otherwise the YAML embeds the PNG as base64 under `image:`. `load()` restores either form.
 
@@ -342,12 +342,9 @@ class OCRWord:
 class OCRResult:
     screenshot: Screenshot
     words: tuple[OCRWord, ...]
-
-    def display_polygon(self, word: OCRWord) -> Polygon: ...
-    def display_bbox(self, word: OCRWord) -> tuple[int, int, int, int]: ...
 ```
 
-Bundles a `Screenshot` with the words detected on it. `display_*` shifts a word's window-local coordinates to desktop-absolute space using the `Screenshot`'s `x` / `y`.
+Bundles a `Screenshot` with the words detected on it. All `OCRWord.polygon` / `OCRWord.bbox` values are **window-local** (origin at the VRChat window's top-left), which is the same frame `mouse.move()` consumes — no translation step is required.
 
 ### `vrcpilot.OCREngine`
 
@@ -412,10 +409,9 @@ class DetectResult:
     screenshot: Screenshot
     query: NDArray[np.uint8]    # (h, w, 3) uint8 RGB
     detections: tuple[Detection, ...]
-
-    def display_polygon(self, det: Detection) -> Polygon: ...
-    def display_bbox(self, det: Detection) -> tuple[int, int, int, int]: ...
 ```
+
+All `Detection.polygon` / `Detection.bbox` values are **window-local**, matching `OCRResult` and the frame `mouse.move()` accepts.
 
 ### `vrcpilot.DetectEngine`
 
@@ -508,7 +504,7 @@ def press(*buttons: MouseButton, focus: bool = True) -> None: ...
 def release(*buttons: MouseButton, focus: bool = True) -> None: ...
 ```
 
-`move(x, y)` defaults to pixels in the virtual-desktop bounding box (`mss.MSS().monitors[0]` on Linux, the Win32 virtual screen on Windows). On standard left-origin monitor layouts this matches "desktop-absolute pixels" and round-trips with `display_pos.bbox` from OCR / detect. If another monitor extends left of the primary, the origin shifts accordingly. With `relative=True`, `(x, y)` is added to the current cursor position.
+`move(x, y)` interprets `(x, y)` as **VRChat window-local pixels** — `(0, 0)` is the top-left of the VRChat window. This is the same frame `OCRWord.bbox` / `Detection.bbox` use, so OCR / detect results feed in directly. Coordinates outside the window are not rejected; they are translated to the desktop and passed to the OS as-is. With `relative=True`, `(x, y)` is a delta added to the current cursor position (the window-local interpretation does not apply in that branch).
 
 `click()` falls back to `LEFT` when called with no buttons. `count > 1` repeats the press/release pair. `duration > 0` holds each click for that many seconds.
 
@@ -582,11 +578,11 @@ try:
 
     result = vrcpilot.ocr(shot)
     for word in result.words:
-        print(word.text, result.display_bbox(word), word.confidence)
+        print(word.text, word.bbox, word.confidence)
 
     if result.words:
         first = result.words[0]
-        x, y, w, h = result.display_bbox(first)
+        x, y, w, h = first.bbox
         vrcpilot.mouse.move(int(x + w / 2), int(y + h / 2))
         vrcpilot.mouse.click(vrcpilot.MouseButton.LEFT)
 

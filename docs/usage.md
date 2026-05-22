@@ -64,7 +64,7 @@ vrcpilot screenshot -o /tmp/vrc.png > /tmp/vrc.yaml
 The YAML on stdout records:
 
 - `path` — absolute path to the PNG (file mode), or `image` — base64 PNG (inline mode, when `-o` is omitted).
-- `x`, `y` — VRChat window's top-left, **desktop-absolute**.
+- `x`, `y` — VRChat window's top-left in desktop-absolute pixels (informational; OCR / detect results below are window-local).
 - `width`, `height` — window size in physical pixels.
 
 ### 3.2 OCR
@@ -82,10 +82,9 @@ vrcpilot ocr --screenshot /tmp/vrc.yaml > /tmp/ocr.yaml
 Each `words[i]` carries:
 
 - `text` and `confidence`.
-- `pos.{polygon,bbox}` — window-local.
-- `display_pos.{polygon,bbox}` — desktop-absolute, already shifted by `window.x` / `window.y`.
+- `pos.{polygon,bbox}` — window-local pixels (origin at the VRChat window's top-left).
 
-When passing coordinates to `vrcpilot mouse move`, **always use `display_pos.bbox`**. Window-local `pos` will land in the wrong place on multi-monitor setups or when the VRChat window is not at the desktop origin. Both OCR / detect output and `mouse move` share the same virtual-desktop frame, so coordinates round-trip without manual translation; see [`cli.md` Coordinate system](cli.md#coordinate-system) for the full story.
+`vrcpilot mouse move` interprets its `X Y` arguments in the same window-local frame, so `pos.bbox` feeds in directly — no per-coordinate translation is needed. See [`cli.md` Coordinate system](cli.md#coordinate-system) for the full story.
 
 `--viz [PATH]` produces a PNG with the polygons drawn over the screenshot. Use it to sanity-check OCR output by eye.
 
@@ -97,7 +96,7 @@ When passing coordinates to `vrcpilot mouse move`, **always use `display_pos.bbo
 vrcpilot screenshot | vrcpilot detect -q assets/launch-pad.png --threshold 0.85 --top-k 3 > /tmp/det.yaml
 ```
 
-`detections[i]` carries `confidence`, `scale`, `rotation`, `pos.*`, and `display_pos.*`.
+`detections[i]` carries `confidence`, `scale`, `rotation`, and `pos.{polygon,bbox}` (window-local pixels).
 
 `TM_CCOEFF_NORMED` works best with pixel-perfect crops of static UI elements. For text, prefer OCR.
 
@@ -106,12 +105,12 @@ ______________________________________________________________________
 ## 4. Move and click
 
 ```bash
-# Replace 1183 / 514 with the center of an OCR/detect display_pos.bbox you obtained above.
-vrcpilot mouse move 1183 514
+# Replace 600 / 360 with the center of an OCR/detect pos.bbox you obtained above.
+vrcpilot mouse move 600 360
 vrcpilot mouse click left
 ```
 
-- Coordinates default to the virtual-desktop frame (the same one OCR / detect emit under `display_pos`). `--rel` switches to a delta from the current cursor position.
+- Coordinates are **VRChat window-local pixels** — the same frame OCR / detect emit under `pos`. `--rel` switches to a delta from the current cursor position. Coordinates outside the VRChat window are not rejected; they reach the OS as-is.
 - `vrcpilot mouse click` defaults to `left` and `--count 1`. Use `--count 2` for double-click; `--duration 0.05` to hold the button briefly.
 
 For paired down/up actions such as dragging, use a single Python process. The synthetic input device is released by the kernel when the CLI process exits, so `mouse press` followed by a separate `mouse release` invocation cannot keep the button held between commands.
@@ -178,13 +177,13 @@ vrcpilot screenshot -o /tmp/vrc_after.png
 
 ### OCR-driven click
 
-Pipe a screenshot through `ocr`, pick the first match for a word, and click its center. The example uses [mikefarah/yq](https://github.com/mikefarah/yq) v4; with `jq`, replace the filter with `'.words[] | select(.text == "Worlds") | .display_pos.bbox | @tsv'`.
+Pipe a screenshot through `ocr`, pick the first match for a word, and click its center. The example uses [mikefarah/yq](https://github.com/mikefarah/yq) v4; with `jq`, replace the filter with `'.words[] | select(.text == "Worlds") | .pos.bbox | @tsv'`.
 
 ```bash
 read -r x y w h < <(
   vrcpilot screenshot \
     | vrcpilot ocr \
-    | yq -r '.words[] | select(.text == "Worlds") | .display_pos.bbox | join(" ")' \
+    | yq -r '.words[] | select(.text == "Worlds") | .pos.bbox | join(" ")' \
     | head -n 1
 )
 vrcpilot mouse move $((x + w / 2)) $((y + h / 2))
@@ -211,16 +210,16 @@ ______________________________________________________________________
 
 ## 9. Recovering from common failures
 
-| Symptom                                      | Likely cause                                            | Fix                                                    |
-| -------------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------ |
-| `VRChat PID was not observed before timeout` | Steam is not running, or VRChat install is missing      | Start Steam first; verify the install in Steam library |
-| `vrcpilot focus` exits 1 silently            | Wayland-native session, or VRChat window not yet mapped | Switch to X11 / XWayland; wait for the warm-up         |
-| `VRChatNotFocusedError` from input commands  | The window lost focus right before the call             | Re-focus with `vrcpilot focus`, then retry             |
-| Tab key does nothing                         | The 2026-series UI no longer maps Tab to a menu         | Use Escape (Launch Pad) and R (Radial Action Menu)     |
-| `keyboard press` ignored                     | `--duration` lowered below `0.1`                        | Restore the default of `0.1` or higher                 |
-| OCR `pos` lands in the wrong spot            | `pos` is window-local, not desktop-absolute             | Use `display_pos.bbox` instead                         |
-| `pyperclip.PyperclipException` on Linux      | No clipboard backend installed                          | `sudo apt-get install xclip` (or `xsel`)               |
-| Capture hangs or fails immediately           | Wayland-native session, or screen is locked             | Switch to X11 / XWayland; unlock the screen            |
+| Symptom                                      | Likely cause                                                | Fix                                                     |
+| -------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------- |
+| `VRChat PID was not observed before timeout` | Steam is not running, or VRChat install is missing          | Start Steam first; verify the install in Steam library  |
+| `vrcpilot focus` exits 1 silently            | Wayland-native session, or VRChat window not yet mapped     | Switch to X11 / XWayland; wait for the warm-up          |
+| `VRChatNotFocusedError` from input commands  | The window lost focus right before the call                 | Re-focus with `vrcpilot focus`, then retry              |
+| Tab key does nothing                         | The 2026-series UI no longer maps Tab to a menu             | Use Escape (Launch Pad) and R (Radial Action Menu)      |
+| `keyboard press` ignored                     | `--duration` lowered below `0.1`                            | Restore the default of `0.1` or higher                  |
+| `mouse move` lands far from the OCR target   | Adding `window.x` / `window.y` to `pos` (pre-0.1.0a2 habit) | Pass `pos.bbox` directly — `mouse move` is window-local |
+| `pyperclip.PyperclipException` on Linux      | No clipboard backend installed                              | `sudo apt-get install xclip` (or `xsel`)                |
+| Capture hangs or fails immediately           | Wayland-native session, or screen is locked                 | Switch to X11 / XWayland; unlock the screen             |
 
 ______________________________________________________________________
 
@@ -242,7 +241,7 @@ try:
     result = vrcpilot.ocr(shot)
     target = next((w for w in result.words if w.text == "Worlds"), None)
     if target is not None:
-        x, y, w, h = result.display_bbox(target)
+        x, y, w, h = target.bbox
         vrcpilot.mouse.move(int(x + w / 2), int(y + h / 2))
         vrcpilot.mouse.click(vrcpilot.MouseButton.LEFT)
 

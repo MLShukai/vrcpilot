@@ -11,12 +11,14 @@
 
 Python automation toolkit for the VRChat desktop client on Windows / Linux. It can launch, focus, capture, OCR, detect image templates, and synthesize input through both a typed Python API and the `vrcpilot` CLI.
 
+> **Breaking change (`0.1.0a2`)** — coordinates are now uniformly **VRChat window-local**. `mouse.move(x, y)` (and `vrcpilot mouse move X Y`) interprets its arguments as window-local pixels, and OCR / detect results expose only the window-local `pos` field. The previous `display_pos.{polygon,bbox}` keys and the `OCRResult.display_polygon` / `display_bbox` (and `DetectResult.*`) helpers have been removed. Pass `pos.bbox` (or `word.bbox` / `detection.bbox`) into `mouse.move` directly — no per-coordinate translation is needed.
+
 ## Features
 
 - **Process control** — launch VRChat through Steam (`vrcpilot.launch`), detect running PIDs, and terminate the process.
 - **Window control** — focus / unfocus the VRChat window and check its foreground state (Win32 / X11 / XWayland).
 - **Screen capture** — `Capture` for streaming (mp4 / y4m sinks) and `take_screenshot` for one-off captures that round-trip through YAML.
-- **OCR** — pluggable `OCREngine` ABC with the default `RapidOCREngine`. `ocr()` returns word-level results in both window-local and desktop-absolute coordinates.
+- **OCR** — pluggable `OCREngine` ABC with the default `RapidOCREngine`. `ocr()` returns word-level results in VRChat window-local coordinates that feed straight into `mouse.move()`.
 - **Image-template detection** — `TemplateDetectEngine` using OpenCV `TM_CCOEFF_NORMED`. Detections use the same coordinate schema as OCR.
 - **Synthetic input** — keyboard / mouse input via [`pydirectinput`](https://github.com/learncodebygaming/pydirectinput) on Windows and [`inputtino`](https://github.com/games-on-whales/inputtino) + `/dev/uinput` on Linux. Input is sent only while VRChat is focused.
 - **Non-ASCII text injection** — `vrcpilot.clipboard` sends arbitrary Unicode strings through clipboard + Ctrl+V.
@@ -90,7 +92,7 @@ Not supported.
 
 The CLI is the quickest entry point for driving VRChat. The basic pipeline is: `screenshot` emits a `Screenshot` as YAML, then `ocr` / `detect` consume it from stdin or `--screenshot`.
 
-When using OCR / detect results as click targets, **always use `display_pos.bbox`** (not the window-local `pos`). In multi-monitor environments, or when the window origin is not the top-left corner of the full display, passing `pos` directly will shift the coordinates.
+OCR / detect results expose **window-local** coordinates under `pos.bbox`, and `vrcpilot mouse move X Y` consumes the same window-local frame. Feed `pos.bbox` in directly — no manual translation is needed.
 
 ```bash
 # Launch VRChat in desktop mode and wait until startup completes
@@ -102,8 +104,8 @@ vrcpilot screenshot | vrcpilot ocr --viz /tmp/viz.png > /tmp/ocr.yaml
 # Pass the same pipeline to image-template detection
 vrcpilot screenshot | vrcpilot detect -q assets/button.png > /tmp/det.yaml
 
-# Move the mouse and click (desktop-absolute coordinates)
-vrcpilot mouse move 1183 514
+# Move the mouse and click (VRChat window-local coordinates)
+vrcpilot mouse move 600 360
 vrcpilot mouse click left
 
 # Press a key (--duration defaults to 0.1s, the lower bound VRChat reliably accepts)
@@ -141,11 +143,12 @@ try:
     # OCR all visible words (uses a cached RapidOCREngine when engine is omitted)
     result = vrcpilot.ocr(shot)
     for word in result.words:
-        print(word.text, result.display_bbox(word))
+        print(word.text, word.bbox)
 
     # Move the cursor to the center of the first word and left-click
+    # word.bbox is window-local, which is exactly what mouse.move expects.
     if result.words:
-        x, y, w, h = result.display_bbox(result.words[0])
+        x, y, w, h = result.words[0].bbox
         vrcpilot.mouse.move(int(x + w / 2), int(y + h / 2))
         vrcpilot.mouse.click(vrcpilot.MouseButton.LEFT)
 
@@ -166,7 +169,7 @@ finally:
 | `unfocus`    | Send the VRChat window to the bottom of the z-order                                                   |
 | `screenshot` | Capture one frame and emit a `Screenshot` YAML to stdout (PNG path or inline base64)                  |
 | `capture`    | Record at a fixed FPS. Saves to file with `-o file.mp4`; otherwise emits y4m to stdout                |
-| `mouse`      | `move` / `click` / `scroll` (desktop-absolute coordinates)                                            |
+| `mouse`      | `move` / `click` / `scroll` (VRChat window-local coordinates)                                         |
 | `keyboard`   | `press` (`--duration` defaults to 0.1s)                                                               |
 | `paste`      | Input text through clipboard + Ctrl+V (non-ASCII safe)                                                |
 | `ocr`        | Run OCR on a `Screenshot` YAML (stdin pipe or `--screenshot <path>`)                                  |

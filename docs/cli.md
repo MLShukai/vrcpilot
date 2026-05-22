@@ -22,14 +22,13 @@ Both forms are first-class: pipe a fresh capture, or pass a previously saved YAM
 
 ### Coordinate system
 
-OCR and detect emit two coordinate spaces per match:
+OCR and detect emit one coordinate space per match:
 
-- `pos.{polygon,bbox}` — window-local, origin at the VRChat window's top-left.
-- `display_pos.{polygon,bbox}` — desktop-absolute, already shifted by `window.x` / `window.y`.
+- `pos.{polygon,bbox}` — window-local pixels, origin at the VRChat window's top-left.
 
-When feeding coordinates back into `vrcpilot mouse move`, **always use `display_pos.bbox`**. Window-local `pos` will land in the wrong place on multi-monitor setups or whenever the VRChat window is not at `(0, 0)`.
+`vrcpilot mouse move X Y` interprets `(X, Y)` in the **same window-local frame**, so OCR / detect output and `mouse move` round-trip without any translation. There is no separate desktop-absolute view — the previous `display_pos.{polygon,bbox}` field has been removed.
 
-The shared frame for screenshot geometry and `mouse move` is the **virtual-desktop bounding box**: `mss.MSS().monitors[0]` on Linux, and the Win32 virtual screen on Windows. On standard left-origin monitor layouts that box starts at `(0, 0)` and matches the usual "desktop-absolute pixels" intuition. If a secondary monitor extends left of the primary, the origin shifts accordingly. OCR / detect output and `mouse move` use the same frame, so coordinates round-trip without manual translation.
+If you need the desktop-absolute position of the window itself, the `screenshot` YAML still records the window top-left under `x` / `y` (and the monitor index under `monitor_index`).
 
 ______________________________________________________________________
 
@@ -212,10 +211,10 @@ Send synthetic mouse input to VRChat. All actions guard on VRChat being running 
 vrcpilot mouse move X Y [--rel]
 ```
 
-| Argument | Description                                                                                                                                                            |
-| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `X`, `Y` | Target position in the virtual-desktop frame (see [Coordinate system](#coordinate-system)). On standard layouts this matches `display_pos.bbox` from `ocr` / `detect`. |
-| `--rel`  | Treat `X`, `Y` as a relative delta from the current cursor position.                                                                                                   |
+| Argument | Description                                                                                                                                                   |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `X`, `Y` | Target position in **VRChat window-local pixels** — same frame as `pos.bbox` from `ocr` / `detect`. See [Coordinate system](#coordinate-system).              |
+| `--rel`  | Treat `X`, `Y` as a relative delta from the current cursor position. Coordinates outside the VRChat window are not rejected; they are passed to the OS as-is. |
 
 ### `mouse click`
 
@@ -307,7 +306,7 @@ vrcpilot ocr [-s YAML | --screenshot YAML] [--viz [PATH]]
 
 - `captured_at` (ISO-8601 UTC)
 - `window` — `x`, `y`, `width`, `height`, `monitor_index`
-- `words[]` — each entry has `text`, `confidence`, `pos.{polygon,bbox}`, `display_pos.{polygon,bbox}`
+- `words[]` — each entry has `text`, `confidence`, `pos.{polygon,bbox}` (window-local pixels)
 - `viz_path` — present only when `--viz` was used
 
 **Exit codes**: `0` on success, `1` if the screenshot input cannot be resolved or OCR fails.
@@ -340,7 +339,7 @@ vrcpilot detect -q QUERY_PATH [-s YAML | --screenshot YAML]
 - `captured_at` (ISO-8601 UTC)
 - `window` — `x`, `y`, `width`, `height`, `monitor_index`
 - `query` — `path`, `width`, `height`
-- `detections[]` — each entry has `confidence`, `scale`, `rotation`, `pos.{polygon,bbox}`, `display_pos.{polygon,bbox}`
+- `detections[]` — each entry has `confidence`, `scale`, `rotation`, `pos.{polygon,bbox}` (window-local pixels)
 - `viz_path` — present only when `--viz` was used
 
 **Exit codes**: `0` on success, `1` if the screenshot input cannot be resolved, the query image cannot be loaded, or detection fails.

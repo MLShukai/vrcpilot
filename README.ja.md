@@ -11,12 +11,14 @@
 
 Windows / Linux 上の VRChat デスクトップクライアントを Python から自動操作するためのツールキットです。起動、フォーカス、画面キャプチャ、OCR、画像テンプレート検出、合成入力を、型付きの Python API と `vrcpilot` CLI から扱えます。
 
+> **破壊的変更 (`0.1.0a2`)** — 座標系が **VRChat ウィンドウローカル** に一本化されました。`mouse.move(x, y)`（および `vrcpilot mouse move X Y`）はウィンドウローカル座標として解釈され、OCR / detect の結果もウィンドウローカルな `pos` のみを返します。従来の `display_pos.{polygon,bbox}` キーや、`OCRResult.display_polygon` / `display_bbox`（`DetectResult` 側も同様）は撤廃されました。OCR / detect の `pos.bbox`（あるいは `word.bbox` / `detection.bbox`）をそのまま `mouse.move` に渡せます。座標を手動で平行移動する必要はありません。
+
 ## 機能
 
 - **プロセス制御** — Steam 経由で VRChat を起動 (`vrcpilot.launch`)。起動中プロセスの PID 検出と終了処理にも対応
 - **ウィンドウ制御** — VRChat ウィンドウのフォーカス取得・解除、前面状態の確認に対応（Win32 / X11 / XWayland）
 - **画面キャプチャ** — ストリーミング向けの `Capture` (mp4 / y4m シンク) と、YAML と相互変換できる単発キャプチャ `take_screenshot`
-- **OCR** — 差し替え可能な `OCREngine` ABC と標準実装の `RapidOCREngine`。`ocr()` は単語単位の認識結果を、ウィンドウローカル座標とデスクトップ絶対座標の両方で返します
+- **OCR** — 差し替え可能な `OCREngine` ABC と標準実装の `RapidOCREngine`。`ocr()` は単語単位の認識結果を VRChat ウィンドウローカル座標で返し、そのまま `mouse.move()` に渡せます
 - **画像テンプレート検出** — OpenCV の `TM_CCOEFF_NORMED` を使う `TemplateDetectEngine`。OCR と同じ座標スキーマで検出結果を返します
 - **合成入力** — keyboard / mouse の入力（Windows: [`pydirectinput`](https://github.com/learncodebygaming/pydirectinput) / Linux: [`inputtino`](https://github.com/games-on-whales/inputtino) + `/dev/uinput`）。VRChat にフォーカスがあるときだけ入力します
 - **非 ASCII テキスト入力** — `vrcpilot.clipboard` がクリップボード + Ctrl+V 経由で任意の Unicode 文字列を入力
@@ -90,7 +92,7 @@ sudo usermod -aG input "$USER"   # /dev/uinput への書き込み権限。一度
 
 CLI は VRChat を操作する一番手軽な入口です。基本的な流れは、`screenshot` が `Screenshot` を YAML で出力し、`ocr` / `detect` が標準入力または `--screenshot` からそれを受け取る、という形です。
 
-OCR / detect の結果をクリック対象にする場合は、**必ず `display_pos.bbox` を使ってください** (ウィンドウローカルの `pos` ではありません)。マルチモニタ環境や、ウィンドウの左上が画面全体の左上と一致しない環境では、`pos` をそのまま渡すと座標がずれます。
+OCR / detect の結果はすべて **VRChat ウィンドウローカル座標** で `pos.bbox` に格納されます。`vrcpilot mouse move X Y` も同じウィンドウローカル座標を受け取るため、`pos.bbox` をそのまま渡せます。手動で座標を平行移動する必要はありません。
 
 ```bash
 # VRChat をデスクトップモードで起動し、起動完了まで待機
@@ -102,8 +104,8 @@ vrcpilot screenshot | vrcpilot ocr --viz /tmp/viz.png > /tmp/ocr.yaml
 # 同じパイプを画像テンプレート検出へ渡す例
 vrcpilot screenshot | vrcpilot detect -q assets/button.png > /tmp/det.yaml
 
-# マウス移動 + クリック (デスクトップ絶対座標)
-vrcpilot mouse move 1183 514
+# マウス移動 + クリック (VRChat ウィンドウローカル座標)
+vrcpilot mouse move 600 360
 vrcpilot mouse click left
 
 # キー押下 (--duration の既定値 0.1 秒は、VRChat が安定して受け取れる下限)
@@ -141,11 +143,12 @@ try:
     # 表示中の単語をすべて OCR (engine 未指定時はキャッシュ済みの RapidOCREngine を使用)
     result = vrcpilot.ocr(shot)
     for word in result.words:
-        print(word.text, result.display_bbox(word))
+        print(word.text, word.bbox)
 
     # 最初の単語の中央へカーソルを移動して左クリック
+    # word.bbox はウィンドウローカル座標で、mouse.move がそのまま受け取れる
     if result.words:
-        x, y, w, h = result.display_bbox(result.words[0])
+        x, y, w, h = result.words[0].bbox
         vrcpilot.mouse.move(int(x + w / 2), int(y + h / 2))
         vrcpilot.mouse.click(vrcpilot.MouseButton.LEFT)
 
@@ -166,7 +169,7 @@ finally:
 | `unfocus`    | VRChat ウィンドウを Z オーダーの最背面に送る                                                       |
 | `screenshot` | 画面を 1 枚キャプチャし、`Screenshot` を YAML で標準出力へ出力 (PNG パスまたはインライン base64)   |
 | `capture`    | 一定の FPS で録画。`-o file.mp4` 指定時はファイルに保存し、未指定時は y4m を標準出力へ出力         |
-| `mouse`      | `move` / `click` / `scroll` (デスクトップ絶対座標)                                                 |
+| `mouse`      | `move` / `click` / `scroll` (VRChat ウィンドウローカル座標)                                        |
 | `keyboard`   | `press` (`--duration` の既定値は 0.1 秒)                                                           |
 | `paste`      | クリップボード + Ctrl+V でテキストを入力 (非 ASCII 対応)                                           |
 | `ocr`        | `Screenshot` YAML に対して OCR を実行 (標準入力のパイプ、または `--screenshot <path>`)             |
