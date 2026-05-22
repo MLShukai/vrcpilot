@@ -153,11 +153,14 @@ class TestBackendDispatch:
 
         proctap_mock.assert_called_once_with(read_timeout=2.0)
 
-    def test_darwin_falls_through_to_proctap(self, mocker: MockerFixture):
-        # macOS is intentionally a fall-through case: proctap's own
-        # error surface is the right place for an "unsupported host"
-        # diagnosis if upstream cannot load a backend.
-        mocker.patch("sys.platform", "darwin")
+    def test_unsupported_platform_falls_through_to_proctap(self, mocker: MockerFixture):
+        # An unsupported host (e.g. freebsd) is intentionally a fall-
+        # through case here: proctap's own error surface is the right
+        # place for an "unsupported host" diagnosis if upstream cannot
+        # load a backend. M4 will replace this with an explicit
+        # NotImplementedError; until then the dispatcher mirrors its
+        # historical behaviour.
+        mocker.patch("sys.platform", "freebsd")
         proctap_mock = mocker.patch("vrcpilot.speaker.proctap.ProcTapSpeakerBackend")
 
         from vrcpilot.speaker.session import _select_speaker_backend
