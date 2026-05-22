@@ -27,11 +27,11 @@ def focus() -> bool:
         session is native Wayland (also emits :class:`RuntimeWarning`).
     """
     if sys.platform == "win32":
-        from .win32 import focus_window as _impl
+        from .windows import focus_window as _impl
 
         return _impl()
     if sys.platform == "linux":
-        from .x11 import focus_window as _impl
+        from .linux import focus_window as _impl
 
         return _impl()
     raise NotImplementedError(f"focus() is not supported on {sys.platform}")
@@ -50,11 +50,11 @@ def is_foreground() -> bool:
         emits :class:`RuntimeWarning`).
     """
     if sys.platform == "win32":
-        from .win32 import is_window_foreground as _impl
+        from .windows import is_window_foreground as _impl
 
         return _impl()
     if sys.platform == "linux":
-        from .x11 import is_window_foreground as _impl
+        from .linux import is_window_foreground as _impl
 
         return _impl()
     raise NotImplementedError(f"is_foreground() is not supported on {sys.platform}")
@@ -75,11 +75,11 @@ def unfocus() -> bool:
         session is native Wayland (also emits :class:`RuntimeWarning`).
     """
     if sys.platform == "win32":
-        from .win32 import unfocus_window as _impl
+        from .windows import unfocus_window as _impl
 
         return _impl()
     if sys.platform == "linux":
-        from .x11 import unfocus_window as _impl
+        from .linux import unfocus_window as _impl
 
         return _impl()
     raise NotImplementedError(f"unfocus() is not supported on {sys.platform}")

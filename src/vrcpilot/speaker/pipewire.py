@@ -54,7 +54,7 @@ _logger = logging.getLogger(__name__)
 
 #: External CLIs the backend relies on. Missing any of these is a hard
 #: start-up failure with an aggregated, actionable error message.
-_REQUIRED_CLIS: Final[tuple[str, ...]] = ("pw-record", "pw-link", "pw-dump", "pactl")
+_REQUIRED_CLIS: Final[tuple[str, ...]] = ("pw-record", "pw-link", "pw-dump")
 
 #: Deterministic null-sink name. Stale instances from previous crashed
 #: runs are unloaded on start-up by matching this token in the module's
