@@ -9,7 +9,7 @@ Manage the persistent ``VRCPilotMic`` virtual mic that
 * ``unregister`` -- remove the config fragment and unload any matching
   runtime module.
 * ``status`` -- report what is currently in place: config file, runtime
-  module, and whether ``sounddevice`` can see the device.
+  module, and whether ``soundcard`` can see the device.
 
 The action sits under a single parent subparser so the top-level CLI
 exposes only ``linux-mic`` (the actions live one level deeper, matching
@@ -71,7 +71,7 @@ def register(subparsers: SubParsersAction) -> None:
         "status",
         help=(
             "Report current registration state: config present, runtime "
-            "module loaded, sounddevice visibility."
+            "module loaded, soundcard visibility."
         ),
     )
 
@@ -166,50 +166,51 @@ def _runtime_loaded(sink_name: str) -> tuple[bool, str | None]:
     return False, None
 
 
-def _sounddevice_visible(sink_name: str) -> tuple[bool, str | None]:
-    """Return ``(visible, error)`` from a sounddevice device probe.
+def _soundcard_visible(sink_name: str) -> tuple[bool, str | None]:
+    """Return ``(visible, error)`` from a soundcard speaker probe.
 
     ``visible`` is ``True`` iff some entry from
-    ``sounddevice.query_devices()`` contains ``sink_name`` as a
-    substring of its ``name`` field. ``error`` is populated when the
-    probe itself blew up (sounddevice missing, PortAudio open failure);
-    callers print it alongside the ``not visible`` answer.
+    ``soundcard.all_speakers()`` contains ``sink_name`` as a
+    case-insensitive substring of its ``name`` field. ``error`` is
+    populated when the probe itself blew up (soundcard missing,
+    libpulse / WASAPI open failure); callers print it alongside the
+    ``not visible`` answer.
     """
     try:
-        # ``sounddevice`` was dropped from runtime deps in the Phase 1
-        # ``soundcard`` migration; Phase 2 will rewrite this probe.
-        # Until then, suppress the missing-import diagnostic so strict
-        # pyright stays green while the lazy import path is exercised
-        # only via ``sys.modules`` patching in tests.
-        import sounddevice as sd  # pyright: ignore[reportMissingImports,reportMissingTypeStubs]
+        import soundcard as sc  # pyright: ignore[reportMissingTypeStubs]
     except ImportError as exc:
-        return False, f"sounddevice not installed ({exc})"
+        return False, f"soundcard not installed ({exc})"
     except OSError as exc:
-        # sounddevice raises OSError on import when the PortAudio shared
-        # library is missing (libportaudio2 on Debian/Ubuntu, portaudio
-        # on Fedora). Surface a hint along with the underlying error.
+        # soundcard raises OSError on import when the libpulse shared
+        # library is missing on Linux (libpulse0 on Debian/Ubuntu) or
+        # WASAPI is unavailable on Windows. Surface a hint along with
+        # the underlying error.
         return False, (
-            f"sounddevice import failed ({exc}); install PortAudio "
-            "(e.g. 'sudo apt-get install libportaudio2')"
+            f"soundcard import failed ({exc}); install libpulse "
+            "(e.g. 'sudo apt-get install libpulse0')"
         )
 
     try:
-        devices = sd.query_devices()  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
+        speakers = sc.all_speakers()  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
+    except OSError as exc:
+        # The native library can also surface its missing-dependency
+        # OSError on the first call rather than at import (e.g. when
+        # ``soundcard`` lazy-loads ``libpulse`` via ``ctypes`` only when
+        # the first speaker enumeration runs). Reuse the same hint so
+        # users see consistent guidance regardless of which path tripped.
+        return False, (
+            f"soundcard probe failed ({exc}); install libpulse "
+            "(e.g. 'sudo apt-get install libpulse0')"
+        )
     except Exception as exc:  # noqa: BLE001
-        return False, f"query_devices failed ({exc})"
+        return False, f"all_speakers failed ({exc})"
 
-    for device in devices:  # pyright: ignore[reportUnknownVariableType]
-        device_obj = cast(object, device)
-        name = ""
-        if isinstance(device_obj, dict):
-            raw = device_obj.get("name", "")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
-            if isinstance(raw, str):
-                name = raw
-        else:
-            attr = getattr(device_obj, "name", "")
-            if isinstance(attr, str):
-                name = attr
-        if sink_name in name:
+    needle = sink_name.lower()
+    for speaker in speakers:  # pyright: ignore[reportUnknownVariableType]
+        speaker_obj = cast(object, speaker)
+        attr = getattr(speaker_obj, "name", "")
+        name = attr if isinstance(attr, str) else ""
+        if needle in name.lower():
             return True, None
     return False, None
 
@@ -220,7 +221,7 @@ def _run_status() -> int:
     Machine-readable state lands on stdout in a stable vocabulary
     (``present``/``absent`` for config, ``loaded``/``unavailable``/
     ``not loaded`` for runtime, ``visible``/``unavailable``/``not
-    visible`` for sounddevice); human-readable error detail goes to
+    visible`` for soundcard); human-readable error detail goes to
     stderr so scripts can ``grep`` stdout without seeing import-failure
     parentheticals. ``unavailable`` is the fixed label used whenever
     the probe itself blew up; the matching stderr line carries the
@@ -244,12 +245,12 @@ def _run_status() -> int:
     else:
         print(f"runtime: {'loaded' if loaded else 'not loaded'}")
 
-    visible, sd_err = _sounddevice_visible(VIRTUAL_MIC_SINK_NAME)
-    if sd_err is not None:
-        print("sounddevice: unavailable")
-        print(f"sounddevice: error: {sd_err}", file=sys.stderr)
+    visible, sc_err = _soundcard_visible(VIRTUAL_MIC_SINK_NAME)
+    if sc_err is not None:
+        print("soundcard: unavailable")
+        print(f"soundcard: error: {sc_err}", file=sys.stderr)
     else:
-        print(f"sounddevice: {'visible' if visible else 'not visible'}")
+        print(f"soundcard: {'visible' if visible else 'not visible'}")
 
     return 0
 

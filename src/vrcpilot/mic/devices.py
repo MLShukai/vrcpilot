@@ -62,32 +62,36 @@ def resolve_device_name(argument: str | None) -> str:
 
 
 def lookup_speaker(name: str) -> Any:
-    """Return the first soundcard ``Speaker`` whose name contains ``name``
-    (case-insensitive).
+    """Return the soundcard ``Speaker`` matching ``name``.
 
-    ``soundcard`` is imported lazily so platforms without ``libpulse``
-    (Linux) or WASAPI (Windows) wired up can still ``import
-    vrcpilot.mic``. The return value is the duck-typed ``_Speaker``
-    instance exposed by :mod:`soundcard`; it carries ``id`` / ``name``
-    / ``channels`` attributes and a ``player(samplerate, channels,
-    blocksize=None)`` context-manager factory that :class:`Mic` opens.
+    Delegates to :func:`soundcard.get_speaker`, which does a
+    case-insensitive substring (and fuzzy id) match and raises
+    :class:`LookupError` on miss. ``soundcard`` is imported lazily so
+    platforms without ``libpulse`` (Linux) or WASAPI (Windows) wired up
+    can still ``import vrcpilot.mic``. The return value is the
+    duck-typed ``_Speaker`` instance exposed by :mod:`soundcard`; it
+    carries ``id`` / ``name`` / ``channels`` attributes and a
+    ``player(samplerate, channels, blocksize=None)`` context-manager
+    factory that :class:`Mic` opens.
 
     Raises:
-        MicDeviceNotFoundError: No output device matches; the message
-            lists every output device currently visible to soundcard.
+        MicDeviceNotFoundError: ``soundcard`` reports no match; the
+            message lists every output device currently visible and
+            points the user at the OS-specific setup step.
     """
     import soundcard as sc  # pyright: ignore[reportMissingTypeStubs]
+
+    try:
+        return sc.get_speaker(name)  # pyright: ignore[reportUnknownMemberType]
+    except (LookupError, IndexError):
+        # soundcard raises LookupError on a clean miss; the fuzzy-match
+        # implementation can also surface IndexError when the candidate
+        # list is empty. Both map to "no match" for our contract.
+        pass
 
     speakers: list[Any] = list(
         sc.all_speakers()  # pyright: ignore[reportUnknownMemberType]
     )
-    needle = name.lower()
-    for speaker in speakers:
-        speaker_name = str(
-            getattr(speaker, "name", "")  # pyright: ignore[reportUnknownArgumentType]
-        )
-        if needle in speaker_name.lower():
-            return speaker
     listing_lines: list[str] = []
     for s in speakers:
         s_name = str(

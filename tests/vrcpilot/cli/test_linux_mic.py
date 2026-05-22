@@ -1,7 +1,7 @@
 """Tests for :mod:`vrcpilot.cli.linux_mic`.
 
 The CLI front-end calls into :mod:`vrcpilot.mic.linux` (which raises
-on import outside Linux) and probes ``pulsectl`` / ``sounddevice``
+on import outside Linux) and probes ``pulsectl`` / ``soundcard``
 indirectly via :func:`vrcpilot.mic.linux.open_pulse_control` -- the
 same seam ``register`` / ``unregister`` use, so unit tests patch one
 symbol and cover all three code paths. Linux-only behaviour is
@@ -25,7 +25,7 @@ from tests.fakes import (
     FakePulse,
     FakePulseModuleInfo,
     FakePulseRegistry,
-    FakeSoundDevice,
+    FakeSoundCard,
 )
 from vrcpilot.cli import linux_mic as cli_linux_mic, main
 
@@ -244,10 +244,10 @@ class TestStatusAction:
         )
         mocker.patch.object(mic_linux, "open_pulse_control", return_value=pulse)
 
-        # sounddevice: visible -- the fake exposes our device by name.
-        fake_sd = FakeSoundDevice()
-        fake_sd.add_output_device("VRCPilotMic")
-        mocker.patch.dict(sys.modules, {"sounddevice": fake_sd})
+        # soundcard: visible -- the fake exposes our device by name.
+        fake_sc = FakeSoundCard()
+        fake_sc.add_speaker("VRCPilotMic")
+        mocker.patch.dict(sys.modules, {"soundcard": fake_sc})
 
         exit_code = main(["linux-mic", "status"])
 
@@ -256,7 +256,7 @@ class TestStatusAction:
         assert "config: present" in captured.out
         assert f"config_path: {cfg}" in captured.out
         assert "runtime: loaded" in captured.out
-        assert "sounddevice: visible" in captured.out
+        assert "soundcard: visible" in captured.out
         # No error -> stderr stays empty on the happy path.
         assert captured.err == ""
 
@@ -271,10 +271,10 @@ class TestStatusAction:
         pulse = FakePulse("vrcpilot-mic-status")
         mocker.patch.object(mic_linux, "open_pulse_control", return_value=pulse)
 
-        # sounddevice: not visible -- no matching device registered.
-        fake_sd = FakeSoundDevice()
-        fake_sd.add_output_device("Some Other Output")
-        mocker.patch.dict(sys.modules, {"sounddevice": fake_sd})
+        # soundcard: not visible -- no matching device registered.
+        fake_sc = FakeSoundCard()
+        fake_sc.add_speaker("Some Other Output")
+        mocker.patch.dict(sys.modules, {"soundcard": fake_sc})
 
         exit_code = main(["linux-mic", "status"])
 
@@ -282,10 +282,10 @@ class TestStatusAction:
         captured = capsys.readouterr()
         assert "config: absent" in captured.out
         assert "runtime: not loaded" in captured.out
-        assert "sounddevice: not visible" in captured.out
+        assert "soundcard: not visible" in captured.out
         assert captured.err == ""
 
-    def test_status_sounddevice_missing_reports_error(
+    def test_status_soundcard_missing_reports_error(
         self,
         isolate_config: Path,
         mocker: MockerFixture,
@@ -295,64 +295,65 @@ class TestStatusAction:
         pulse = FakePulse("vrcpilot-mic-status")
         mocker.patch.object(mic_linux, "open_pulse_control", return_value=pulse)
 
-        # Force the lazy ``import sounddevice`` to fail by parking ``None``
+        # Force the lazy ``import soundcard`` to fail by parking ``None``
         # in ``sys.modules`` -- Python raises ``ImportError`` on the next
-        # ``import sounddevice`` without involving ``builtins.__import__``.
-        mocker.patch.dict(sys.modules, {"sounddevice": None})
+        # ``import soundcard`` without involving ``builtins.__import__``.
+        mocker.patch.dict(sys.modules, {"soundcard": None})
 
         exit_code = main(["linux-mic", "status"])
 
         assert exit_code == 0
         captured = capsys.readouterr()
         # Machine-readable label on stdout (fixed vocabulary).
-        assert "sounddevice: unavailable" in captured.out
+        assert "soundcard: unavailable" in captured.out
         # Human-readable detail on stderr.
-        assert "sounddevice: error:" in captured.err
-        assert "sounddevice not installed" in captured.err
+        assert "soundcard: error:" in captured.err
+        assert "soundcard not installed" in captured.err
 
-    def test_status_sounddevice_portaudio_missing_reports_error(
+    def test_status_soundcard_libpulse_missing_reports_error(
         self,
         isolate_config: Path,
         mocker: MockerFixture,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        """``import sounddevice`` raises ``OSError`` when PortAudio is absent.
+        """``soundcard`` surfaces ``OSError`` when libpulse is unavailable.
 
         Real-world failure observed on a fresh Linux dev box without
-        ``libportaudio2`` installed: the wheel imports fine via
-        ``sys.modules`` lookup but raises ``OSError("PortAudio library
-        not found")`` from its initialiser. Status must funnel that
-        through the same ``unavailable`` + stderr-detail contract as
-        ``ImportError``.
+        ``libpulse0`` installed: the wheel imports fine via ``sys.modules``
+        lookup but raises ``OSError`` from its ``ctypes.CDLL("libpulse")``
+        call the first time the binding actually touches the native
+        library. Status must funnel that through the same
+        ``unavailable`` + stderr-detail contract as ``ImportError``.
+
+        Patching ``builtins.__import__`` is intentionally avoided -- it
+        was flagged as too broad in earlier reviews -- so we install a
+        module-shaped stand-in whose attribute access raises ``OSError``
+        and rely on ``sc.all_speakers()`` (the first attribute lookup)
+        to trigger the libpulse-missing path inside
+        :func:`vrcpilot.cli.linux_mic._soundcard_visible`.
         """
         del isolate_config
 
-        # Stand-in module that raises OSError on attribute access, the
-        # closest in-process analogue of sounddevice's behaviour when
-        # the underlying shared library is missing.
-        class _PortAudioMissingModule:
-            def __getattr__(self, _name: str) -> object:
-                raise OSError("PortAudio library not found")
+        class _LibpulseMissingModule:
+            """Module-shaped stand-in for ``soundcard`` whose attribute access
+            raises ``OSError``.
 
-        # The CLI's ``import sounddevice`` is inside a ``try`` block; a
-        # bare module that raises on every attribute access is not enough
-        # because import succeeds. Patching the import itself to raise
-        # OSError directly captures the failure mode users hit.
-        original_import = __import__
+            ``import soundcard as sc`` succeeds (the import system just
+            returns whatever is parked at ``sys.modules["soundcard"]``),
+            but the very first ``sc.<attr>`` access -- ``sc.all_speakers()``
+            inside the probe -- raises ``OSError`` the same way a real
+            soundcard install would when ``ctypes`` fails to dlopen
+            ``libpulse.so.0``.
+            """
 
-        def fake_import(
-            name: str,
-            globals: dict[str, object] | None = None,
-            locals: dict[str, object] | None = None,
-            fromlist: tuple[str, ...] = (),
-            level: int = 0,
-        ) -> object:
-            if name == "sounddevice":
-                raise OSError("PortAudio library not found")
-            return original_import(name, globals, locals, fromlist, level)
+            def __getattr__(self, name: str) -> object:
+                raise OSError(
+                    f"libpulse.so.0: cannot open shared object file "
+                    f"(attribute {name!r})"
+                )
 
-        mocker.patch("builtins.__import__", side_effect=fake_import)
-        # Keep pulsectl side green so the failure attributes to sounddevice.
+        mocker.patch.dict(sys.modules, {"soundcard": _LibpulseMissingModule()})
+        # Keep pulsectl side green so the failure attributes to soundcard.
         mocker.patch.object(
             mic_linux,
             "open_pulse_control",
@@ -363,13 +364,13 @@ class TestStatusAction:
 
         assert exit_code == 0
         captured = capsys.readouterr()
-        assert "sounddevice: unavailable" in captured.out
-        assert "sounddevice: error:" in captured.err
-        assert "PortAudio" in captured.err
-        # Hint to install libportaudio2 is part of the contract for
-        # this branch -- without it, users on a clean Linux box are
-        # left guessing.
-        assert "libportaudio2" in captured.err
+        assert "soundcard: unavailable" in captured.out
+        assert "soundcard: error:" in captured.err
+        assert "libpulse" in captured.err
+        # Hint to install libpulse0 is part of the contract for this
+        # branch -- without it, users on a clean Linux box are left
+        # guessing.
+        assert "libpulse0" in captured.err
 
     def test_status_pulsectl_missing_reports_error(
         self,
@@ -378,9 +379,9 @@ class TestStatusAction:
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         del isolate_config
-        # sounddevice must still resolve so only one branch goes red.
-        fake_sd = FakeSoundDevice()
-        mocker.patch.dict(sys.modules, {"sounddevice": fake_sd})
+        # soundcard must still resolve so only one branch goes red.
+        fake_sc = FakeSoundCard()
+        mocker.patch.dict(sys.modules, {"soundcard": fake_sc})
 
         # The status action funnels through ``open_pulse_control``; raising
         # ``ImportError`` from that seam is the seamless way to fake a

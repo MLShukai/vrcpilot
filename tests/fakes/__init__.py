@@ -18,7 +18,6 @@ from __future__ import annotations
 
 from .audio import (
     FakeMic,
-    FakeOutputStream,
     FakeProcessAudioCapture,
     FakePulse,
     FakePulseEventInfo,
@@ -33,7 +32,6 @@ from .audio import (
     FakeSoundCardRecorder,
     FakeSoundCardRecorderCM,
     FakeSoundCardSpeaker,
-    FakeSoundDevice,
     FakeSpeaker,
     FakeSpeakerLoop,
     FakeWavSink,
@@ -73,7 +71,6 @@ __all__ = [
     "FakeMouseButton",
     "FakeMp4Sink",
     "FakeOCREngine",
-    "FakeOutputStream",
     "FakePixmap",
     "FakePixmapImage",
     "FakePopen",
@@ -93,7 +90,6 @@ __all__ = [
     "FakeSoundCardRecorder",
     "FakeSoundCardRecorderCM",
     "FakeSoundCardSpeaker",
-    "FakeSoundDevice",
     "FakeSpeaker",
     "FakeSpeakerLoop",
     "FakeUDPClient",

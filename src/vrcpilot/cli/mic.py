@@ -11,7 +11,8 @@ Exit codes:
     * ``0`` -- playback completed successfully.
     * ``1`` -- recoverable runtime failure: device lookup miss
       (:class:`~vrcpilot.mic.MicDeviceNotFoundError`), unsupported WAV
-      (sampwidth != 2), PortAudio failure, or sounddevice not installed.
+      (sampwidth != 2), soundcard / libpulse / WASAPI failure, or
+      soundcard not installed.
     * ``2`` -- bad argument combination (no input on a tty, ``auto``
       format against a non-WAV extension).
 """
@@ -38,7 +39,7 @@ from ._common import SubParsersAction, attach_completer
 #: ``np.int16(-32768) / 32768.0`` is exactly ``-1.0`` and
 #: ``np.int16(32767) / 32768.0`` is ``~0.999969``: the asymmetric divisor
 #: keeps ``int16.min`` from saturating past ``-1.0`` (which would clip
-#: inside sounddevice's float -> driver path) while still preserving
+#: inside soundcard's float -> driver path) while still preserving
 #: near-unity on the positive side.
 _INT16_DIVISOR: float = 32768.0
 
@@ -164,7 +165,7 @@ def _raw_stream_chunks(
         raw = source.read(buf_size)
         if not raw:
             return
-        # Trim any trailing partial frame: feeding it to sounddevice
+        # Trim any trailing partial frame: feeding it to soundcard
         # would misalign channels in subsequent chunks.
         usable = (len(raw) // frame_bytes) * frame_bytes
         if usable == 0:
@@ -277,18 +278,14 @@ def run(args: argparse.Namespace) -> int:
     except ImportError as exc:
         print(f"vrcpilot: {exc}", file=sys.stderr)
         return 1
-    except OSError as exc:
-        # File-open failures (missing path, permission denied) and any
-        # underlying PortAudio I/O surface as OSError subclasses.
-        print(f"vrcpilot: {exc}", file=sys.stderr)
-        return 1
-    except Exception as exc:
-        # sounddevice.PortAudioError inherits from Exception (not
-        # OSError); funnelling residual hardware faults through here
-        # keeps the CLI exit contract (code 1) intact instead of
-        # crashing with a traceback.
-        if type(exc).__name__ != "PortAudioError":
-            raise
+    except (OSError, RuntimeError) as exc:
+        # ``OSError`` covers file-open failures (missing path, permission
+        # denied) and the ``OSError`` soundcard raises when libpulse /
+        # WASAPI cannot be loaded. ``RuntimeError`` is soundcard's
+        # runtime fault channel (libpulse server errors, WASAPI device
+        # I/O failures); routing both through the same exit-code-1 path
+        # keeps the CLI contract intact instead of crashing with a
+        # traceback.
         print(f"vrcpilot: {exc}", file=sys.stderr)
         return 1
     return 0

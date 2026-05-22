@@ -62,7 +62,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
-from typing import Any, BinaryIO, Self
+from typing import BinaryIO, Self
 
 import numpy as np
 from numpy.typing import NDArray
@@ -761,131 +761,6 @@ class FakeRawPcmStdoutSink:
     ) -> None:
         del exc_type, exc_val, exc_tb
         self.close()
-
-
-class FakeOutputStream:
-    """Stand-in for :class:`sounddevice.OutputStream`.
-
-    Retained transiently for ``tests/vrcpilot/cli/test_linux_mic.py``
-    which still exercises the (about-to-be-replaced) ``sounddevice``
-    visibility probe in :mod:`vrcpilot.cli.linux_mic`. Will be removed
-    in Phase 2 once that probe migrates to :mod:`soundcard`.
-
-    Models the explicit-lifecycle surface
-    :class:`vrcpilot.mic.Mic` historically drove directly: ``start`` is
-    called from the Mic constructor, ``write`` from each
-    :meth:`Mic.play`, and ``stop`` / ``close`` from :meth:`Mic.close`.
-    Lifecycle flags (:attr:`started`, :attr:`stopped`, :attr:`closed`)
-    let tests assert the ordering without simulating threading.
-    """
-
-    def __init__(
-        self,
-        *,
-        samplerate: int,
-        channels: int,
-        dtype: str,
-        device: int,
-    ) -> None:
-        self.samplerate = samplerate
-        self.channels = channels
-        self.dtype = dtype
-        self.device = device
-        self.writes: list[NDArray[np.float32]] = []
-        self.started: bool = False
-        self.stopped: bool = False
-        self.closed: bool = False
-
-    def start(self) -> None:
-        self.started = True
-
-    def write(self, frame: NDArray[np.float32]) -> None:
-        if self.closed:
-            raise RuntimeError("write after close")
-        self.writes.append(frame)
-
-    def stop(self) -> None:
-        self.stopped = True
-
-    def close(self) -> None:
-        self.closed = True
-
-
-class FakeSoundDevice:
-    """Module-shaped stand-in for the ``sounddevice`` package.
-
-    Retained transiently for ``tests/vrcpilot/cli/test_linux_mic.py``
-    which still exercises the (about-to-be-replaced) ``sounddevice``
-    visibility probe in :mod:`vrcpilot.cli.linux_mic`. Will be removed
-    in Phase 2 once that probe migrates to :mod:`soundcard`.
-
-    Tests install an instance via ``mocker.patch.dict(sys.modules,
-    {"sounddevice": fake})`` so the lazy ``import sounddevice as sd``
-    inside the linux-mic status probe resolves to this fake instead of
-    the real PortAudio binding.
-
-    Currently models:
-
-    * :meth:`query_devices` -- backs the linux-mic status visibility
-      probe.
-    * :meth:`OutputStream` -- legacy surface kept until the Phase 2
-      ``soundcard`` migration ships.
-    """
-
-    def __init__(self) -> None:
-        self.devices: list[dict[str, Any]] = []
-        self.output_streams: list[FakeOutputStream] = []
-
-    def add_output_device(self, name: str, *, max_output_channels: int = 2) -> None:
-        """Register an output-capable device.
-
-        ``query_devices`` returns the registered entries in insertion
-        order; the index a test passes to assertions matches the order
-        of :meth:`add_output_device` / :meth:`add_input_device` calls.
-        """
-        self.devices.append(
-            {
-                "name": name,
-                "max_output_channels": max_output_channels,
-                "max_input_channels": 0,
-            }
-        )
-
-    def add_input_device(self, name: str, *, max_input_channels: int = 2) -> None:
-        """Register an input-only device (``max_output_channels=0``).
-
-        Useful for asserting that output-device lookup skips input-only
-        entries that happen to share a substring with the search needle.
-        """
-        self.devices.append(
-            {
-                "name": name,
-                "max_input_channels": max_input_channels,
-                "max_output_channels": 0,
-            }
-        )
-
-    def query_devices(self) -> list[dict[str, Any]]:
-        """Return a shallow copy of the registered device list."""
-        return list(self.devices)
-
-    def OutputStream(  # noqa: N802 -- mirrors sounddevice.OutputStream
-        self,
-        *,
-        samplerate: int,
-        channels: int,
-        dtype: str,
-        device: int,
-    ) -> FakeOutputStream:
-        """Return a fresh :class:`FakeOutputStream` and track it."""
-        stream = FakeOutputStream(
-            samplerate=samplerate,
-            channels=channels,
-            dtype=dtype,
-            device=device,
-        )
-        self.output_streams.append(stream)
-        return stream
 
 
 class FakeSoundCardPlayer:

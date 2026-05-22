@@ -416,7 +416,7 @@ class TestErrorPaths:
             channels: int = 1,
         ) -> object:
             del device, sample_rate, channels
-            raise ImportError("sounddevice is not installed")
+            raise ImportError("soundcard is not installed")
 
         mocker.patch("vrcpilot.cli.mic.Mic", _boom)
         wav_path = tmp_path / "x.wav"
@@ -426,20 +426,19 @@ class TestErrorPaths:
 
         assert exit_code == 1
         captured = capsys.readouterr()
-        assert "sounddevice is not installed" in captured.err
+        assert "soundcard is not installed" in captured.err
 
-    def test_port_audio_error_returns_1(
+    def test_runtime_error_returns_1(
         self,
         mocker: MockerFixture,
         tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ):
-        # Synthesise a PortAudioError-shaped exception so the except
-        # branch routing on ``type(exc).__name__`` is exercised.
-        class PortAudioError(Exception):
-            pass
-
-        class _PaBoomMic:
+        # soundcard surfaces native libpulse / WASAPI failures as
+        # ``RuntimeError``. The CLI's combined ``(OSError, RuntimeError)``
+        # catch must route those to exit code 1 with the message on stderr
+        # instead of crashing with a traceback.
+        class _RuntimeBoomMic:
             def __init__(
                 self,
                 device: str | None = None,
@@ -449,7 +448,7 @@ class TestErrorPaths:
             ) -> None:
                 del device, sample_rate, channels
 
-            def __enter__(self) -> _PaBoomMic:
+            def __enter__(self) -> _RuntimeBoomMic:
                 return self
 
             def __exit__(self, *_exc: object) -> None:
@@ -457,12 +456,12 @@ class TestErrorPaths:
 
             def play(self, chunk: object) -> None:
                 del chunk
-                raise PortAudioError("device unavailable")
+                raise RuntimeError("device unavailable")
 
             def close(self) -> None:
                 pass
 
-        mocker.patch("vrcpilot.cli.mic.Mic", _PaBoomMic)
+        mocker.patch("vrcpilot.cli.mic.Mic", _RuntimeBoomMic)
         wav_path = tmp_path / "x.wav"
         _write_wav(wav_path, np.zeros((1, 2), dtype=np.int16), channels=2, rate=48000)
 
