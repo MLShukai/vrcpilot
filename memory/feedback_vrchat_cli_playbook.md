@@ -6,7 +6,7 @@ type: feedback
 
 `vrcpilot` の CLI を組み合わせて VRChat を end-to-end で動かすための運用手順。SSH 越しに自分のデスクトップへ VRChat を出して観察・操作する用途を想定する。
 
-**Why:** ユーザーから「CLI で VRChat の UI 操作が可能なレベルまで到達したので、メニューを開いて色々操作するインストラクションを Claude 自身が VRChat を操作するために書いて」と明示依頼あり (2026-05-04)。同日に X11 デスクトップ + Steam 稼働下で起動 → Launch Pad 開閉 → OCR → mouse click → 前進 → terminate まで実機検証済みの手順を、再現できるよう記録したもの。さらに同日の延長セッション (2026-05-04 後半) で featured world への travel、ワールド内移動、各タブの read-only 巡回、`paste` での日本語投入、`R` の Radial Action Menu までを **他人アカウントでの非破壊操作の枠内で** 検証し、得た罠 (§4.1 travel フロー / §5.1 Radial / §8 追補) と禁止事項 (§9 不可逆操作リスト) として反映している。Linux 限定の事実 (Tab で Quick Menu が開かない、`VIRTUAL_ENV=/usr` 警告は無視可など) は実機で見ないと気付かない罠なのでここに保存する価値がある。
+**Why:** ユーザーから「CLI で VRChat の UI 操作が可能なレベルまで到達したので、メニューを開いて色々操作するインストラクションを Claude 自身が VRChat を操作するために書いて」と明示依頼あり (2026-05-04)。同日に X11 デスクトップ + Steam 稼働下で起動 → Launch Pad 開閉 → OCR → mouse click → 前進 → terminate まで実機検証済みの手順を、再現できるよう記録したもの。さらに同日の延長セッション (2026-05-04 後半) で featured world への travel、ワールド内移動、各タブの read-only 巡回、`paste` での日本語投入、`R` の Radial Action Menu までを **他人アカウントでの非破壊操作の枠内で** 検証し、得た罠 (§4.1 travel フロー / §5.1 Radial / §8 追補) と禁止事項 (§9 不可逆操作リスト) として反映している。Linux 限定の事実 (Tab で Quick Menu が開かない、`VIRTUAL_ENV=/usr` 警告は無視可など) は実機で見ないと気付かない罠なのでここに保存する価値がある。2026-05-22 に window-local 座標一本化への破壊的変更を実施 (`refactor/20260522/window-local-coordinates`)。`mouse.move(x, y)` の `(x, y)` は VRChat window-local pixels として解釈され、OCR / detect の戻り値からも `display_pos` (および `display_polygon` / `display_bbox`) が完全撤廃された。以下の手順は新座標系に追随済み。
 
 **How to apply:**
 
@@ -49,7 +49,7 @@ VRChat は黒箱なので、操作前後で必ず screenshot か OCR を取っ�
 uv run vrcpilot screenshot -o /tmp/vrc_<step>.png
 ```
 
-stdout に YAML が出る。重要なのは `x` / `y` (ウィンドウの絶対位置) と `width` / `height`。これが mouse 座標を window-local から display-absolute へ変換する基準値。
+stdout に YAML が出る。`x` / `y` はスクショ撮影時点でのウィンドウのデスクトップ位置（情報用）。`width` / `height` はウィンドウの内寸。**`mouse move` の `(x, y)` は window-local pixels で解釈される** ようになったため、`x` / `y` で OCR / detect の座標を補正する必要はもう無い（マルチモニタや非原点ウィンドウでも window-local の値をそのまま渡せる）。
 
 ### 3.2 OCR (テキスト + 座標)
 
@@ -66,8 +66,8 @@ uv run vrcpilot screenshot -o /tmp/vrc_<step>.png | uv run vrcpilot ocr --viz /t
 uv run vrcpilot ocr --screenshot /tmp/vrc_<step>.yaml > /tmp/vrc_<step>_ocr.yaml
 ```
 
-- 各 word に `pos` (window 内座標) と `display_pos` (絶対デスクトップ座標) の両方が入る
-- mouse コマンドへ渡すなら **`display_pos.bbox`** を使う：`[x, y, width, height]` の中央 = `(x + w/2, y + h/2)` が click point
+- 各 word には `pos` (`polygon` と `bbox` を持つ window-local 座標) が入る。2026-05-22 以降、`display_pos` は撤廃された（`mouse move` が window-local pixels を受け取るため変換不要）
+- mouse コマンドへ渡すなら **`pos.bbox`** をそのまま使える：`[x, y, width, height]` の中央 = `(x + w/2, y + h/2)` が click point
 - `--viz` を付けると bbox を重ねた PNG が落ちる。Read ツールで開けば視覚的に妥当性確認できる
 - RapidOCR は cp932 関係なくフルで日本語/英語を読める。Launch Pad の "Worlds" / "Avatars" / "Social" / "Safety" / "Home" / "Respawn" などはすべて 99% 信頼度で取れる実績あり
 
@@ -92,6 +92,8 @@ uv run vrcpilot screenshot -o /tmp/vrc_after.png
 
 VRChat 2026 系の UI では旧 Quick Menu / 旧 Main Menu が **Launch Pad** に統合されている。
 
+> **以下の座標値の前提**: §4 / §5 / §8 で出てくる絶対値 (例 `1183 514`) は、**1280×720 のウィンドウをデスクトップ原点 (0, 0) に置いた状態で測ったもの**。2026-05-22 に `mouse move` が window-local pixels を受け取るよう変わったため、この前提では値はそのまま window-local 座標として読み替えてよい。ウィンドウサイズや位置が違う場合は、必ず `vrcpilot screenshot | vrcpilot ocr` を取り直して **`pos.bbox`** の中心を使うこと。
+
 | キー                        | 効果                                                              | 備考                                                                        |
 | --------------------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | `escape`                    | Launch Pad / 開いている直近のサブダイアログを **1 段だけ** 閉じる | input → サブモーダル → Launch Pad の順で 1 回ずつ。一発全閉じ不可           |
@@ -104,14 +106,14 @@ VRChat 2026 系の UI では旧 Quick Menu / 旧 Main Menu が **Launch Pad** �
 uv run vrcpilot keyboard press escape
 # クリック対象を OCR で特定 (screenshot を pipe する)
 uv run vrcpilot screenshot | uv run vrcpilot ocr > /tmp/menu.yaml
-# 例: "Worlds" タブの display_pos.bbox = [1163, 507, 40, 14] → 中心 (1183, 514)
+# 例: "Worlds" タブの pos.bbox = [1163, 507, 40, 14] → 中心 (1183, 514) （1280×720 / origin (0,0) 前提）
 uv run vrcpilot mouse move 1183 514
 uv run vrcpilot mouse click left
 # 閉じる
 uv run vrcpilot keyboard press escape
 ```
 
-Launch Pad 上の主なナビゲーション要素 (実機で OCR 取得済): `Launch Pad`, `Explore`, `Avatars`, `Worlds`, `Social`, `Groups`, `Safety`, `Accessories`, `Home`, `Respawn`, `Select`。bottom nav (Home / Worlds / Avatars / Social ...) は `display_pos.y ≈ 642 付近` (1280×720 ウィンドウの場合)。
+Launch Pad 上の主なナビゲーション要素 (実機で OCR 取得済): `Launch Pad`, `Explore`, `Avatars`, `Worlds`, `Social`, `Groups`, `Safety`, `Accessories`, `Home`, `Respawn`, `Select`。bottom nav (Home / Worlds / Avatars / Social ...) は `pos.y ≈ 642 付近` (1280×720 ウィンドウの場合)。
 
 ### 4.1 Worlds タブから別ワールドへ travel する
 
@@ -155,15 +157,17 @@ uv run vrcpilot mouse move 1117 404 && uv run vrcpilot mouse click left
 
 ### 5.1 Radial Action Menu (R キー)
 
-`vrcpilot keyboard press r` で画面中央にリング状の Action Menu が出る。実機で取れたセグメント (位置は 1280×720 desktop ウィンドウ前提):
+`vrcpilot keyboard press r` で画面中央にリング状の Action Menu が出る。実機で取れたセグメント (1280×720 ウィンドウを origin (0,0) に置いた前提の window-local 中心座標。`mouse move <x> <y>` にそのまま渡せる):
 
-| セグメント  | display_pos 中心 (例) | 用途        |
-| ----------- | --------------------- | ----------- |
-| Options     | (1293, 484)           | 設定系      |
-| Tools       | (1220, 525)           | カメラ等    |
-| Expressions | (1370, 528)           | 表情・emote |
-| Items       | (1219, 611)           | 持ち物      |
-| Looks       | (1373, 619)           | 見た目変更  |
+| セグメント  | pos 中心 (例) | 用途        |
+| ----------- | ------------- | ----------- |
+| Options     | (1293, 484)   | 設定系      |
+| Tools       | (1220, 525)   | カメラ等    |
+| Expressions | (1370, 528)   | 表情・emote |
+| Items       | (1219, 611)   | 持ち物      |
+| Looks       | (1373, 619)   | 見た目変更  |
+
+> 上記の `x` がウィンドウ幅 (1280) を超えているのは、Radial Menu のリングが画面中央から外側に張り出して描画されるため。`mouse move` は window-local 座標が範囲外でも例外を投げず OS にそのまま通すので、これらの値はそのまま渡してよい。
 
 サブメニューに掘るときは text label をそのままクリックするとリングに戻されることがある。**OCR の text 中心ではなくセグメントのアイコン中心** (リング上の少し外側寄り) を狙うと当たりやすい。閉じるは Esc 一発。
 
@@ -197,12 +201,12 @@ uv run vrcpilot pid; echo "exit=$?"   # exit=1 で何もいないことを確認
 - **`VIRTUAL_ENV=/usr` の警告**: 単なる informational。動作に影響なし。報告にも書かない
 - **Esc を 1 回押しても画面変化しない**: VRChat がまだ初回ロード中の可能性。45s 待ってから再試行
 - **Tab で何も起こらない**: 仕様（Launch Pad 統合済み）。Esc を使う
-- **OCR の `pos` をそのまま mouse に渡してしまう**: window 内座標なのでデスクトップが複数モニタや非原点位置だと外す。**必ず `display_pos.bbox`** を使う
+- **OCR の座標を desktop-absolute に変換しようとする**: 2026-05-22 以降は不要。`mouse move` が window-local pixels を受け取るので **`pos.bbox` の中央をそのまま渡せる**。`display_pos` は撤廃済み（古い手順書を持ち込まないこと）
 - **キープレスが届かない**: `keyboard press --duration 0.05` 以下にしていないか確認。デフォルト 0.1 が確実な下限
 - **画面ロック中**: window 操作が安定しない。検証中は lock を外しておく
 - **OCR の visibility テキスト揺れ**: confidence 0.9+ でも "Avatar" が "Auatar" になる等のドリフトあり (`step5_ocr.yaml` で実観測)。完全一致でなく `startswith` / `in` でマッチさせるとよい
 - **world card label を直接クリックすると「お気に入り追加」ダイアログが出る**: card の label / heart 領域にヒットしている。**サムネイル画像の中心** (ラベルより 30-40px 上) を狙うと world 詳細ペインが開く
-- **詳細ペインから travel するには `Join` ボタン**: ラベル "Join" の display_pos 中心を click。Public Instance 0/n で人がいない選択を優先する
+- **詳細ペインから travel するには `Join` ボタン**: ラベル "Join" の `pos` 中心を click。Public Instance 0/n で人がいない選択を優先する
 - **travel 直後の世界で Respawn を呼ぶと VRChat が落ちることがある**: 2026-05-04 に Grand View 入室直後 (12s 後) に Esc → Respawn (1140, 650) を click したらプロセスが消えた事例 1 件。重要操作はホームで先に試し、travel 後はネット同期と avatar の measure が落ち着く 30s ほど待ってから操作する
 - **Esc は 1 段ずつしか閉じない**: input field → 仮想キーボード → サブモーダル → Launch Pad と階層が深いと最大 3-4 回 Esc が必要。間に screenshot を挟んで段階を確認する
 

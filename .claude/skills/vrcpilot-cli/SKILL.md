@@ -1,6 +1,6 @@
 ---
 name: vrcpilot-cli
-description: vrcpilot CLI (uv run vrcpilot ...) のサブコマンド表、screenshot → ocr / detect 標準パイプライン、record で音声を WAV / s16le stdout pipe する典型例、osc 7 アクションの典型例、OCR/detect の座標系（pos vs display_pos）。CLI を実行する／引数を組み立てる／パイプラインを書く前に読む
+description: vrcpilot CLI (uv run vrcpilot ...) のサブコマンド表、screenshot → ocr / detect 標準パイプライン、record で音声を WAV / s16le stdout pipe する典型例、osc 7 アクションの典型例、OCR/detect/mouse の座標系（すべて VRChat window-local）。CLI を実行する／引数を組み立てる／パイプラインを書く前に読む
 ---
 
 # vrcpilot CLI 参照リファレンス
@@ -122,12 +122,19 @@ uv run vrcpilot osc send /custom/Address --int 42
 
 ## 座標系
 
-OCR / detect の YAML は同じ座標スキーマで揃えてある:
+OCR / detect / mouse はすべて **VRChat window-local** で統一されている
+（左上 origin、単位はピクセル）:
 
-- `pos.{polygon,bbox}`: ウィンドウローカル（左上 origin）
-- `display_pos.{polygon,bbox}`: デスクトップ絶対（`window.x` / `window.y` でシフト済み）
-- `vrcpilot mouse move <x> <y>` に渡すのは **必ず `display_pos.bbox`**。
-  `pos` をそのまま渡すとマルチモニタや非原点ウィンドウで外れる
+- `pos.{polygon,bbox}`: ウィンドウローカル座標。これだけが出力される
+- `vrcpilot mouse move <x> <y>` の `<x> <y>` も window-local として解釈される
+- したがって `pos.bbox` 中心を `mouse move` にそのまま渡せる
+  （`[x, y, w, h]` なら `(x + w/2, y + h/2)`）
+- マルチモニタや非原点ウィンドウでも、`mouse` 側がランタイムで現在の
+  ウィンドウ位置を解決して desktop 絶対に変換するため追加の補正不要
+
+旧 `display_pos.{polygon,bbox}` キーは 2026-05-22 に廃止された。
+`Screenshot.x` / `Screenshot.y`（撮影時のウィンドウのデスクトップ位置）は
+情報として YAML に残るが、`mouse move` の引数には不要
 
 ## 実機 end-to-end の playbook
 

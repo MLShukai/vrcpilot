@@ -62,7 +62,7 @@
 
 - **CLI 詳細**: `/vrcpilot-cli` skill — `uv run vrcpilot ...` のサブコマンド
   表、`screenshot → ocr / detect` の標準パイプライン、`osc` 7 アクションの
-  典型例、OCR / detect の座標系（`pos` vs `display_pos`）
+  典型例、OCR / detect の座標系（`pos` = window-local）
 - **テスト方針**: `/vrcpilot-testing` skill — 4 区分のテスト戦略、tests
   ミラーレイアウト、共有 fakes、`pytest --doctest-modules` /
   `--strict-markers` の含意、`tests/e2e/` シナリオ作法、Windows cp932 /
