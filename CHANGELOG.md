@@ -45,6 +45,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Linux speaker backend**: replaced `proc-tap` process loopback with
+  a native PipeWire pipeline (virtual null-sink + `pw-link` + `pw-record`)
+  driven by a `pulsectl` control plane. Windows and macOS still use
+  `proc-tap`. Linux runtime now requires the PipeWire CLIs (`pw-link`,
+  `pw-record`) and `libpulse0` — both already pulled in by
+  `pipewire-pulse` on most desktops.
 - **Virtual mic backend**: replaced `sounddevice` (PortAudio) with
   `soundcard` (libpulse on Linux, WASAPI on Windows). Linux now
   enumerates individual PulseAudio sinks, so `vrcpilot mic` can resolve
