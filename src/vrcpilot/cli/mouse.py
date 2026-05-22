@@ -42,14 +42,17 @@ def register(subparsers: SubParsersAction) -> None:
 
     move_parser = actions.add_parser(
         "move",
-        help="Move the cursor to (X, Y), or by (X, Y) with --rel.",
+        help=(
+            "Move the cursor to (X, Y) in VRChat window-local pixels, "
+            "or by (X, Y) deltas with --rel."
+        ),
     )
     move_parser.add_argument("x", type=int)
     move_parser.add_argument("y", type=int)
     move_parser.add_argument(
         "--rel",
         action="store_true",
-        help="Treat X and Y as relative deltas instead of absolute pixels.",
+        help="Treat X and Y as relative deltas instead of VRChat window-local pixels.",
     )
 
     click_parser = actions.add_parser(

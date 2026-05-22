@@ -39,28 +39,26 @@ import sys
 import time
 from pathlib import Path
 
-import mss
-
 import vrcpilot
 from vrcpilot import MouseButton, mouse
+from vrcpilot.geometry import get_vrchat_window_rect
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _helpers  # noqa: E402
 
 
-def _screen_center() -> tuple[int, int]:
-    """Return the centre pixel of the union of all monitors.
+def _window_center() -> tuple[int, int]:
+    """Return the centre pixel of the VRChat window in window-local coords.
 
-    Computed at runtime via ``mss`` so no resolution is hard-coded.
+    ``mouse.move`` now interprets ``(x, y)`` as VRChat window-local
+    pixels (the default ``relative=False`` path), so the centre is just
+    ``(width // 2, height // 2)`` regardless of where the window sits
+    on the desktop.
     """
-    sct = mss.MSS()
-    try:
-        bbox = sct.monitors[0]
-        cx = int(bbox["width"]) // 2
-        cy = int(bbox["height"]) // 2
-    finally:
-        sct.close()
-    return cx, cy
+    rect = get_vrchat_window_rect()
+    assert rect is not None, "VRChat window not found"
+    _, _, w, h = rect
+    return w // 2, h // 2
 
 
 def _scenario() -> None:
@@ -74,12 +72,13 @@ def _scenario() -> None:
 
     _helpers.warmup()
 
-    cx, cy = _screen_center()
-    _helpers.log(f"screen centre: ({cx}, {cy})")
+    cx, cy = _window_center()
+    _helpers.log(f"VRChat window centre (window-local): ({cx}, {cy})")
 
-    # Step 1/6: absolute move to the centre. Verifies move_abs path
-    # against mss-derived screen size.
-    _helpers.log("mouse.move(cx, cy) (1/6: absolute move to centre)")
+    # Step 1/6: absolute move to the VRChat window centre. Verifies the
+    # window-local -> desktop translation in Mouse.move; the backend's
+    # move_abs is exercised transitively.
+    _helpers.log("mouse.move(cx, cy) (1/6: absolute move to window centre)")
     mouse.move(cx, cy)
     time.sleep(0.5)
     _helpers.save_monitor_screenshot("mouse", "1_move_center")

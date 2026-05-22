@@ -30,11 +30,18 @@ def fake_mouse(mocker: MockerFixture) -> ImplMouse:
     """Wire the public ``mouse`` module to a recording :class:`ImplMouse`.
 
     Also stubs :func:`vrcpilot.controls.guard.ensure_target` to a no-op
-    so the success-path tests do not need a real VRChat process.
+    and pins :func:`vrcpilot.geometry.get_vrchat_window_rect` to an
+    origin-anchored rectangle so the window-local -> desktop translation
+    in :meth:`Mouse.move` is a no-op and existing CLI tests can keep
+    asserting on raw coordinates.
     """
     impl = ImplMouse()
     mocker.patch("vrcpilot.controls.mouse._get", return_value=impl)
     mocker.patch("vrcpilot.controls.mouse.ensure_target", return_value=None)
+    mocker.patch(
+        "vrcpilot.controls.mouse.get_vrchat_window_rect",
+        return_value=(0, 0, 1920, 1080),
+    )
     return impl
 
 

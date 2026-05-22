@@ -9,6 +9,9 @@ from abc import ABC, abstractmethod
 from enum import StrEnum
 from typing import Any, override
 
+from vrcpilot.geometry import get_vrchat_window_rect
+
+from .errors import VRChatNotRunningError
 from .guard import ensure_target
 
 # inputtino's scroll API takes distance in 120-per-notch high-resolution
@@ -40,13 +43,49 @@ class Mouse(ABC):
     ) -> None:
         """Move the cursor.
 
-        With ``relative=False`` (default), ``(x, y)`` are pixels in the
-        union bounding box of all monitors (``mss.monitors[0]``);
-        ``(0, 0)`` is the top-left of the leftmost / topmost monitor.
+        With ``relative=False`` (default), ``(x, y)`` are interpreted as
+        VRChat window-local pixels: ``(0, 0)`` is the top-left of the
+        VRChat window. The values are translated to desktop-absolute
+        coordinates via :meth:`_to_desktop` before reaching the backend.
+
+        With ``relative=True``, ``(x, y)`` are mouse deltas (relative
+        movement) and are passed through to the backend unchanged.
+
+        Out-of-window coordinates (negative or beyond the window size)
+        are intentionally not rejected: the desktop-absolute value is
+        forwarded to the OS as-is, matching the previous
+        desktop-absolute semantics for points outside any monitor.
+
+        Raises:
+            VRChatNotRunningError: ``relative=False`` and the VRChat
+                window cannot be located, so window-local coordinates
+                cannot be resolved.
         """
         if focus:
             ensure_target()
-        self._do_move(x, y, relative=relative)
+        if relative:
+            self._do_move(x, y, relative=True)
+            return
+        dx, dy = self._to_desktop(x, y)
+        self._do_move(dx, dy, relative=False)
+
+    def _to_desktop(self, x: int, y: int) -> tuple[int, int]:
+        """Translate VRChat window-local ``(x, y)`` to desktop pixels.
+
+        Looks up the current VRChat window rectangle via
+        :func:`vrcpilot.geometry.get_vrchat_window_rect` and returns
+        ``(x + wx, y + wy)`` where ``(wx, wy)`` is the window origin.
+
+        Raises:
+            VRChatNotRunningError: The VRChat window cannot be located.
+        """
+        rect = get_vrchat_window_rect()
+        if rect is None:
+            raise VRChatNotRunningError(
+                "VRChat window not found; cannot resolve window-local coordinates"
+            )
+        wx, wy, _, _ = rect
+        return x + wx, y + wy
 
     def click(
         self,

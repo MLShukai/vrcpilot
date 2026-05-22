@@ -30,6 +30,7 @@ from pytest_mock import MockerFixture
 from tests.fakes import FakeInputtinoMouse, FakePyDirectInput
 from tests.helpers import ImplMouse, only_linux, only_windows
 from vrcpilot.controls import mouse as mouse_mod
+from vrcpilot.controls.errors import VRChatNotRunningError
 from vrcpilot.controls.mouse import Mouse, MouseButton
 
 
@@ -95,8 +96,11 @@ class TestMouseGuardWiring:
     """
 
     def test_focus_true_calls_ensure_target_for_every_method(
-        self, mocker: MockerFixture
+        self,
+        mocker: MockerFixture,
+        fake_vrchat_window: tuple[int, int, int, int],
     ):
+        del fake_vrchat_window  # only needed so move()'s _to_desktop resolves
         guard = mocker.patch("vrcpilot.controls.mouse.ensure_target")
         impl = ImplMouse()
 
@@ -108,7 +112,12 @@ class TestMouseGuardWiring:
 
         assert guard.call_count == 5
 
-    def test_focus_false_skips_ensure_target(self, mocker: MockerFixture):
+    def test_focus_false_skips_ensure_target(
+        self,
+        mocker: MockerFixture,
+        fake_vrchat_window: tuple[int, int, int, int],
+    ):
+        del fake_vrchat_window  # only needed so move()'s _to_desktop resolves
         guard = mocker.patch("vrcpilot.controls.mouse.ensure_target")
         impl = ImplMouse()
 
@@ -120,16 +129,23 @@ class TestMouseGuardWiring:
 
         guard.assert_not_called()
 
-    def test_move_forwards_arguments(self, mocker: MockerFixture):
+    def test_move_forwards_arguments(
+        self,
+        mocker: MockerFixture,
+        fake_vrchat_window: tuple[int, int, int, int],
+    ):
         mocker.patch("vrcpilot.controls.mouse.ensure_target")
         impl = ImplMouse()
+        wx, wy, _, _ = fake_vrchat_window
 
         impl.move(10, 20, relative=True)
-        impl.move(30, 40)  # default relative=False
+        impl.move(30, 40)  # default relative=False -> window-local
 
+        # Relative deltas pass through; absolute coordinates are
+        # translated by the window origin before reaching _do_move.
         assert impl.calls == [
             ("_do_move", {"x": 10, "y": 20, "relative": True}),
-            ("_do_move", {"x": 30, "y": 40, "relative": False}),
+            ("_do_move", {"x": 30 + wx, "y": 40 + wy, "relative": False}),
         ]
 
     def test_click_single_button_decomposes_to_press_release(
@@ -284,6 +300,140 @@ class TestMouseGuardWiring:
         impl.scroll(-3)
 
         assert impl.calls == [("_do_scroll", {"amount": -3})]
+
+
+# --- Window-local -> desktop translation tests ---------------------------
+
+
+class TestMouseToDesktop:
+    """Verify :meth:`Mouse._to_desktop` resolves window-local coordinates.
+
+    The mapping is ``(x, y) -> (x + wx, y + wy)`` where ``(wx, wy)`` is
+    the VRChat window origin. Out-of-window inputs (negative or beyond
+    the window size) are intentionally not rejected because the OS
+    accepts them and matches the previous desktop-absolute behaviour
+    for points outside any monitor.
+    """
+
+    def test_origin_returns_window_origin(
+        self, fake_vrchat_window: tuple[int, int, int, int]
+    ):
+        impl = ImplMouse()
+        wx, wy, _, _ = fake_vrchat_window
+
+        assert impl._to_desktop(0, 0) == (wx, wy)
+
+    def test_positive_offsets_add_to_window_origin(
+        self, fake_vrchat_window: tuple[int, int, int, int]
+    ):
+        impl = ImplMouse()
+        wx, wy, _, _ = fake_vrchat_window
+
+        assert impl._to_desktop(50, 30) == (wx + 50, wy + 30)
+
+    def test_negative_offsets_do_not_raise(
+        self, fake_vrchat_window: tuple[int, int, int, int]
+    ):
+        # Out-of-window points are passed through; the OS will clamp or
+        # ignore them. The API contract is "do not raise".
+        impl = ImplMouse()
+        wx, wy, _, _ = fake_vrchat_window
+
+        assert impl._to_desktop(-5, -5) == (wx - 5, wy - 5)
+
+    def test_offsets_beyond_window_size_do_not_raise(
+        self, fake_vrchat_window: tuple[int, int, int, int]
+    ):
+        impl = ImplMouse()
+        wx, wy, _, _ = fake_vrchat_window
+
+        assert impl._to_desktop(10000, 10000) == (wx + 10000, wy + 10000)
+
+    def test_missing_window_raises_vrchat_not_running(self, mocker: MockerFixture):
+        # No VRChat window -> _to_desktop cannot resolve an origin. The
+        # ABC raises the same exception the focus guard does so callers
+        # only need to catch one error.
+        mocker.patch(
+            "vrcpilot.controls.mouse.get_vrchat_window_rect", return_value=None
+        )
+        impl = ImplMouse()
+
+        with pytest.raises(VRChatNotRunningError, match="VRChat window not found"):
+            impl._to_desktop(0, 0)
+
+
+class TestMouseMovePublicAbsolute:
+    """Public :meth:`Mouse.move` (``relative=False``) is window-local.
+
+    The default ``move(x, y)`` call now means "VRChat window-local
+    pixels", so the backend ``_do_move`` must receive
+    ``(x + wx, y + wy)`` (desktop-absolute) after translation. Verified
+    through the real ABC plumbing via :class:`ImplMouse`.
+    """
+
+    def test_translates_to_desktop_before_backend_call(
+        self,
+        mocker: MockerFixture,
+        fake_vrchat_window: tuple[int, int, int, int],
+    ):
+        mocker.patch("vrcpilot.controls.mouse.ensure_target")
+        impl = ImplMouse()
+        wx, wy, _, _ = fake_vrchat_window
+
+        impl.move(50, 30)
+
+        assert impl.calls == [
+            ("_do_move", {"x": wx + 50, "y": wy + 30, "relative": False}),
+        ]
+
+    def test_missing_window_propagates_vrchat_not_running(self, mocker: MockerFixture):
+        # focus=False so we bypass ensure_target and prove the failure
+        # comes from _to_desktop, not the guard.
+        mocker.patch(
+            "vrcpilot.controls.mouse.get_vrchat_window_rect", return_value=None
+        )
+        impl = ImplMouse()
+
+        with pytest.raises(VRChatNotRunningError, match="VRChat window not found"):
+            impl.move(10, 20, focus=False)
+
+        # Backend must not have been called when translation failed.
+        assert impl.calls == []
+
+
+class TestMouseMovePublicRelative:
+    """Public :meth:`Mouse.move` (``relative=True``) skips translation.
+
+    Relative moves are mouse deltas, so the window origin is irrelevant
+    and :func:`get_vrchat_window_rect` must not be consulted.
+    """
+
+    def test_does_not_call_get_vrchat_window_rect(self, mocker: MockerFixture):
+        mocker.patch("vrcpilot.controls.mouse.ensure_target")
+        rect_spy = mocker.patch(
+            "vrcpilot.controls.mouse.get_vrchat_window_rect",
+            # Deliberately return None: if the production code reads
+            # this it would raise, which would fail the test loudly.
+            return_value=None,
+        )
+        impl = ImplMouse()
+
+        impl.move(50, 30, relative=True)
+
+        rect_spy.assert_not_called()
+
+    def test_forwards_deltas_unchanged(
+        self, mocker: MockerFixture, fake_vrchat_window: tuple[int, int, int, int]
+    ):
+        del fake_vrchat_window  # not consulted on the relative path
+        mocker.patch("vrcpilot.controls.mouse.ensure_target")
+        impl = ImplMouse()
+
+        impl.move(50, 30, relative=True)
+
+        assert impl.calls == [
+            ("_do_move", {"x": 50, "y": 30, "relative": True}),
+        ]
 
 
 # --- LinuxMouse tests (Linux-only) ----------------------------------------
