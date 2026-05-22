@@ -1,9 +1,8 @@
 """Multi-scale template-matching detection engine.
 
-VRChat UI is rendered pixel-perfect, and feature-based detectors
-struggle on its small (18-50 px) icons. A scale-grid sweep of
-``cv2.matchTemplate`` reaches them reliably, so this is the default
-:class:`~vrcpilot.detect.DetectEngine`.
+VRChat UI is rendered pixel-perfect and its small (18-50 px) icons
+defeat feature-based detectors; a scale-grid sweep of
+``cv2.matchTemplate`` reaches them reliably, hence the default.
 """
 
 from __future__ import annotations
@@ -25,11 +24,11 @@ from .base import DetectEngine, Detection
 class TemplateDetectEngine(DetectEngine):
     """Multi-scale (+ optional rotation) template-matching engine.
 
-    For each ``(scale, rotation)`` the query is transformed and
-    ``cv2.matchTemplate`` (TM_CCOEFF_NORMED) produces a score map;
-    positions at or above ``threshold`` become candidates, then NMS
-    removes duplicates. Outperforms feature-based detectors on
-    pixel-stable UI targets like VRChat's icons.
+    For each ``(scale, rotation)``, ``cv2.matchTemplate``
+    (TM_CCOEFF_NORMED) scores the transformed query against the image;
+    positions at or above ``threshold`` become candidates, NMS
+    deduplicates. Use this for pixel-stable UI targets (VRChat icons);
+    prefer feature-based detectors for photographic content.
     """
 
     def __init__(
@@ -59,24 +58,14 @@ class TemplateDetectEngine(DetectEngine):
     ) -> None:
         """Configure the scale grid, rotation list, threshold and NMS.
 
-        Args:
-            threshold: ``cv2.TM_CCOEFF_NORMED`` score cutoff; theoretical
-                range ``[-1, 1]``. ``0.85`` is tuned for VRChat Launch
-                Pad icons; raise toward ``0.9`` for stricter matching at
-                the cost of dropping weaker hits.
-            scales: Scale factors applied to the query before matching.
-                The default grid spans ``0.25``-``3.0`` so a fixed query
-                image can match captures across HD (1280x720) to 4K
-                resolutions; spacing is denser at the low end where HD
-                icons land (~0.35), coarser above ``1.0`` to keep cost
-                bounded at 4K.
-            rotations_deg: Rotation angles (degrees) to enumerate. The
-                default ``(0.0,)`` skips rotation entirely for speed
-                (VRChat UI never rotates).
-            nms_iou: IoU above which a lower-confidence candidate is
-                suppressed by a higher-confidence one. Defaults to
-                ``0.3``.
-            max_results: Cap on returned detections. Defaults to ``32``.
+        ``threshold`` is the ``TM_CCOEFF_NORMED`` cutoff (theoretical
+        range ``[-1, 1]``); ``0.85`` is tuned for VRChat Launch Pad
+        icons. The default ``scales`` grid spans ``0.25``-``3.0`` so a
+        fixed query matches captures from HD (1280x720) to 4K, denser
+        at the low end where HD icons land. ``rotations_deg`` defaults
+        to ``(0.0,)`` because VRChat UI never rotates; enumerating more
+        angles multiplies the cost. ``nms_iou`` is the IoU above which
+        a lower-confidence candidate is suppressed.
         """
         self._threshold = threshold
         self._scales = tuple(scales)
@@ -92,8 +81,8 @@ class TemplateDetectEngine(DetectEngine):
     ) -> Sequence[Detection]:
         """Detect instances of *query* in *image*.
 
-        Returns an empty list when nothing clears ``threshold`` or when
-        the query is larger than the image at every transform.
+        Empty when nothing clears ``threshold`` or the query exceeds
+        the image at every transform.
         """
         # Match in RGB so the score reflects colour similarity, not just
         # luminance shape. A blue icon and a red icon with the same outline
@@ -140,10 +129,10 @@ def _resize_query(
     query: NDArray[Any],
     scale: float,
 ) -> NDArray[Any] | None:
-    """Resize ``query``; returns ``None`` if the result is too small.
+    """Resize ``query``; ``None`` if the result is smaller than 2x2.
 
-    ``NDArray[Any]`` is used because ``cv2`` returns the broader
-    ``MatLike`` shape that pyright strict cannot narrow.
+    Typed as ``NDArray[Any]`` because ``cv2`` returns ``MatLike``,
+    which pyright strict cannot narrow.
     """
     h, w = query.shape[:2]
     new_w = max(1, int(round(w * scale)))
@@ -160,9 +149,9 @@ def _rotate_query(
     query: NDArray[Any],
     rotation_deg: float,
 ) -> NDArray[Any] | None:
-    """Rotate ``query`` around its centre; identity rotation is a no-op.
+    """Rotate ``query`` around its centre with a grown 0-padded canvas.
 
-    The output canvas is grown to the rotated bbox with 0 padding.
+    Identity rotation short-circuits.
     """
     if rotation_deg == 0.0:
         return query
@@ -189,10 +178,9 @@ def _build_polygon(
     width: int,
     height: int,
 ) -> Polygon:
-    """Build a TL,TR,BR,BL polygon for a match at ``(x, y)``.
+    """TL,TR,BR,BL polygon framing the rotated-template canvas.
 
-    The corners frame the rotated-template canvas (the score-map peak
-    aligns with that canvas, not with the unrotated query).
+    The score-map peak aligns with this canvas, not the unrotated query.
     """
     return (
         (float(x), float(y)),
