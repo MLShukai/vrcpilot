@@ -289,9 +289,9 @@ code $PROFILE   # notepad $PROFILE でも可
 
 ## ドキュメント
 
-- **チュートリアル / プレイブック**: [`docs/usage.md`](docs/usage.md) — タスク別の解説 (起動 → 観測 → クリック → 後片付け)
-- **CLI リファレンス**: [`docs/cli.md`](docs/cli.md) — 全サブコマンドのフラグと終了コードの一覧。`vrcpilot --help` / `vrcpilot <subcommand> --help` と同じ内容
-- **Python API リファレンス**: [`docs/python-api.md`](docs/python-api.md) — `vrcpilot.<name>` で公開されている全シンボル
+- **チュートリアル / プレイブック**: [`docs/usage.ja.md`](docs/usage.ja.md) — タスク別の解説 (起動 → 観測 → クリック → 後片付け)
+- **CLI リファレンス**: [`docs/cli.ja.md`](docs/cli.ja.md) — 全サブコマンドのフラグと終了コードの一覧。`vrcpilot --help` / `vrcpilot <subcommand> --help` と同じ内容
+- **Python API リファレンス**: [`docs/python-api.ja.md`](docs/python-api.ja.md) — `vrcpilot.<name>` で公開されている全シンボル
 - **変更履歴**: [`CHANGELOG.md`](CHANGELOG.md)
 - **コントリビュートガイド**: [`CONTRIBUTING.md`](CONTRIBUTING.md) (英語)
 
