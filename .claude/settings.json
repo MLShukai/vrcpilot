@@ -3,9 +3,6 @@
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
   },
   "permissions": {
-    "additionalDirectories": [
-      "/tmp"
-    ],
     "allow": [
       "Bash(ls:*)",
       "Bash(cat:*)",
@@ -162,7 +159,8 @@
       "Bash(tar -tf:*)",
       "Bash(tar -tvf:*)",
       "WebSearch",
-      "WebFetch"
+      "WebFetch",
+      "Bash(git cherry-pick *)"
     ],
     "deny": [
       "Bash(git -C:*)",
@@ -173,6 +171,9 @@
       "Bash(rm -rf:*)",
       "Bash(rm -fr:*)",
       "Bash(sudo:*)"
+    ],
+    "additionalDirectories": [
+      "/tmp"
     ]
   }
 }
