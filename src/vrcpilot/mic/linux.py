@@ -128,6 +128,17 @@ def _open_pulse() -> Any:
     )
 
 
+def get_config_path() -> Path:
+    """Return the absolute path of the PipeWire config fragment.
+
+    Public alias for :func:`_config_path`; intended for callers (such
+    as the ``vrcpilot linux-mic status`` CLI action) that need to
+    surface the persisted-config location to the user without writing
+    or removing it.
+    """
+    return _config_path()
+
+
 def is_registered() -> bool:
     """Return whether the persistent config fragment exists."""
     return _config_path().exists()
