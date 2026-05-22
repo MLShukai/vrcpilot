@@ -18,13 +18,10 @@ def register(subparsers: SubParsersAction) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
-    """Execute the ``terminate`` subcommand.
+    """Kill any running VRChat process; idempotent (always exits 0).
 
-    Idempotent: exit ``0`` whether VRChat was running or not, so
-    callers do not need a preflight ``pid`` check. When at least one
-    process was killed, the killed PIDs are printed one per line on
-    stdout. The no-op path stays silent so consumers can pipe through
-    ``xargs`` without worrying about a stray header line.
+    Killed PIDs print one per line on stdout; the no-op path stays
+    silent so consumers can pipe through ``xargs`` safely.
     """
     del args
     for pid in terminate():

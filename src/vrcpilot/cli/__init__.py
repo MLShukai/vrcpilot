@@ -1,11 +1,8 @@
 # PYTHON_ARGCOMPLETE_OK
-"""Command line interface for vrcpilot.
+"""Entry point for the ``vrcpilot`` console script and ``python -m vrcpilot``.
 
-Thin dispatcher that translates :mod:`argparse` invocations into
-public-API calls and exit codes. Each subcommand lives in
-``vrcpilot.cli.<name>`` and exposes a ``register(subparsers)`` /
-``run(args) -> int`` pair. :func:`main` is the entry point for both
-the ``vrcpilot`` console script and ``python -m vrcpilot``.
+Each subcommand module exposes a ``register(subparsers)`` /
+``run(args) -> int`` pair; this module just wires them together.
 """
 
 from __future__ import annotations
@@ -67,10 +64,10 @@ _COMMANDS.update(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Build the top-level argparse parser with all subcommands.
+    """Return the fully-configured top-level parser.
 
-    Public (no ``_`` prefix) so tests and the ``argcomplete`` hook can
-    obtain a fully-configured parser without running a command.
+    Public so tests and ``argcomplete`` can obtain it without running
+    a command.
     """
     parser = argparse.ArgumentParser(
         prog="vrcpilot",
@@ -88,10 +85,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run the ``vrcpilot`` CLI and return an exit code.
+    """Run the ``vrcpilot`` CLI and return its exit code.
 
-    Returns the code instead of calling :func:`sys.exit` so tests can
-    pass ``argv`` and assert on the return value.
+    Returns the code rather than calling :func:`sys.exit` so tests can
+    drive ``main`` directly.
     """
     parser = build_parser()
     argcomplete.autocomplete(parser)

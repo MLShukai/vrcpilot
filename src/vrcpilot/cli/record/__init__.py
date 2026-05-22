@@ -1,20 +1,9 @@
-"""``vrcpilot record`` subcommand.
+"""``vrcpilot record`` subcommand: unified video/audio recorder.
 
-Unified video/audio recorder. Backed by the CLI-internal muxer classes
-in :mod:`vrcpilot.cli.record.muxer`: an ``.mp4`` file muxer for
-video-bearing file outputs, a ``.wav`` muxer for audio-only files, and
-a Matroska stream muxer for the pipe (``-o`` omitted) case.
-
-Three modes are derived from the ``--video`` / ``--audio`` flags:
-
-============= ============= ==================
-``--video``   ``--audio``   resulting ``mode``
-============= ============= ==================
-absent        absent        ``"both"``
-present       absent        ``"video"``
-absent        present       ``"audio"``
-present       present       ``"both"``
-============= ============= ==================
+Mode is derived from ``--video`` / ``--audio``: both unset (or both
+set) means ``"both"``; otherwise the single flag wins. Muxer choice
+follows the output: ``.mp4`` (file, with video), ``.wav`` (file,
+audio-only), or Matroska over stdout when ``-o`` is omitted.
 """
 
 from __future__ import annotations
@@ -107,11 +96,7 @@ def register(subparsers: SubParsersAction) -> None:
 
 
 def _resolve_mode(*, video: bool, audio: bool) -> _Mode:
-    """Map ``--video`` / ``--audio`` flag combinations to a mode label.
-
-    Both unset and both set both resolve to ``"both"``; otherwise the
-    single flag wins.
-    """
+    """Map ``--video`` / ``--audio`` to a mode; ``"both"`` is the default."""
     if video and not audio:
         return "video"
     if audio and not video:
@@ -131,19 +116,10 @@ def _default_filename(mode: _Mode, *, now: datetime) -> str:
 
 
 def _resolve_output(arg: Path | None, *, mode: _Mode, now: datetime) -> Path | None:
-    """Resolve ``args.output`` to a concrete file :class:`Path` or ``None``.
+    """Resolve ``args.output``; ``None`` signals stdout pipe mode.
 
-    Args:
-        arg: Raw value from ``args.output``. ``None`` (flag absent)
-            means stdout pipe mode.
-        mode: Already-resolved recording mode; selects ``.mp4`` vs
-            ``.wav`` for the default-directory filename.
-        now: Timestamp used to build the default filename. Taken as a
-            parameter so tests can pin it.
-
-    Returns:
-        ``None`` to signal stdout pipe mode, otherwise the resolved
-        file :class:`Path`.
+    A directory argument is expanded with the mode-aware default
+    filename; ``now`` is injected so tests can pin the timestamp.
     """
     if arg is None:
         return None
@@ -183,22 +159,14 @@ def _build_stdout_muxer(mode: _Mode, fps: float) -> BaseMuxer:
 
 
 def run(args: argparse.Namespace) -> int:
-    """Execute the ``record`` subcommand.
+    """Run ``record`` to a file or stdout pipe.
 
-    Args:
-        args: Parsed argparse namespace. Reads ``args.output`` /
-            ``args.video`` / ``args.audio`` / ``args.fps`` /
-            ``args.duration``.
-
-    Returns:
-        ``0`` on success. In file mode the absolute path of the saved
-        recording (a single line) is written to stdout; in pipe mode
-        stdout carries the binary MKV stream and Python writes nothing
-        else there. ``1`` on runtime failures (VRChat not running, no
-        frames or samples recorded, stdout-is-a-TTY refusal). ``2`` on
-        argument-shape mistakes (extension mismatch or ``--fps`` with
-        an audio-only invocation). Progress chatter goes to stderr so
-        stdout stays parseable / pipe-clean.
+    File mode prints the saved absolute path to stdout; pipe mode
+    writes the raw MKV byte stream there. Progress chatter always goes
+    to stderr so stdout stays parseable / pipe-clean. Exit codes:
+    0 ok, 1 runtime failure (VRChat down, no data captured, refused
+    TTY pipe), 2 argument-shape mismatch (extension / ``--fps`` with
+    audio-only).
     """
     mode = _resolve_mode(video=args.video, audio=args.audio)
     fps_arg: float | None = args.fps

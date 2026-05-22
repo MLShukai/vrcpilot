@@ -1,27 +1,11 @@
-"""``vrcpilot osc`` subcommand.
+"""``vrcpilot osc`` subcommand: send VRChat OSC messages.
 
-Thin CLI wrapper over :mod:`vrcpilot.osc`. Exposes seven actions:
+Seven actions (``send`` / ``axis`` / ``tap`` / ``hold`` / ``chatbox`` /
+``typing`` / ``avatar``); see ``docs/cli.md`` for the full table.
 
-- ``send`` -- raw typed send (``OscSender.send_bool/send_int/send_float``)
-- ``axis`` -- :class:`InputController` axis inputs (-1.0..1.0)
-- ``tap`` -- :class:`InputController` tap buttons (1 -> sleep -> 0)
-- ``hold`` -- :class:`InputController` hold buttons (on/off)
-- ``chatbox`` -- chatbox text + typing indicator
-- ``typing`` -- chatbox typing indicator only
-- ``avatar`` -- :class:`AvatarParameters` send_bool/send_int/send_float
-
-Unlike ``mouse`` / ``keyboard`` (which deliberately omit ``press`` /
-``down`` because each CLI invocation owns a separate ``/dev/uinput``
-device), every OSC action is fire-and-forget UDP -- there is no
-held-state shared across processes, so ``hold <name> on`` and a later
-``hold <name> off`` from a fresh invocation work as expected.
-
-The :func:`_make_sender` factory below is the stable patch target for
-tests (mirrors how ``mouse_api`` works in :mod:`vrcpilot.cli.mouse`):
-tests build a real :class:`OscSender` with an injected
-:class:`tests.fakes.FakeUDPClient` and patch this factory to return it,
-so the real :class:`OscSender` validation path runs end-to-end while
-UDP construction is bypassed.
+Unlike ``mouse`` / ``keyboard`` there is no shared device, so
+``hold <name> on`` followed by a later ``hold <name> off`` from a fresh
+invocation works — every OSC action is fire-and-forget UDP.
 """
 
 from __future__ import annotations
@@ -99,31 +83,23 @@ def _parse_bool_str(value: str) -> bool:
 def _make_sender(host: str, port: int) -> OscSender:
     """Construct the :class:`OscSender` that ``run()`` dispatches through.
 
-    Stable patch target: tests pre-build an :class:`OscSender` with a
-    :class:`tests.fakes.FakeUDPClient` injected via ``client=`` and patch
-    this function to return it, so real validation runs end-to-end while
-    UDP socket construction is skipped.
+    Stable patch target so tests can swap in a fake UDP client while
+    still exercising the real validation path.
     """
     return OscSender(host=host, port=port)
 
 
 def _make_controller(args: argparse.Namespace) -> InputController:
-    """Build an :class:`InputController` from the shared ``osc``-level flags.
-
-    Threads ``--host`` / ``--port`` / ``--button-hold`` off the parent
-    parser into :func:`_make_sender` and yields a fresh controller view;
-    the shared dispatch helper for ``axis`` / ``tap`` / ``hold`` /
-    ``chatbox`` / ``typing``.
-    """
+    """Build a fresh :class:`InputController` from the shared parent flags."""
     return _make_sender(args.host, args.port).controller(button_hold=args.button_hold)
 
 
 def register(subparsers: SubParsersAction) -> None:
-    """Add the ``osc`` parent subparser plus its seven action sub-subcommands.
+    """Wire ``osc`` and its seven action sub-subcommands into the CLI.
 
-    The kebab-case name choices for ``axis`` / ``tap`` / ``hold`` come
-    from :data:`AXIS_NAMES` / :data:`TAP_NAMES` / :data:`HOLD_NAMES`
-    respectively; those tuples are the single source of truth.
+    Choices for ``axis`` / ``tap`` / ``hold`` come from
+    :data:`AXIS_NAMES` / :data:`TAP_NAMES` / :data:`HOLD_NAMES` — those
+    tuples are the single source of truth.
     """
     parser = subparsers.add_parser(
         "osc",
@@ -295,16 +271,11 @@ def register(subparsers: SubParsersAction) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
-    """Execute the ``osc`` subcommand.
+    """Dispatch ``osc <action>``.
 
-    Silent on success (exit 0). Any ``ValueError`` raised by the
-    underlying :class:`OscSender` / :class:`InputController` /
-    :class:`AvatarParameters` (int / float range checks, parameter-name
-    validation, chatbox length cap) is caught and reported as a single
-    ``vrcpilot: <message>`` line on stderr with exit 1. ``chatbox``
-    with no text and a tty stdin returns exit 2 (mirrors
-    :mod:`vrcpilot.cli.paste`). Argparse handles malformed usage
-    upstream and exits non-zero on its own before ``run`` is reached.
+    Validation errors from the underlying senders collapse to exit 1.
+    ``chatbox`` with no text and a tty stdin exits 2 (same shape as
+    :mod:`vrcpilot.cli.paste`).
     """
     try:
         match args.osc_action:

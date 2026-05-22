@@ -1,25 +1,8 @@
-"""``vrcpilot detect`` subcommand.
+"""``vrcpilot detect`` subcommand: image-query detection over a screenshot.
 
-Runs image-query detection against the current VRChat window and emits
-a YAML document on stdout (image-local coordinates per detection).
-``--viz`` additionally writes an annotated PNG.
-
-YAML keys are emitted in a fixed order (``sort_keys=False``):
-``captured_at``, ``window``, ``query``, ``detections``, optional
-``viz_path``. Each detection carries ``confidence`` / ``scale`` /
-``rotation`` plus ``pos`` (image-local ``polygon`` and ``bbox``).
-
-Screenshot input sources:
-
-1. ``--screenshot <yaml-path>`` - read a previously captured
-   screenshot from a YAML file (as emitted by ``vrcpilot screenshot``)
-2. piped stdin - same YAML format consumed from stdin when stdin is
-   not a tty (e.g. ``vrcpilot screenshot | vrcpilot detect --query q.png``)
-
-If neither is given, the command exits with status 1 and an explanatory
-message on stderr. ``vrcpilot detect`` no longer captures a fresh
-screenshot itself - pipe in or pass ``--screenshot`` so template
-detection works even when VRChat is not running.
+Screenshot input arrives via ``--screenshot`` or piped stdin (see
+:func:`vrcpilot.cli._common.resolve_screenshot`); this command never
+captures a fresh shot itself. See ``docs/cli.md`` for the YAML schema.
 """
 
 from __future__ import annotations
@@ -148,16 +131,10 @@ def _build_engine(*, threshold: float | None) -> DetectEngine | None:
 
 
 def run(args: argparse.Namespace) -> int:
-    """Execute the ``detect`` subcommand.
+    """Run ``detect``; exit 1 on screenshot or query-image failure.
 
-    Returns ``0`` on success, ``1`` when the screenshot input cannot
-    be resolved (e.g. ``--screenshot`` file missing, piped YAML
-    malformed, or neither ``--screenshot`` nor a piped stdin was
-    supplied) or when the query image cannot be decoded.
-    :func:`~vrcpilot.cli._common.resolve_screenshot` emits the
-    ``vrcpilot: ...`` stderr line for screenshot failures; the query
-    path branch writes its own ``vrcpilot: could not read query image:
-    ...`` line. stdout stays empty on every failure.
+    Failure modes write a single ``vrcpilot: ...`` line to stderr and
+    leave stdout empty.
     """
     shot = resolve_screenshot(args)
     if shot is None:

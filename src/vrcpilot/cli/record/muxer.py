@@ -1,21 +1,8 @@
-"""PyAV-backed muxers used internally by the ``vrcpilot record`` command.
+"""PyAV-backed muxers backing ``vrcpilot record``.
 
-Three concrete classes share :class:`BaseMuxer`:
-
-- :class:`Mp4FileMuxer` — H.264 (libx264 / yuv420p) video and AAC
-  (fltp) audio in an ``.mp4`` container. Either or both streams may be
-  enabled at construction time.
-- :class:`WavFileMuxer` — audio-only, ``pcm_s16le`` 48 kHz stereo in a
-  RIFF/WAV container. Video writes are rejected at runtime.
-- :class:`MkvStdoutMuxer` — same codecs as :class:`Mp4FileMuxer` but
-  packed into a non-seekable Matroska byte stream targeted at a
-  :class:`typing.BinaryIO` (defaults to ``sys.stdout.buffer``) so the
-  CLI can pipe a self-describing recording to downstream tools.
-
-This module is **CLI-internal**: it is intentionally absent from
-``__all__`` and not re-exported via :mod:`vrcpilot.cli.record`'s public
-surface. Stable users compose :class:`vrcpilot.CaptureLoop` /
-:class:`vrcpilot.SpeakerLoop` with their own writers.
+CLI-internal: not part of any public ``__all__``. Library users should
+compose :class:`vrcpilot.CaptureLoop` / :class:`vrcpilot.SpeakerLoop`
+with their own writers rather than depending on these classes.
 """
 
 import abc
@@ -105,18 +92,11 @@ def _fps_to_fraction(fps: float) -> Fraction:
 
 
 class BaseMuxer(abc.ABC):
-    """Abstract PyAV-backed muxer accepting RGB video and float32 audio chunks.
+    """Abstract PyAV-backed muxer accepting RGB video and float32 audio.
 
-    Concrete subclasses own one :class:`av.container.OutputContainer`
-    plus zero or more streams. The base class owns the public surface
-    (validation, properties, context-manager protocol) so subclasses
-    only override the three abstract write/close primitives.
-
-    The class is CLI-internal and **not** part of any public
-    ``__all__`` — library users should drive :class:`vrcpilot.Capture`
-    / :class:`vrcpilot.CaptureLoop` and :class:`vrcpilot.Speaker` /
-    :class:`vrcpilot.SpeakerLoop` directly and compose their own sinks
-    on top.
+    Subclasses own one :class:`av.container.OutputContainer` plus
+    zero or more streams; the base owns validation, properties, and
+    the context-manager protocol.
     """
 
     @abc.abstractmethod
@@ -267,27 +247,12 @@ class _AudioMixin:
 
 
 class Mp4FileMuxer(_VideoMixin, _AudioMixin, BaseMuxer):
-    """Muxer that writes H.264 + AAC into an ``.mp4`` file.
+    """H.264 + AAC ``.mp4`` writer; at least one stream must be enabled.
 
-    Either or both of ``video`` / ``audio`` may be enabled, but at
-    least one must be. The first :meth:`write_video` locks the frame
-    size; subsequent calls with a different size raise
-    :class:`ValueError`.
-
-    Args:
-        output_path: Destination ``.mp4`` path. Parent directory must
-            exist; otherwise PyAV raises a :class:`OSError`-derived
-            exception when opening the container.
-        fps: Playback frame rate stored in the mp4 container.
-            ``fps <= 0`` raises :class:`ValueError`.
-        video: When ``True`` a libx264 (yuv420p) video stream is
-            attached and :meth:`write_video` accepts frames.
-        audio: When ``True`` an AAC (fltp, 48 kHz stereo) audio stream
-            is attached and :meth:`write_audio` accepts chunks.
-
-    Raises:
-        ValueError: ``video`` and ``audio`` are both ``False``, or
-            ``fps <= 0``.
+    The first :meth:`write_video` locks the frame size; later calls
+    with a different size raise :class:`ValueError`. Construction
+    raises :class:`ValueError` when neither stream is enabled or
+    ``fps <= 0``.
     """
 
     _output_path: Path
@@ -356,16 +321,11 @@ class Mp4FileMuxer(_VideoMixin, _AudioMixin, BaseMuxer):
 
 
 class WavFileMuxer(BaseMuxer):
-    """Audio-only muxer writing ``pcm_s16le`` 48 kHz stereo to ``.wav``.
+    """Audio-only ``.wav`` writer (``pcm_s16le`` 48 kHz stereo).
 
     Float32 input is quantised to int16 with symmetric scaling
-    (``×32767`` with clipping). Calling :meth:`write_video` always
-    raises :class:`RuntimeError` — the WAV container has no video
-    stream.
-
-    Args:
-        output_path: Destination ``.wav`` path. Parent directory must
-            already exist.
+    (``×32767`` with clipping). :meth:`write_video` always raises —
+    WAV has no video stream.
     """
 
     _output_path: Path
@@ -438,30 +398,14 @@ class WavFileMuxer(BaseMuxer):
 
 
 class MkvStdoutMuxer(_VideoMixin, _AudioMixin, BaseMuxer):
-    """Muxer that writes H.264 + AAC into a non-seekable Matroska stream.
+    """H.264 + AAC over a non-seekable Matroska byte stream.
 
-    Designed for the CLI ``record`` command's pipe mode: when the user
-    omits ``-o``, the recording is emitted to a binary stream
-    (``sys.stdout.buffer`` by default) so downstream tools can pick up
-    both video and audio without an intermediate file. Matroska is
-    chosen over MP4 because mp4 requires a seekable output to patch
-    the ``moov`` atom at close-time, which a pipe cannot offer.
-
-    The stream is **never** closed by this muxer — :meth:`close` only
-    flushes — because the default target (``sys.stdout.buffer``) is
-    owned by the interpreter and must outlive the muxer.
-
-    Args:
-        fps: Playback frame rate stored in the matroska container.
-        video: When ``True`` a libx264 video stream is attached.
-        audio: When ``True`` an AAC audio stream is attached.
-        stream: Destination binary stream. Defaults to
-            ``sys.stdout.buffer`` so the CLI's stdout pipe works
-            without explicit wiring; tests inject :class:`io.BytesIO`.
-
-    Raises:
-        ValueError: ``video`` and ``audio`` are both ``False``, or
-            ``fps <= 0``.
+    Backs ``vrcpilot record``'s pipe mode: MP4 cannot be used because
+    closing its container requires seeking to patch ``moov``, which a
+    pipe forbids. The destination stream (default
+    ``sys.stdout.buffer``) is never closed — only flushed — because
+    the interpreter owns it. Construction raises :class:`ValueError`
+    when neither stream is enabled or ``fps <= 0``.
     """
 
     _stream: BinaryIO
