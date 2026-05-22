@@ -483,9 +483,9 @@ class TestGetLazyInit:
         # Force the "neither linux nor win32" branch by patching the
         # module-level sys.platform reference. Singleton has been
         # cleared by the autouse fixture, so the branch is reached.
-        mocker.patch.object(sys, "platform", "darwin")
+        mocker.patch.object(sys, "platform", "freebsd")
 
-        with pytest.raises(NotImplementedError, match="darwin"):
+        with pytest.raises(NotImplementedError, match="freebsd"):
             keyboard_mod._get()
 
 
