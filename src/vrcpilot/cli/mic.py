@@ -1,10 +1,10 @@
 """``vrcpilot mic`` subcommand.
 
 Stream float32 PCM into a virtual mic device (VB-Cable on Windows,
-the ``VRCPilotMic`` PipeWire null-sink on Linux). The symmetric
-counterpart of :mod:`vrcpilot.cli.record` -- both default to stdin so
-``vrcpilot record | vrcpilot mic`` round-trips audio back into VRChat
-without intermediate files.
+the ``VRCPilotMic`` PipeWire null-sink on Linux). Reads from a WAV
+file (``-i path.wav``) or raw ``s16le`` over stdin so upstream tools
+such as ``ffmpeg -f s16le ...`` or a Python LLM-TTS pipeline can pipe
+audio directly into VRChat's mic.
 
 Exit codes:
     * ``0`` -- playback completed.
@@ -46,8 +46,8 @@ def register(subparsers: SubParsersAction) -> None:
         "mic",
         help=(
             "Stream PCM (WAV file or raw s16le) into a virtual mic device. "
-            "Defaults to reading from stdin so 'vrcpilot record | vrcpilot mic' "
-            "round-trips audio back into VRChat."
+            "Reads stdin by default so upstream tools (ffmpeg -f s16le, a "
+            "Python TTS pipeline, ...) can pipe audio into VRChat's mic."
         ),
     )
     input_action = parser.add_argument(
@@ -88,8 +88,7 @@ def register(subparsers: SubParsersAction) -> None:
         choices=(1, 2),
         default=2,
         help=(
-            "Channel count for raw s16le input. Ignored for WAV. Default 2 to "
-            "match 'vrcpilot record' (stereo s16le)."
+            "Channel count for raw s16le input. Ignored for WAV. " "Default 2 (stereo)."
         ),
     )
     parser.add_argument(
@@ -206,8 +205,8 @@ def _resolve_input(
                 samples, framerate, channels = _wav_to_float32(reader)
             return [samples], channels, framerate
         # ``auto`` over a stdin pipe is raw s16le: no extension to
-        # inspect and ``vrcpilot record`` emits headerless s16le by
-        # default, so the symmetric pipeline just works.
+        # inspect, and headerless s16le is what upstream producers
+        # (ffmpeg ``-f s16le``, TTS pipelines, ...) emit.
         chunks = _raw_stream_chunks(
             _stdin_buffer(),
             rate=args.rate,

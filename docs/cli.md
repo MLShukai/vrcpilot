@@ -203,7 +203,7 @@ ______________________________________________________________________
 
 ## mic
 
-Stream PCM audio into a virtual mic device so VRChat picks it up as microphone input. Symmetric counterpart of `record`: `record` emits WAV / raw `s16le`, and `mic` consumes the same payload — `vrcpilot record -o - | vrcpilot mic` round-trips audio without an intermediate file. Primary use case is feeding an LLM agent's TTS into VRChat.
+Stream PCM audio into a virtual mic device so VRChat picks it up as microphone input. Reads from a WAV file (`-i path.wav`) or raw `s16le` over stdin, so upstream tools such as `ffmpeg -f s16le ...` or a Python LLM-TTS pipeline can pipe audio directly into VRChat. Primary use case is feeding an LLM agent's TTS into VRChat.
 
 ```
 vrcpilot mic [-i PATH] [--device NAME] [--rate HZ] [--channels {1,2}]
@@ -215,8 +215,8 @@ vrcpilot mic [-i PATH] [--device NAME] [--rate HZ] [--channels {1,2}]
 | `-i PATH`, `--input PATH`   | `-`     | Audio source. `-` reads from stdin. A `.wav` path is decoded with the stdlib `wave` module (16-bit signed PCM required). Any other path needs `--format s16le`.                                                              |
 | `--device NAME`             | unset   | Output-device name substring (passed to `soundcard` matching). When unset, falls back to `$VRCPILOT_MIC_DEVICE`, then the OS default (`CABLE Input` on Windows; `VRCPilotMic` on Linux after `vrcpilot linux-mic register`). |
 | `--rate HZ`                 | `48000` | Sample rate for raw `s16le` input. Ignored for WAV (the WAV header wins).                                                                                                                                                    |
-| `--channels {1,2}`          | `2`     | Channel count for raw `s16le` input. Default is `2` to match `vrcpilot record`'s stereo `s16le` pipe output. Ignored for WAV.                                                                                                |
-| `--format {auto,wav,s16le}` | `auto`  | Force input interpretation. `auto` + file → decoded as WAV iff the extension is `.wav` (other extensions exit `2`). `auto` + stdin → raw `s16le` (matches `vrcpilot record`'s pipe mode, which is headerless).               |
+| `--channels {1,2}`          | `2`     | Channel count for raw `s16le` input. Default is `2` (stereo). Ignored for WAV (the WAV header wins).                                                                                                                         |
+| `--format {auto,wav,s16le}` | `auto`  | Force input interpretation. `auto` + file → decoded as WAV iff the extension is `.wav` (other extensions exit `2`). `auto` + stdin → raw `s16le`.                                                                            |
 | `--chunk-ms MS`             | `100`   | Chunk size in milliseconds for raw `s16le` streaming. Only affects pull cadence; the backend drains across chunks regardless.                                                                                                |
 
 **Input resolution**:
@@ -225,7 +225,7 @@ vrcpilot mic [-i PATH] [--device NAME] [--rate HZ] [--channels {1,2}]
 - `-i path.wav` (or any path with `--format wav`) — open as a 16-bit signed PCM WAV file.
 - `-i path.raw --format s16le` — open as raw little-endian signed 16-bit PCM at `--rate` / `--channels`.
 
-**Output**: progress messages are written to stderr (sample rate, etc.). Stdout is **silent** so this subcommand can sit downstream of a `record` pipe without polluting its byte stream.
+**Output**: progress messages are written to stderr (sample rate, etc.). Stdout is **silent** so this subcommand can sit downstream of a producer pipe without polluting its byte stream.
 
 **Exit codes**: `0` on success. `1` for device-lookup failure (`MicDeviceNotFoundError`), unsupported WAV (non-16-bit signed PCM), `soundcard` / libpulse / WASAPI runtime failure, file-open errors, or `soundcard` not installed. `2` for argument-shape errors: `-i -` against a TTY, or `--format auto` against a non-WAV file path.
 
@@ -239,8 +239,9 @@ vrcpilot mic [-i PATH] [--device NAME] [--rate HZ] [--channels {1,2}]
 # Play a WAV file
 vrcpilot mic -i greeting.wav
 
-# record -> mic round trip (3 seconds of VRChat audio sent back through the mic)
-vrcpilot record -o - --duration 3 | vrcpilot mic --format s16le --channels 2
+# Decode any audio source to raw s16le and pipe it through the virtual mic
+ffmpeg -i greeting.mp3 -f s16le -ar 48000 -ac 2 - \
+  | vrcpilot mic --format s16le --rate 48000 --channels 2
 
 # Raw PCM file with an explicit format
 vrcpilot mic -i tts.raw --format s16le --rate 24000 --channels 1
