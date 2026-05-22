@@ -169,12 +169,18 @@ def _runtime_loaded(sink_name: str) -> tuple[bool, str | None]:
 def _soundcard_visible(sink_name: str) -> tuple[bool, str | None]:
     """Return ``(visible, error)`` from a soundcard speaker probe.
 
-    ``visible`` is ``True`` iff some entry from
-    ``soundcard.all_speakers()`` contains ``sink_name`` as a
-    case-insensitive substring of its ``name`` field. ``error`` is
-    populated when the probe itself blew up (soundcard missing,
-    libpulse / WASAPI open failure); callers print it alongside the
-    ``not visible`` answer.
+    Delegates to :func:`soundcard.get_speaker`, which matches against
+    both ``Speaker.id`` and ``Speaker.name`` (case-insensitive substring
+    + fuzzy id) and raises :class:`LookupError` on miss. PipeWire
+    surfaces the sink under ``id="VRCPilotMic"`` while exposing
+    ``name="VRCPilot_Virtual_Mic"`` (the description with spaces
+    rewritten); only an id-aware match catches this divergence, which
+    is why an earlier ``name``-only scan returned ``not visible`` even
+    when the sink was loaded.
+
+    ``error`` is populated when the probe itself blew up (soundcard
+    missing, libpulse / WASAPI open failure); callers print it
+    alongside the ``not visible`` answer.
     """
     try:
         import soundcard as sc  # pyright: ignore[reportMissingTypeStubs]
@@ -191,28 +197,19 @@ def _soundcard_visible(sink_name: str) -> tuple[bool, str | None]:
         )
 
     try:
-        speakers = sc.all_speakers()  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
+        sc.get_speaker(sink_name)  # pyright: ignore[reportUnknownMemberType]
+    except LookupError:
+        return False, None
     except OSError as exc:
-        # The native library can also surface its missing-dependency
-        # OSError on the first call rather than at import (e.g. when
-        # ``soundcard`` lazy-loads ``libpulse`` via ``ctypes`` only when
-        # the first speaker enumeration runs). Reuse the same hint so
-        # users see consistent guidance regardless of which path tripped.
+        # libpulse / WASAPI sometimes load lazily on first enumeration.
+        # Reuse the same hint so users see consistent guidance.
         return False, (
             f"soundcard probe failed ({exc}); install libpulse "
             "(e.g. 'sudo apt-get install libpulse0')"
         )
     except Exception as exc:  # noqa: BLE001
-        return False, f"all_speakers failed ({exc})"
-
-    needle = sink_name.lower()
-    for speaker in speakers:  # pyright: ignore[reportUnknownVariableType]
-        speaker_obj = cast(object, speaker)
-        attr = getattr(speaker_obj, "name", "")
-        name = attr if isinstance(attr, str) else ""
-        if needle in name.lower():
-            return True, None
-    return False, None
+        return False, f"get_speaker failed ({exc})"
+    return True, None
 
 
 def _run_status() -> int:

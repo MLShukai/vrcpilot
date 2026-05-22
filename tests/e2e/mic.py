@@ -99,13 +99,15 @@ def _default_loopback_record() -> dict[str, str]:
     """Map playback substring -> matching recording substring.
 
     Keyed by the canonical playback names produced by
-    :func:`vrcpilot.mic.default_device_name`. For Linux the same
-    :data:`vrcpilot.mic.VIRTUAL_MIC_SINK_NAME` substring matches both
-    the null-sink itself and its ``Monitor of VRCPilot Virtual Mic``
-    source (soundcard surfaces the monitor as a microphone whose name
-    contains ``VRCPilotMic``), so a single entry suffices. The Linux
-    key is read from ``vrcpilot.mic.VIRTUAL_MIC_SINK_NAME`` so the e2e
-    harness never drifts away from the production constant.
+    :func:`vrcpilot.mic.default_device_name`. For Linux the monitor
+    source PipeWire creates for the ``VRCPilotMic`` null-sink is
+    surfaced by soundcard with ``id="VRCPilotMic.monitor"``; the
+    bare sink name does not match it because
+    :func:`soundcard.get_microphone` does an exact-id lookup before
+    falling back to a fuzzy name scan. The Linux key is read from
+    ``vrcpilot.mic.VIRTUAL_MIC_SINK_NAME`` so the e2e harness never
+    drifts away from the production constant, and the value appends
+    the explicit ``.monitor`` suffix the null-sink convention exposes.
 
     Built lazily inside a function so the ``vrcpilot.mic`` import (and
     its OS-conditional sub-imports) is deferred until ``main()`` runs
@@ -116,7 +118,7 @@ def _default_loopback_record() -> dict[str, str]:
 
     return {
         "CABLE Input": "CABLE Output",
-        VIRTUAL_MIC_SINK_NAME: VIRTUAL_MIC_SINK_NAME,
+        VIRTUAL_MIC_SINK_NAME: f"{VIRTUAL_MIC_SINK_NAME}.monitor",
     }
 
 
@@ -194,10 +196,12 @@ def _query_microphones() -> list[Any] | None:
     """Return soundcard's microphone list, or ``None`` if soundcard missing.
 
     Mirrors :func:`_query_speakers` so the caller can probe each side of
-    the loopback independently. ``soundcard.all_microphones`` surfaces
-    PulseAudio monitor sources (e.g. ``Monitor of VRCPilot Virtual
-    Mic``) alongside real input devices, which is exactly what the
-    Linux loopback path needs.
+    the loopback independently. ``include_loopback=True`` keeps
+    PulseAudio monitor sources (e.g. the ``VRCPilotMic.monitor``
+    source registered by ``vrcpilot linux-mic register``) in the
+    enumeration -- they are filtered out of the default
+    :func:`soundcard.all_microphones` view, which made the Linux
+    loopback scenario fail to find anything earlier.
     """
     try:
         import soundcard as sc  # pyright: ignore[reportMissingTypeStubs]
@@ -207,41 +211,51 @@ def _query_microphones() -> list[Any] | None:
     except OSError as exc:
         _helpers.log(f"soundcard import failed (libpulse missing?): {exc!r}")
         return None
-    return list(sc.all_microphones())  # pyright: ignore[reportUnknownMemberType]
+    return list(
+        sc.all_microphones(  # pyright: ignore[reportUnknownMemberType]
+            include_loopback=True
+        )
+    )
 
 
-def _resolve_speaker(speakers: list[Any], *, name: str) -> Any | None:
-    """Return the first speaker whose name contains *name* (case-insensitive).
+def _resolve_speaker(*, name: str) -> Any | None:
+    """Return the soundcard ``Speaker`` matching *name*, or ``None``.
 
-    Matches :func:`vrcpilot.mic.devices.lookup_speaker`'s "first match
-    wins" substring semantic so the scenario picks the same handle the
-    library would. Returns ``None`` if no speaker matches; the caller
-    converts that into a skip reason.
+    Delegates to :func:`soundcard.get_speaker` so id-only matches (e.g.
+    PulseAudio sink name ``"VRCPilotMic"`` vs description-derived
+    ``Speaker.name="VRCPilot_Virtual_Mic"``) work too. Mirrors
+    :func:`vrcpilot.mic.devices.lookup_speaker` so the scenario picks
+    the same handle the library would.
     """
-    needle = name.lower()
-    for speaker in speakers:
-        speaker_name = str(getattr(speaker, "name", ""))
-        if needle in speaker_name.lower():
-            return speaker
-    return None
+    try:
+        import soundcard as sc  # pyright: ignore[reportMissingTypeStubs]
+    except (ImportError, OSError):
+        return None
+    try:
+        return sc.get_speaker(name)  # pyright: ignore[reportUnknownMemberType]
+    except (LookupError, IndexError):
+        return None
 
 
-def _resolve_microphone(mics: list[Any], *, name: str) -> Any | None:
-    """Return the first microphone whose name contains *name* (case-
-    insensitive).
+def _resolve_microphone(*, name: str) -> Any | None:
+    """Return the soundcard ``Microphone`` matching *name*, or ``None``.
 
     Companion to :func:`_resolve_speaker` for the recording side of the
-    loopback. ``soundcard`` reports PulseAudio monitor sources whose
-    names typically embed the sink name (``Monitor of VRCPilot Virtual
-    Mic`` contains ``VRCPilotMic`` once case-folded), so the same
-    substring used for the playback side normally matches here too.
+    loopback. ``include_loopback=True`` widens the search to PulseAudio
+    monitor sources so ``VRCPilotMic.monitor`` is reachable; the match
+    is performed by :func:`soundcard.get_microphone` (id + name with
+    fuzzy fallback).
     """
-    needle = name.lower()
-    for mic in mics:
-        mic_name = str(getattr(mic, "name", ""))
-        if needle in mic_name.lower():
-            return mic
-    return None
+    try:
+        import soundcard as sc  # pyright: ignore[reportMissingTypeStubs]
+    except (ImportError, OSError):
+        return None
+    try:
+        return sc.get_microphone(  # pyright: ignore[reportUnknownMemberType]
+            name, include_loopback=True
+        )
+    except (LookupError, IndexError):
+        return None
 
 
 def _resolve_device_names() -> tuple[str, str] | str:
@@ -466,8 +480,8 @@ def _scenario() -> str | None:
     assert not isinstance(resolved, str)
     playback_name, record_name = resolved
 
-    playback_speaker = _resolve_speaker(speakers, name=playback_name)
-    record_mic = _resolve_microphone(mics, name=record_name)
+    playback_speaker = _resolve_speaker(name=playback_name)
+    record_mic = _resolve_microphone(name=record_name)
     if playback_speaker is None or record_mic is None:
         missing = playback_name if playback_speaker is None else record_name
         playback_id = (
@@ -476,11 +490,20 @@ def _scenario() -> str | None:
             else None
         )
         record_id = getattr(record_mic, "id", None) if record_mic is not None else None
+        speaker_listing = ", ".join(
+            f"{getattr(sp, 'name', '?')!r}(id={getattr(sp, 'id', '?')!r})"
+            for sp in speakers
+        )
+        mic_listing = ", ".join(
+            f"{getattr(m, 'name', '?')!r}(id={getattr(m, 'id', '?')!r})" for m in mics
+        )
         _helpers.log(
             f"loopback halves not found: "
             f"{playback_name!r} (speaker) -> id={playback_id!r}, "
             f"{record_name!r} (microphone) -> id={record_id!r}"
         )
+        _helpers.log(f"available speakers: {speaker_listing or '(none)'}")
+        _helpers.log(f"available microphones: {mic_listing or '(none)'}")
         return (
             f"loopback device {missing!r} not found "
             f"(set $VRCPILOT_MIC_DEVICE / ${_LOOPBACK_DEVICE_ENV_VAR})"
