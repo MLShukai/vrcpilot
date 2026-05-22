@@ -103,7 +103,8 @@ Linux で `vrcpilot mic` および `Mic` Python API を使うには、追加で�
 
 ### macOS
 
-対応していません。
+対応していません。`sys.platform` が `"win32"` / `"linux"` 以外のとき、
+`import vrcpilot` は `ImportError` を送出します。
 
 ## クイックスタート (CLI)
 
