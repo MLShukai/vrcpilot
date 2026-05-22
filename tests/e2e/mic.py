@@ -1,16 +1,17 @@
 """E2E scenario: cross-platform Mic loopback verification.
 
-Drives :class:`vrcpilot.mic.Mic` against the real PortAudio backend and
-confirms that audio written to the platform's virtual mic device re-emerges
-on the matching loopback recording device. On Windows this resolves to
-VB-Audio Virtual Cable (``CABLE Input`` -> ``CABLE Output``); on Linux it
-resolves to the PipeWire ``VRCPilotMic`` null-sink registered by
+Drives :class:`vrcpilot.mic.Mic` against the real :mod:`soundcard`
+backend (libpulse on Linux, WASAPI on Windows) and confirms that audio
+written to the platform's virtual mic device re-emerges on the matching
+loopback recording device. On Windows this resolves to VB-Audio Virtual
+Cable (``CABLE Input`` -> ``CABLE Output``); on Linux it resolves to the
+PipeWire ``VRCPilotMic`` null-sink registered by
 ``vrcpilot linux-mic register`` (whose ``Monitor of VRCPilot Virtual Mic``
 source matches the same ``VRCPilotMic`` substring).
 
 Unlike every other scenario in this directory, this one does **not** launch
 VRChat: the test is about the mic-modality output path (Python ->
-sounddevice -> virtual mic -> sounddevice input) and VRChat's own audio
+soundcard -> virtual mic -> soundcard input) and VRChat's own audio
 routing is irrelevant. ``vrcpilot record`` (proc-tap) is intentionally not
 used because it captures VRChat output audio via process-loopback, which is
 a different code path from the mic output stream this scenario exercises.
@@ -27,15 +28,20 @@ Strategy:
 
   Both env vars are picked up automatically by ``just e2e-test`` via the
   ``set dotenv-load := true`` line in the project ``justfile``.
-* Probe :func:`sounddevice.query_devices` for both substrings. If either is
-  missing the scenario PASSes with a "skipped" note, mirroring how the
-  codebase handles platform-only deps in unit tests via ``pytest.skip``.
-  The same applies if :mod:`sounddevice` itself is not installed, or if
-  the Linux setup step (``vrcpilot linux-mic register``) has not been run.
-* A background thread opens ``InputStream`` on the record device and
-  appends every callback chunk to a list. The list is converted to a
-  contiguous ndarray once the stream is closed, so no synchronisation
-  primitive is needed during recording.
+* Probe :func:`soundcard.all_speakers` / :func:`soundcard.all_microphones`
+  for both substrings. If either is missing the scenario PASSes with a
+  "skipped" note, mirroring how the codebase handles platform-only deps
+  in unit tests via ``pytest.skip``. The same applies if :mod:`soundcard`
+  itself is not installed (or libpulse is missing), or if the Linux setup
+  step (``vrcpilot linux-mic register``) has not been run.
+* A background thread opens ``microphone.recorder()`` on the record
+  device and pulls fixed-size blocks in a tight loop, appending each
+  block to a list. ``soundcard``'s recorder is a pull-mode API (unlike
+  PortAudio's push-mode callback), so the thread itself drives the cadence
+  via :meth:`record`; a :class:`threading.Event` signals the thread to
+  exit when the main thread closes the context. No lock is needed: the
+  main thread only reads ``self._chunks`` after the worker has been
+  joined.
 * The main thread plays a 1 s 440 Hz sine, stereo, in 100 ms chunks.
   Sample rate is fixed to 48 kHz so both ends agree without negotiation.
 * Verification is intentionally lenient on this first pass:
@@ -55,11 +61,12 @@ Prerequisites (host-dependent):
 
 * Windows: VB-Audio Virtual Cable installed
   (https://vb-audio.com/Cable/) so ``CABLE Input`` / ``CABLE Output``
-  show up under PortAudio.
+  show up under WASAPI.
 * Linux: ``vrcpilot linux-mic register`` has been run so the
   ``VRCPilotMic`` PipeWire null-sink (plus its ``Monitor of VRCPilot
-  Virtual Mic`` source) exists.
-* ``sounddevice`` installed in the active uv environment (it is a
+  Virtual Mic`` source) exists, and ``libpulse`` is available so
+  :mod:`soundcard` can talk to PipeWire-pulse.
+* ``soundcard`` installed in the active uv environment (it is a
   project-wide dependency now, so ``uv sync`` covers it on every OS).
 """
 
@@ -95,10 +102,10 @@ def _default_loopback_record() -> dict[str, str]:
     :func:`vrcpilot.mic.default_device_name`. For Linux the same
     :data:`vrcpilot.mic.VIRTUAL_MIC_SINK_NAME` substring matches both
     the null-sink itself and its ``Monitor of VRCPilot Virtual Mic``
-    source (PortAudio surfaces the monitor with ``VRCPilotMic`` in its
-    name), so a single entry suffices. The Linux key is read from
-    ``vrcpilot.mic.VIRTUAL_MIC_SINK_NAME`` so the e2e harness never
-    drifts away from the production constant.
+    source (soundcard surfaces the monitor as a microphone whose name
+    contains ``VRCPilotMic``), so a single entry suffices. The Linux
+    key is read from ``vrcpilot.mic.VIRTUAL_MIC_SINK_NAME`` so the e2e
+    harness never drifts away from the production constant.
 
     Built lazily inside a function so the ``vrcpilot.mic`` import (and
     its OS-conditional sub-imports) is deferred until ``main()`` runs
@@ -120,6 +127,12 @@ def _default_loopback_record() -> dict[str, str]:
 _SAMPLE_RATE = 48000
 _CHANNELS = 2
 
+#: Recorder block size in frames. 480 frames at 48 kHz is 10 ms, which
+#: matches the chunk cadence soundcard itself uses internally and keeps
+#: the pull-mode ``record()`` loop tight enough that the stop event is
+#: observed within one tick of being set.
+_RECORDER_BLOCKSIZE = int(_SAMPLE_RATE * 0.01)
+
 #: Sine tone parameters. 440 Hz (A4) is well within both VB-Cable's and
 #: PipeWire's pass band and far from DC, so any high-pass on the path
 #: leaves it intact.
@@ -128,12 +141,13 @@ _TONE_SECONDS = 1.0
 _CHUNK_SECONDS = 0.1
 
 #: Lead-in time the recorder gets before playback starts. Long enough
-#: for the InputStream callback thread to spin up; short enough that
-#: the head of the sine still lands inside the recording buffer.
+#: for the recorder thread to enter its first ``record()`` call; short
+#: enough that the head of the sine still lands inside the recording
+#: buffer.
 _RECORD_LEAD_IN_SECONDS = 0.2
 
 #: Trailing silence captured after playback ends so the cross-correlation
-#: window covers the whole tone even if PortAudio adds a few hundred ms
+#: window covers the whole tone even if the backend adds a few hundred ms
 #: of latency on either side.
 _RECORD_TAIL_SECONDS = 0.4
 
@@ -156,46 +170,77 @@ _SINE_AMPLITUDE = 0.7
 _FREQUENCY_BIN_TOLERANCE = 2
 
 
-def _query_devices() -> list[dict[str, Any]] | None:
-    """Return PortAudio's device list, or ``None`` if sounddevice missing.
+def _query_speakers() -> list[Any] | None:
+    """Return soundcard's speaker list, or ``None`` if soundcard missing.
 
     Returning ``None`` (rather than re-raising) lets the caller treat
     the import failure the same as a missing virtual mic and produce a
-    single "skipped" branch.
+    single "skipped" branch. ``OSError`` covers the libpulse-missing
+    case on Linux (soundcard raises it when the shared library cannot
+    be loaded).
     """
     try:
-        # ``sounddevice`` was removed from runtime deps in the Phase 1
-        # ``soundcard`` migration; Phase 2 (Unit Z) will rewrite this
-        # e2e scenario against soundcard's recorder API. The defensive
-        # try/except already handles the import failure gracefully.
-        import sounddevice as sd  # pyright: ignore[reportMissingImports,reportMissingTypeStubs]
-    except Exception as exc:
-        _helpers.log(f"sounddevice import failed: {exc!r}")
+        import soundcard as sc  # pyright: ignore[reportMissingTypeStubs]
+    except ImportError as exc:
+        _helpers.log(f"soundcard not installed: {exc!r}")
         return None
-    return list(sd.query_devices())  # pyright: ignore[reportUnknownMemberType]
+    except OSError as exc:
+        _helpers.log(f"soundcard import failed (libpulse missing?): {exc!r}")
+        return None
+    return list(sc.all_speakers())  # pyright: ignore[reportUnknownMemberType]
 
 
-def _resolve_device_index(
-    devices: list[dict[str, Any]],
-    *,
-    name: str,
-    direction: str,
-) -> int | None:
-    """Locate a device whose name contains *name*, returning its sounddevice
-    index.
+def _query_microphones() -> list[Any] | None:
+    """Return soundcard's microphone list, or ``None`` if soundcard missing.
 
-    ``direction`` selects ``max_output_channels`` (playback) or
-    ``max_input_channels`` (recording) so we never pick the wrong
-    half of a pair -- VB-Cable, for instance, exposes both names on
-    each side and only one direction is usable per half.
+    Mirrors :func:`_query_speakers` so the caller can probe each side of
+    the loopback independently. ``soundcard.all_microphones`` surfaces
+    PulseAudio monitor sources (e.g. ``Monitor of VRCPilot Virtual
+    Mic``) alongside real input devices, which is exactly what the
+    Linux loopback path needs.
     """
-    field = "max_output_channels" if direction == "output" else "max_input_channels"
+    try:
+        import soundcard as sc  # pyright: ignore[reportMissingTypeStubs]
+    except ImportError as exc:
+        _helpers.log(f"soundcard not installed: {exc!r}")
+        return None
+    except OSError as exc:
+        _helpers.log(f"soundcard import failed (libpulse missing?): {exc!r}")
+        return None
+    return list(sc.all_microphones())  # pyright: ignore[reportUnknownMemberType]
+
+
+def _resolve_speaker(speakers: list[Any], *, name: str) -> Any | None:
+    """Return the first speaker whose name contains *name* (case-insensitive).
+
+    Matches :func:`vrcpilot.mic.devices.lookup_speaker`'s "first match
+    wins" substring semantic so the scenario picks the same handle the
+    library would. Returns ``None`` if no speaker matches; the caller
+    converts that into a skip reason.
+    """
     needle = name.lower()
-    for index, info in enumerate(devices):
-        if int(info.get(field, 0)) <= 0:
-            continue
-        if needle in str(info.get("name", "")).lower():
-            return index
+    for speaker in speakers:
+        speaker_name = str(getattr(speaker, "name", ""))
+        if needle in speaker_name.lower():
+            return speaker
+    return None
+
+
+def _resolve_microphone(mics: list[Any], *, name: str) -> Any | None:
+    """Return the first microphone whose name contains *name* (case-
+    insensitive).
+
+    Companion to :func:`_resolve_speaker` for the recording side of the
+    loopback. ``soundcard`` reports PulseAudio monitor sources whose
+    names typically embed the sink name (``Monitor of VRCPilot Virtual
+    Mic`` contains ``VRCPilotMic`` once case-folded), so the same
+    substring used for the playback side normally matches here too.
+    """
+    needle = name.lower()
+    for mic in mics:
+        mic_name = str(getattr(mic, "name", ""))
+        if needle in mic_name.lower():
+            return mic
     return None
 
 
@@ -268,61 +313,82 @@ def _sine_chunks() -> Iterator[NDArray[np.float32]]:
 
 
 class _LoopbackRecorder:
-    """Background-thread InputStream pump for the loopback record device.
+    """Background-thread pull-mode pump for a soundcard ``Microphone``.
 
-    The PortAudio callback runs on its own thread; we only append the
-    incoming buffer to a list there and defer concatenation until
-    :meth:`stop` joins the stream. That keeps the callback short
-    (PortAudio docs warn against blocking work) and avoids any locking
-    around the growing buffer.
+    ``soundcard``'s recorder API is pull-mode: there is no callback,
+    just a ``record(numframes)`` method that blocks until ``numframes``
+    samples are available. We run that call inside a worker thread so
+    the main thread is free to drive playback; the worker exits when
+    ``_stop_event`` is set. The first observed chunk also sets
+    ``_ready`` so the main thread can wait for the recorder to actually
+    be capturing before it starts playing.
+
+    Concurrency: ``self._chunks`` is appended only on the worker and
+    only read after :meth:`__exit__` has joined it, so no lock is
+    required.
     """
 
-    def __init__(self, device_index: int) -> None:
-        self._device_index = device_index
+    def __init__(self, microphone: Any) -> None:
+        self._microphone = microphone
         self._chunks: list[NDArray[np.float32]] = []
-        self._stream: Any = None
+        self._stop_event = threading.Event()
         self._ready = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._thread_exc: BaseException | None = None
 
     def __enter__(self) -> _LoopbackRecorder:
-        # ``sounddevice`` was removed from runtime deps in the Phase 1
-        # ``soundcard`` migration; Phase 2 (Unit Z) will rewrite this
-        # recorder against soundcard's recorder API. Until then the
-        # missing-import diagnostic is suppressed; the scenario itself
-        # is gated by ``_query_devices()`` returning ``None``.
-        import sounddevice as sd  # pyright: ignore[reportMissingImports,reportMissingTypeStubs]
-
-        def _callback(
-            indata: NDArray[np.float32],
-            _frames: int,
-            _time: Any,
-            _status: Any,
-        ) -> None:
-            # Copy: PortAudio reuses the underlying buffer for the next
-            # tick, so a bare reference would alias future audio.
-            self._chunks.append(indata.copy())
-            if not self._ready.is_set():
-                self._ready.set()
-
-        self._stream = sd.InputStream(  # pyright: ignore[reportUnknownMemberType]
-            device=self._device_index,
-            channels=_CHANNELS,
-            samplerate=_SAMPLE_RATE,
-            dtype="float32",
-            callback=_callback,
+        self._thread = threading.Thread(
+            target=self._run, name="mic-e2e-recorder", daemon=True
         )
-        self._stream.start()  # pyright: ignore[reportUnknownMemberType]
+        self._thread.start()
         return self
 
     def __exit__(self, *_exc: object) -> None:
-        if self._stream is not None:
-            try:
-                self._stream.stop()  # pyright: ignore[reportUnknownMemberType]
-            finally:
-                self._stream.close()  # pyright: ignore[reportUnknownMemberType]
-            self._stream = None
+        self._stop_event.set()
+        thread = self._thread
+        if thread is not None:
+            # Generous join: one ``record()`` call returns within a
+            # block (10 ms here), but allow plenty of slack for slow
+            # libpulse shutdown paths before we'd start to suspect a
+            # hang.
+            thread.join(timeout=5.0)
+            self._thread = None
+        if self._thread_exc is not None:
+            raise self._thread_exc
+
+    def _run(self) -> None:
+        """Worker entry point: open the recorder and pump until stop."""
+        try:
+            recorder_cm = self._microphone.recorder(  # pyright: ignore[reportUnknownMemberType]
+                samplerate=_SAMPLE_RATE,
+                channels=_CHANNELS,
+                blocksize=_RECORDER_BLOCKSIZE,
+            )
+            with recorder_cm as rec:
+                while not self._stop_event.is_set():
+                    chunk = rec.record(  # pyright: ignore[reportUnknownMemberType]
+                        numframes=_RECORDER_BLOCKSIZE
+                    )
+                    # ``record`` returns float32 ndarray of shape
+                    # (numframes, channels). Defensive cast keeps the
+                    # downstream FFT happy if a backend ever hands back
+                    # float64.
+                    arr = np.asarray(chunk, dtype=np.float32)
+                    self._chunks.append(arr)
+                    if not self._ready.is_set():
+                        self._ready.set()
+        except BaseException as exc:  # noqa: BLE001
+            # Surface the failure to the main thread via __exit__ so
+            # the scenario can FAIL rather than silently producing an
+            # empty buffer. Also flip ``_ready`` so the main thread
+            # doesn't deadlock waiting for a recorder that already
+            # crashed.
+            self._thread_exc = exc
+            self._ready.set()
 
     def wait_until_ready(self, timeout: float = 2.0) -> bool:
-        """Block until the first callback fires or *timeout* elapses."""
+        """Block until the first ``record()`` call returns or *timeout*
+        elapses."""
         return self._ready.wait(timeout=timeout)
 
     def collected(self) -> NDArray[np.float32]:
@@ -342,7 +408,7 @@ def _verify_loopback(recording: NDArray[np.float32]) -> None:
     amplitude bounds wait for real-hardware calibration.
     """
     n_frames = int(recording.shape[0])
-    assert n_frames > 0, "recording buffer is empty (InputStream produced no data)"
+    assert n_frames > 0, "recording buffer is empty (recorder produced no data)"
 
     # Mix to mono for the level + spectral checks. Both loopback
     # channels carry the same sine so an unweighted mean is fine.
@@ -385,9 +451,12 @@ def _scenario() -> str | None:
     Raises on any verification failure; :func:`main` converts the
     exception into a ``FAIL:`` line.
     """
-    devices = _query_devices()
-    if devices is None:
-        return "sounddevice not installed"
+    speakers = _query_speakers()
+    if speakers is None:
+        return "soundcard not installed (or libpulse missing)"
+    mics = _query_microphones()
+    if mics is None:
+        return "soundcard not installed (or libpulse missing)"
 
     resolved = _resolve_device_names()
     if isinstance(resolved, str):
@@ -397,16 +466,20 @@ def _scenario() -> str | None:
     assert not isinstance(resolved, str)
     playback_name, record_name = resolved
 
-    playback_idx = _resolve_device_index(
-        devices, name=playback_name, direction="output"
-    )
-    record_idx = _resolve_device_index(devices, name=record_name, direction="input")
-    if playback_idx is None or record_idx is None:
-        missing = playback_name if playback_idx is None else record_name
+    playback_speaker = _resolve_speaker(speakers, name=playback_name)
+    record_mic = _resolve_microphone(mics, name=record_name)
+    if playback_speaker is None or record_mic is None:
+        missing = playback_name if playback_speaker is None else record_name
+        playback_id = (
+            getattr(playback_speaker, "id", None)
+            if playback_speaker is not None
+            else None
+        )
+        record_id = getattr(record_mic, "id", None) if record_mic is not None else None
         _helpers.log(
             f"loopback halves not found: "
-            f"{playback_name!r} (output) -> {playback_idx}, "
-            f"{record_name!r} (input) -> {record_idx}"
+            f"{playback_name!r} (speaker) -> id={playback_id!r}, "
+            f"{record_name!r} (microphone) -> id={record_id!r}"
         )
         return (
             f"loopback device {missing!r} not found "
@@ -414,20 +487,22 @@ def _scenario() -> str | None:
         )
 
     _helpers.log(
-        f"loopback: playback={playback_name!r} (idx={playback_idx}) "
-        f"record={record_name!r} (idx={record_idx})"
+        f"loopback: playback={playback_name!r} "
+        f"(id={getattr(playback_speaker, 'id', None)!r}) "
+        f"record={record_name!r} "
+        f"(id={getattr(record_mic, 'id', None)!r})"
     )
 
     # Import here so the skip branches above can run even on hosts
-    # without sounddevice (the import inside Mic uses the same lazy
-    # path, but we want to be explicit about ordering here).
+    # without soundcard (the import inside Mic uses the same lazy path,
+    # but we want to be explicit about ordering here).
     from vrcpilot.mic import Mic
 
-    with _LoopbackRecorder(record_idx) as recorder:
+    with _LoopbackRecorder(record_mic) as recorder:
         if not recorder.wait_until_ready(timeout=2.0):
-            raise RuntimeError("InputStream first callback did not fire within 2s")
-        # Extra lead-in beyond first-callback ensures we have a margin
-        # of recorded zeros before the tone arrives.
+            raise RuntimeError("recorder first chunk did not arrive within 2s")
+        # Extra lead-in beyond first-chunk-ready ensures we have a
+        # margin of recorded zeros before the tone arrives.
         time.sleep(_RECORD_LEAD_IN_SECONDS)
         _helpers.log(f"playing {_TONE_SECONDS:.2f}s of {_FREQUENCY_HZ:.0f} Hz sine")
         with Mic(
@@ -437,7 +512,7 @@ def _scenario() -> str | None:
         ) as mic:
             for chunk in _sine_chunks():
                 mic.play(chunk)
-        # Trail-out so the InputStream captures any tail latency.
+        # Trail-out so the recorder captures any tail latency.
         time.sleep(_RECORD_TAIL_SECONDS)
         recording = recorder.collected()
 
