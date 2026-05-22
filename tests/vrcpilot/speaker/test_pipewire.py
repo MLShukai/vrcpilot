@@ -27,10 +27,8 @@ import sys
 
 import pytest
 
-# ``vrcpilot.speaker.pipewire`` itself raises ``RuntimeError`` at import
-# time on non-Linux hosts, so even *collecting* this module would crash
-# the test session on Windows / macOS. Skip at module level before any
-# of the production imports run.
+# pipewire raises RuntimeError on import for non-Linux, so skip before
+# the production import below would crash pytest collection.
 if sys.platform != "linux":
     pytest.skip(
         "PipeWireSpeakerBackend is Linux-only",
@@ -134,18 +132,11 @@ def mock_pw_link(mocker: MockerFixture) -> MagicMock:
 
 @pytest.fixture
 def disable_atexit(mocker: MockerFixture) -> MagicMock:
-    """Block ``atexit.register`` and expose the substituted callable.
+    """Replace ``pipewire``'s ``atexit`` reference with a mock.
 
-    Patches the *module-level* ``atexit`` reference inside
-    ``vrcpilot.speaker.pipewire`` rather than ``atexit.register``
-    itself. ``atexit`` is a singleton, so patching its ``register``
-    attribute also intercepts callers unrelated to the backend --
-    notably ``coverage.PyTracer`` on Python 3.14+, which calls
-    ``atexit.register(setattr, tracer, "in_atexit", True)`` from a
-    different module. By rebinding only the name ``atexit`` inside
-    ``pipewire``, this fixture isolates the backend's registrations
-    from the rest of the process and the returned mock counts exactly
-    the calls the backend issued.
+    Rebinding the module-level name (rather than patching
+    ``atexit.register``) keeps unrelated callers like
+    ``coverage.PyTracer`` from leaking into the returned mock.
     """
     atexit_mock = MagicMock()
     mocker.patch("vrcpilot.speaker.pipewire.atexit", atexit_mock)
