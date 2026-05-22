@@ -10,7 +10,7 @@ Stand-ins mirroring the speaker modality's public surface:
 
 * :class:`FakeProcessAudioCapture` mirrors the
   :class:`proctap.ProcessAudioCapture` surface that
-  :class:`vrcpilot.speaker.proctap.ProcTapSpeakerBackend` actually
+  :class:`vrcpilot.speaker.windows.ProcTapSpeakerBackend` actually
   invokes (``start`` / ``stop`` / ``close`` / ``read(timeout)``). The
   backend exposes a single factory method, ``_open_capture``, that the
   production path overrides to call ``proctap``. Tests patch that
@@ -21,7 +21,7 @@ Stand-ins mirroring the speaker modality's public surface:
 * :class:`FakePulse` / :class:`FakePulseModuleInfo` /
   :class:`FakePulseEventInfo` mirror the slice of the ``pulsectl.Pulse``
   surface that
-  :class:`vrcpilot.speaker.pipewire.PipeWireSpeakerBackend` invokes
+  :class:`vrcpilot.speaker.linux.PipeWireSpeakerBackend` invokes
   (``module_list`` / ``module_load`` / ``module_unload`` /
   ``event_mask_set`` / ``event_callback_set`` / ``event_listen`` /
   ``event_listen_stop`` / ``close`` / ``connected`` /

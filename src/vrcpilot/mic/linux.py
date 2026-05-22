@@ -61,7 +61,7 @@ _CONF_FILENAME: Final[str] = "vrcpilot-mic.conf"
 #: accepts PulseAudio-style ``module-null-sink`` args via libpulse, and
 #: ``device.description`` is written with an underscore so the value
 #: stays a single PulseAudio token (matches
-#: ``src/vrcpilot/speaker/pipewire.py``'s style).
+#: ``src/vrcpilot/speaker/linux.py``'s style).
 _NULL_SINK_ARGS: Final[str] = (
     f"sink_name={VIRTUAL_MIC_SINK_NAME} "
     "sink_properties=device.description=VRCPilot_Virtual_Mic "
@@ -208,7 +208,7 @@ def _runtime_load_null_sink() -> str | None:
 
     try:
         # Re-runs must not stack two null-sinks; mirrors
-        # ``_reset_stale_modules`` in ``src/vrcpilot/speaker/pipewire.py``.
+        # ``_reset_stale_modules`` in ``src/vrcpilot/speaker/linux.py``.
         _unload_matching_null_sinks(pulse)
 
         try:
