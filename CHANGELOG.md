@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0rc1] - 2026-05-22
 
 ### Breaking
 
@@ -91,4 +91,4 @@ First public release candidate. Validates the end-to-end publish pipeline before
 
 [0.1.0]: https://github.com/MLShukai/vrcpilot/compare/v0.1.0rc1...v0.1.0
 [0.1.0rc1]: https://github.com/MLShukai/vrcpilot/releases/tag/v0.1.0rc1
-[unreleased]: https://github.com/MLShukai/vrcpilot/compare/v0.1.0...HEAD
+[0.2.0rc1]: https://github.com/MLShukai/vrcpilot/compare/v0.1.0...v0.2.0rc1
