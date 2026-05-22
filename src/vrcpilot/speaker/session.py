@@ -6,10 +6,9 @@ closed-state flag so backend implementations only have to honour the
 ABC contract.
 
 Linux dispatches to :class:`vrcpilot.speaker.pipewire.PipeWireSpeakerBackend`
-(native PipeWire CLIs + ``pulsectl`` control plane). Windows and macOS
-fall through to :class:`vrcpilot.speaker.proctap.ProcTapSpeakerBackend`,
-which delegates process-loopback to the cross-platform ``proc-tap``
-package (Windows is stable upstream; macOS is experimental). Both
+(native PipeWire CLIs + ``pulsectl`` control plane). Windows falls
+through to :class:`vrcpilot.speaker.proctap.ProcTapSpeakerBackend`,
+which delegates process-loopback to the ``proc-tap`` package. Both
 backends are imported lazily so a missing optional dependency on one
 platform never breaks ``import vrcpilot.speaker`` on the other.
 """
@@ -33,8 +32,8 @@ def _select_speaker_backend(
     """Return a started :class:`SpeakerBackend` for the host platform.
 
     Imports the chosen backend lazily so platform-specific dependencies
-    (``proc-tap`` on Windows / macOS, ``pulsectl`` and the PipeWire CLIs
-    on Linux) never need to be importable on the other platform. Linux
+    (``proc-tap`` on Windows, ``pulsectl`` and the PipeWire CLIs on
+    Linux) never need to be importable on the other platform. Linux
     selects :class:`PipeWireSpeakerBackend`; every other platform falls
     through to :class:`ProcTapSpeakerBackend`, whose own error message
     (raised from ``proctap.backends.get_backend``) surfaces the most
