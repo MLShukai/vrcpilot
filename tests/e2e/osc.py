@@ -122,8 +122,8 @@ def _open_osc_debug_panel() -> None:
         "see saved 02_settings artifact"
     )
     sbx, sby, sw, sh = search_word.bbox
-    search_cx = shot.x + sbx + sw // 2
-    search_cy = shot.y + sby + sh // 2
+    search_cx = sbx + sw // 2
+    search_cy = sby + sh // 2
     _helpers.log(f"search field -> click ({search_cx}, {search_cy})")
     mouse.move(search_cx, search_cy)
     mouse.click()
@@ -153,7 +153,7 @@ def _open_osc_debug_panel() -> None:
     # vertically aligned to that midline. Top-edge y would bias the
     # row match toward whichever toggle sits highest in its row.
     _pbx, pby, _pw, ph = panel_word.bbox
-    panel_y = shot.y + pby + ph // 2
+    panel_y = pby + ph // 2
 
     toggle_query = _load_query(_FIXTURE_DIR / "toggle_off.png")
     toggle_result = vrcpilot.detect(shot, toggle_query)
