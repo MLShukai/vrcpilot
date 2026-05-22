@@ -254,71 +254,122 @@ uv run vrcpilot pid; echo "exit=$?"   # exit=1 で何もいないことを確認
 
 これで「起動 → メニュー開く → 状態取得 → 閉じる → 終了」が再現できる。`screenshot -o` で残した `/tmp/vrc_menu.png`、`ocr --viz` で残した `/tmp/vrc_menu_viz.png`、stdout を流し込んだ `/tmp/vrc_menu.yaml` の 3 つを Read で読めば次の操作（クリック対象の選定など）が組める。
 
-## 11. Python API で VRChat の音を録る
+## 11. Python API で VRChat の映像/音声を録る
 
-`vrcpilot.speaker` の Python API で VRChat の音声のみを抽出して WAV に書き出せる（同等の操作を CLI から行いたいときは §12 を参照）。プロセス単位ループバックでシステム全体の音ではなく **VRChat.exe からの音だけ** が取れる（Discord や OBS の音は混ざらない）。バックエンドは `sys.platform` で dispatch される:
+CLI 統合 (`vrcpilot record`、§12) は内部で PyAV ベースの muxer を使うが、**この muxer は `vrcpilot.cli.record.muxer` 配下の CLI 内部実装**で `__all__` に出していない (誤って公開してしまうと外部利用者を巻き込むので意図的に隠している)。Python API ユーザーは `CaptureLoop` / `SpeakerLoop` をコールバックで駆動し、ファイル化の部分は **自前で PyAV か ffmpeg subprocess を組む**のが正規ルート。
 
-- **Linux**: ネイティブ PipeWire バックエンド (`vrcpilot.speaker.pipewire.PipeWireSpeakerBackend`)。`vrcpilot_tap` という null-sink を作って `pw-link` で additive にリンクし、`pw-record` の monitor を読む。**ユーザーは引き続きスピーカーで VRChat 音声を聴ける**。必須 CLI: `pw-record` / `pw-link` / `pw-dump` / `pactl`（`pactl info` で `Server Name: PulseAudio (on PipeWire ...)` であれば前提充足）。制御プレーンは `pulsectl` (Linux 限定 Python 依存)
-- **Windows / macOS**: `proc-tap` (pybind11/C++ 拡張) 経由。Windows は WASAPI Process Loopback で stable、macOS は Core Audio で experimental
+バックエンドは `sys.platform` で dispatch される:
 
-Linux backend は `proc-tap` の Linux パスで音が取れなかった (2026-05-21) のを受けて switch した経緯がある。クラッシュ時の null-sink リーク防止用に `$XDG_RUNTIME_DIR/vrcpilot/tap.json` に PID + module id の breadcrumb を残し、起動時に冪等で stale unload する。
+- **Linux 音声**: ネイティブ PipeWire バックエンド (`vrcpilot.speaker.pipewire.PipeWireSpeakerBackend`)。`vrcpilot_tap` という null-sink を作って `pw-link` で additive にリンクし、`pw-record` の monitor を読む。**ユーザーは引き続きスピーカーで VRChat 音声を聴ける**。必須 CLI: `pw-record` / `pw-link` / `pw-dump` / `pactl`（`pactl info` で `Server Name: PulseAudio (on PipeWire ...)` であれば前提充足）。制御プレーンは `pulsectl` (Linux 限定 Python 依存)
+- **Windows / macOS 音声**: `proc-tap` (pybind11/C++ 拡張) 経由。Windows は WASAPI Process Loopback で stable、macOS は Core Audio で experimental
+- **映像**: Windows は WGC (`windows_capture`)、Linux は X11 Composite (`vrcpilot.capture.x11`)。フレームは `(H, W, 3) uint8 RGB`
+
+Linux 音声 backend は `proc-tap` の Linux パスで音が取れなかった (2026-05-21) のを受けて PipeWire に switch した経緯がある。クラッシュ時の null-sink リーク防止用に `$XDG_RUNTIME_DIR/vrcpilot/tap.json` に PID + module id の breadcrumb を残し、起動時に冪等で stale unload する。
+
+`SpeakerLoop` + 自前 PyAV WAV recorder のミニマル実装 (`tests/e2e/_pyav_recorder.py::WavAudioRecorder` の縮小版):
 
 ```python
 import time
+from fractions import Fraction
 from pathlib import Path
-from vrcpilot.speaker import SpeakerLoop, WavFileSink
 
-with (
-    WavFileSink(Path("/tmp/test.wav")) as sink,
-    SpeakerLoop(sink.write, chunk_seconds=0.05) as loop,
-):
-    loop.start()
-    time.sleep(5.0)  # 5 秒間録音
+import av
+import numpy as np
+from numpy.typing import NDArray
+
+from vrcpilot.speaker import SpeakerLoop
+
+OUT = Path("/tmp/test.wav")
+container = av.open(str(OUT), mode="w", format="wav")
+stream = container.add_stream("pcm_s16le", rate=48000)
+stream.layout = "stereo"
+stream.format = "s16"
+stream.time_base = Fraction(1, 48000)
+samples = 0
+
+def write(chunk: NDArray[np.float32]) -> None:
+    global samples
+    if chunk.shape[0] == 0:
+        return
+    frame = av.AudioFrame.from_ndarray(chunk.T.copy(order="C"), format="fltp", layout="stereo")
+    frame.rate = 48000
+    frame.pts = samples
+    for pkt in stream.encode(frame):
+        container.mux(pkt)
+    samples += chunk.shape[0]
+
+try:
+    with SpeakerLoop(write, chunk_seconds=0.05) as loop:
+        loop.start()
+        time.sleep(5.0)
+finally:
+    for pkt in stream.encode(None):
+        container.mux(pkt)
+    container.close()
 ```
+
+`CaptureLoop` + 自前 PyAV MP4 recorder も同じ要領で `add_stream("libx264", rate=int(round(fps)))` + `av.VideoFrame.from_ndarray(rgb, format="rgb24").reformat(format="yuv420p")` で書ける。実装例は [tests/e2e/\_pyav_recorder.py](../tests/e2e/_pyav_recorder.py) が最短のリファレンス。
 
 要件と挙動:
 
-- **VRChat が起動済み** であること。未起動なら `Speaker` / `SpeakerLoop` のコンストラクタが `RuntimeError("VRChat is not running")` を投げる
-- 出力は **48 kHz / stereo / 16-bit PCM WAV**。`SAMPLE_RATE` / `CHANNELS` 定数は `vrcpilot.speaker.base` にあり、`WavFileSink` の出力は backend に合わせて固定（proc-tap が float32 で返してきたものを sink 側で int16 に量子化）
-- VRChat が無音の間 (タイトル画面など) は `(0, 2)` の空 ndarray が返るのが正常。`WavFileSink.write` は空フレームを no-op としてスキップする
-- 重ねがけは安全: `loop` を閉じる前にユーザーが Ctrl-C しても `with` で `close()` → 内部 `Speaker.close()` → proc-tap の `stop` + `close` が走る
+- **VRChat が起動済み** であること。未起動なら `Speaker` / `SpeakerLoop` / `Capture` / `CaptureLoop` のコンストラクタが `RuntimeError("VRChat is not running")` を投げる
+- `SAMPLE_RATE = 48000` / `CHANNELS = 2` の定数は `vrcpilot.speaker.base` にある（import は可能だが、上の例のように int リテラルで書いた方が依存が少なくて済む）
+- VRChat が無音の間 (タイトル画面など) は `(0, 2)` の空 ndarray が返るのが正常。コールバック側で `chunk.shape[0] == 0` を no-op スキップする
+- 重ねがけは安全: `loop` を閉じる前にユーザーが Ctrl-C しても `with` で `close()` → 内部 backend の `stop` + `close` が走る
 
-`SpeakerLoop` を使わず手動で回したい場合は `Speaker` を直接使う:
+`SpeakerLoop` / `CaptureLoop` を使わず手動で回したい場合は `Speaker` / `Capture` を直接使う:
 
 ```python
+from vrcpilot import Speaker
 with Speaker(read_timeout=1.0) as speaker:
     chunk = speaker.read()  # numpy.ndarray (N, 2) float32
+
+from vrcpilot import Capture
+with Capture() as capture:
+    frame = capture.read()  # numpy.ndarray (H, W, 3) uint8 RGB
 ```
 
 proc-tap の制限: `INCLUDE_TARGET_PROCESS_TREE` (子プロセス込み) モードは proc-tap 側で未実装なので、現在は対象 PID 単独の音だけが取れる。stock VRChat は子プロセスを使わないので実害なし。
 
 CLI 用法は §12 を参照。
 
-## 12. CLI で音を録る (`vrcpilot record`)
+## 12. CLI で映像/音声を録る (`vrcpilot record`)
 
-§11 の Python API と等価な内容を CLI から実行できる。
+§11 の Python API と等価な録画を CLI から実行できる。`vrcpilot record` は **映像/音声/両方** に対応する統合コマンドで、出力は **ファイル時 MP4 or WAV、stdout 時は常に MKV (matroska, h264+aac)** に正規化される。
 
 ```bash
-# WAV ファイルに保存（推奨）
-uv run vrcpilot record -o /tmp/vrc.wav --duration 10
+# 映像+音声を MP4 に保存（フラグ未指定 = both モード）
+uv run vrcpilot record -o /tmp/vrc.mp4 --duration 10
 
-# ディレクトリ指定 → vrcpilot_record_<UTC>.wav が中に作られる
-uv run vrcpilot record -o /tmp/ --duration 10
+# 映像のみ
+uv run vrcpilot record --video -o /tmp/vrc.mp4 --duration 10
 
-# RAW PCM を stdout に流して ffmpeg で再エンコード
-uv run vrcpilot record --duration 10 \
-  | ffmpeg -f s16le -ar 48000 -ac 2 -i - -y /tmp/vrc.opus
+# 音声のみ
+uv run vrcpilot record --audio -o /tmp/vrc.wav --duration 10
+
+# ディレクトリ指定 → vrcpilot_record_<TS>.mp4 / .wav が中に作られる
+uv run vrcpilot record -o /tmp/ --duration 10           # both → .mp4
+uv run vrcpilot record --audio -o /tmp/ --duration 10   # audio → .wav
+
+# stdout は常に自己記述 MKV、ffmpeg で受けるときは -f / -ar / -ac の指定不要
+uv run vrcpilot record --duration 10 | ffmpeg -i - -c copy /tmp/vrc.mkv
+uv run vrcpilot record --video --duration 10 | ffmpeg -i - -c:v copy /tmp/vrc.mp4
+uv run vrcpilot record --audio --duration 10 | ffmpeg -i - -c:a pcm_s16le /tmp/vrc.wav
 
 # Ctrl+C 停止
-uv run vrcpilot record -o /tmp/vrc.wav   # 任意のタイミングで Ctrl+C
+uv run vrcpilot record -o /tmp/vrc.mp4   # --duration 未指定で任意のタイミングで Ctrl+C
 ```
 
 挙動要約:
 
-- `-o <path>` (ファイル or ディレクトリ) で WAV 出力。48 kHz / stereo / 16-bit PCM。stdout に絶対パス 1 行
-- `-o` 無しで **RAW PCM s16le** (48 kHz / stereo / interleaved / little-endian / ヘッダ無し) を stdout に。**自己記述しないので受け側で `-f s16le -ar 48000 -ac 2` の指定必須**。TTY に流そうとすると exit 1
+- フラグ未指定 or `--video --audio` 両方指定 → both モード (映像+音声)
+- `--video` 単独 → 映像のみ、ファイルは MP4 強制
+- `--audio` 単独 → 音声のみ、ファイルは WAV 強制
+- ファイル出力の **拡張子とフラグの不一致は exit 2** (`vrcpilot: --video requires .mp4 output (got: '<path>')` 等)
+- stdout (`-o` 無指定) はモード問わず **MKV (h264+aac)** 自己記述ストリーム。`ffmpeg -i -` でそのまま読める。TTY に流そうとすると exit 1
+- `--fps` (default 30.0) は映像系で有効。`--audio` 単独で `--fps` を明示指定すると exit 2 (`vrcpilot: --fps is not meaningful with --audio (drop --fps or remove --audio)`)
 - `--duration` 未指定なら Ctrl+C 待ち
 - VRChat 未起動なら exit 1 + `vrcpilot: VRChat is not running` を stderr
-- 録音中の進捗メッセージは全て stderr。stdout は WAV モードでは絶対パス 1 行、pipe モードでは PCM バイト列のみ
+- 録音中の進捗メッセージは全て stderr。stdout は file モードでは絶対パス 1 行、pipe モードでは MKV バイト列のみ
 
-`vrcpilot capture` の y4m pipe と違って **音声側は format 自己記述しない**（WAV ヘッダはストリームの先頭で「総サンプル数」を埋める必要があり、ストリーミング pipe では決められないため）。
+旧 `vrcpilot capture` サブコマンドと旧 sink 群 (`Mp4FrameSink` / `Y4mStdoutFrameSink` / `WavFileSink` / `RawPcmStdoutSink`) は 2026-05-22 (`refactor/20260522/unify-record-pyav` ブランチ) に撤去された。旧 `capture | ffmpeg` の y4m パイプ手順や旧 `record -o foo.wav` 単独 (フラグなし) コマンドは **すべて新フラグ付きの形に置き換わっている**ので、過去のスクリプトを使う場合は `--video` / `--audio` を補い、stdout 受け側の `-f s16le -ar 48000 -ac 2` フラグは外す。

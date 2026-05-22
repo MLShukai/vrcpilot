@@ -16,7 +16,6 @@ from importlib import metadata
 import argcomplete
 
 from . import (
-    capture,
     detect,
     focus,
     keyboard,
@@ -41,7 +40,6 @@ _COMMANDS = {
     "focus": focus,
     "unfocus": unfocus,
     "screenshot": screenshot,
-    "capture": capture,
     "record": record,
     "mic": mic,
     "linux-mic": linux_mic,

@@ -41,7 +41,7 @@ from vrcpilot.process import (
     terminate,
 )
 from vrcpilot.screenshot import Screenshot, take_screenshot
-from vrcpilot.speaker import AudioCallback, Speaker, SpeakerLoop, WavFileSink
+from vrcpilot.speaker import AudioCallback, Speaker, SpeakerLoop
 from vrcpilot.steam import SteamNotFoundError
 from vrcpilot.window import focus, is_foreground, unfocus
 
@@ -89,5 +89,4 @@ __all__ = [
     "unfocus",
     "VRChatNotFocusedError",
     "VRChatNotRunningError",
-    "WavFileSink",
 ]

@@ -1,8 +1,8 @@
 """Capture-related test doubles.
 
 Stand-ins for the public :class:`vrcpilot.Capture` and
-:class:`vrcpilot.CaptureLoop`, the file-side :class:`Mp4FrameSink`,
-and the third-party ``windows_capture.WindowsCapture`` library.
+:class:`vrcpilot.CaptureLoop`, and the third-party
+``windows_capture.WindowsCapture`` library.
 
 All stay duck-type compatible with the real surfaces so production
 code can be patched in place via ``mocker.patch`` and treat the fake
@@ -13,9 +13,8 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from pathlib import Path
 from types import TracebackType
-from typing import BinaryIO, Self
+from typing import Self
 
 import numpy as np
 
@@ -125,86 +124,6 @@ class FakeCaptureLoop:
         exc_tb: TracebackType | None,
     ) -> None:
         del exc_type, exc_val, exc_tb
-
-
-class FakeMp4Sink:
-    """Stand-in for :class:`vrcpilot.capture.sinks.Mp4FrameSink`.
-
-    Captures every written frame in :attr:`writes` so CLI / loop
-    integration tests can assert what would have been encoded without
-    invoking ``cv2.VideoWriter``.
-    """
-
-    instances: list[FakeMp4Sink] = []
-
-    def __init__(self, output_path: Path, fps: float) -> None:
-        self.output_path = output_path
-        self.fps = fps
-        self.writes: list[np.ndarray] = []
-        self.closed = False
-        FakeMp4Sink.instances.append(self)
-
-    @property
-    def frame_count(self) -> int:
-        return len(self.writes)
-
-    def write(self, frame_rgb: np.ndarray) -> None:
-        self.writes.append(frame_rgb)
-
-    def close(self) -> None:
-        self.closed = True
-
-    def __enter__(self) -> Self:
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
-    ) -> None:
-        del exc_type, exc_val, exc_tb
-        self.close()
-
-
-class FakeY4mStdoutSink:
-    """Stand-in for :class:`vrcpilot.capture.sinks.Y4mStdoutFrameSink`.
-
-    Captures every written frame in :attr:`writes` so CLI / loop
-    integration tests can assert what would have been streamed to
-    stdout without actually emitting y4m bytes.
-    """
-
-    instances: list[FakeY4mStdoutSink] = []
-
-    def __init__(self, fps: float, *, stream: BinaryIO | None = None) -> None:
-        self.fps = fps
-        self.stream = stream
-        self.writes: list[np.ndarray] = []
-        self.closed = False
-        FakeY4mStdoutSink.instances.append(self)
-
-    @property
-    def frame_count(self) -> int:
-        return len(self.writes)
-
-    def write(self, frame_rgb: np.ndarray) -> None:
-        self.writes.append(frame_rgb)
-
-    def close(self) -> None:
-        self.closed = True
-
-    def __enter__(self) -> Self:
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
-    ) -> None:
-        del exc_type, exc_val, exc_tb
-        self.close()
 
 
 class FakeWindowsCaptureControl:

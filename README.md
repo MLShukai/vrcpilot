@@ -17,13 +17,15 @@ Python automation toolkit for the VRChat desktop client on Windows / Linux. It c
 
 - **Process control** — launch VRChat through Steam (`vrcpilot.launch`), detect running PIDs, and terminate the process.
 - **Window control** — focus / unfocus the VRChat window and check its foreground state (Win32 / X11 / XWayland).
-- **Screen capture** — `Capture` for streaming (mp4 / y4m sinks) and `take_screenshot` for one-off captures that round-trip through YAML.
+- **Screen capture** — `Capture` / `CaptureLoop` for streaming video frames and `take_screenshot` for one-off captures that round-trip through YAML.
+- **Audio capture** — `Speaker` / `SpeakerLoop` for VRChat-only audio via `proc-tap` process loopback.
+- **Unified recording** — `vrcpilot record` writes MP4 (video and/or audio) or WAV (audio only) to a file, or streams a self-describing Matroska (MKV) byte stream to stdout for piping into `ffmpeg` etc.
 - **OCR** — pluggable `OCREngine` ABC with the default `RapidOCREngine`. `ocr()` returns word-level results in VRChat window-local coordinates that feed straight into `mouse.move()`.
 - **Image-template detection** — `TemplateDetectEngine` using OpenCV `TM_CCOEFF_NORMED`. Detections use the same coordinate schema as OCR.
 - **Synthetic input** — keyboard / mouse input via [`pydirectinput`](https://github.com/learncodebygaming/pydirectinput) on Windows and [`inputtino`](https://github.com/games-on-whales/inputtino) + `/dev/uinput` on Linux. Input is sent only while VRChat is focused.
 - **Non-ASCII text injection** — `vrcpilot.clipboard` sends arbitrary Unicode strings through clipboard + Ctrl+V.
 - **Virtual mic output** — Stream WAV files or live float32 chunks (e.g. an LLM agent's TTS) into VRChat through VB-Audio Virtual Cable on Windows, or through the `VRCPilotMic` PipeWire sink on Linux (one-time setup via `vrcpilot linux-mic register`). CLI subcommand `vrcpilot mic` mirrors `vrcpilot record` so audio can be round-tripped.
-- **CLI front-end** — subcommands such as `vrcpilot launch / screenshot / ocr / detect / mouse / keyboard / paste / capture / mic / ...`, with tab completion via `argcomplete`.
+- **CLI front-end** — subcommands such as `vrcpilot launch / screenshot / record / ocr / detect / mouse / keyboard / paste / mic / ...`, with tab completion via `argcomplete`.
 
 ## Installation
 
@@ -129,12 +131,15 @@ vrcpilot keyboard press w --duration 1.0
 # Input non-ASCII text (clipboard + Ctrl+V)
 vrcpilot paste "こんにちは、VRChat！"
 
+# Record 10 seconds of VRChat video + audio to MP4
+vrcpilot record -o /tmp/vrc.mp4 --duration 10
+
+# Stream a self-describing MKV from VRChat into ffmpeg
+vrcpilot record --duration 5 | ffmpeg -i - -c copy /tmp/vrc.mkv
+
 # Play a WAV file into VRChat's mic
 # (Windows: requires VB-Cable; Linux: run `vrcpilot linux-mic register` first)
 vrcpilot mic -i greeting.wav
-
-# Or pipe raw PCM straight from record into mic
-vrcpilot record -o - --duration 3 | vrcpilot mic --format s16le --channels 2
 
 # Terminate (idempotent)
 vrcpilot terminate
@@ -196,28 +201,28 @@ with vrcpilot.Mic(sample_rate=48000, channels=1) as mic:
 
 ## CLI Subcommands
 
-| Subcommand   | Purpose                                                                                                                           |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------------- |
-| `launch`     | Start VRChat through Steam. Supports `--no-vr`, `--screen-{width,height}`, `--wait-timeout`, and more                             |
-| `pid`        | List running VRChat PIDs, one per line                                                                                            |
-| `terminate`  | Terminate VRChat (idempotent)                                                                                                     |
-| `focus`      | Bring the VRChat window to the foreground                                                                                         |
-| `unfocus`    | Send the VRChat window to the bottom of the z-order                                                                               |
-| `screenshot` | Capture one frame and emit a `Screenshot` YAML to stdout (PNG path or inline base64)                                              |
-| `capture`    | Record at a fixed FPS. Saves to file with `-o file.mp4`; otherwise emits y4m to stdout                                            |
-| `mouse`      | `move` / `click` / `scroll` (VRChat window-local coordinates)                                                                     |
-| `keyboard`   | `press` (`--duration` defaults to 0.1s)                                                                                           |
-| `paste`      | Input text through clipboard + Ctrl+V (non-ASCII safe)                                                                            |
-| `ocr`        | Run OCR on a `Screenshot` YAML (stdin pipe or `--screenshot <path>`)                                                              |
-| `detect`     | Template-search a `Screenshot` YAML with a query image. `-q query.png` / `--threshold` / `--top-k`                                |
-| `mic`        | Stream WAV / raw PCM into a virtual mic device (Windows + VB-Cable, Linux + PipeWire; defaults to stdin so `record \| mic` works) |
-| `linux-mic`  | Register / unregister / inspect the `VRCPilotMic` PipeWire virtual mic (Linux only)                                               |
+| Subcommand   | Purpose                                                                                                                 |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| `launch`     | Start VRChat through Steam. Supports `--no-vr`, `--screen-{width,height}`, `--wait-timeout`, and more                   |
+| `pid`        | List running VRChat PIDs, one per line                                                                                  |
+| `terminate`  | Terminate VRChat (idempotent)                                                                                           |
+| `focus`      | Bring the VRChat window to the foreground                                                                               |
+| `unfocus`    | Send the VRChat window to the bottom of the z-order                                                                     |
+| `screenshot` | Capture one frame and emit a `Screenshot` YAML to stdout (PNG path or inline base64)                                    |
+| `record`     | Record VRChat video and/or audio. `-o file.mp4` / `file.wav` for files; otherwise streams self-describing MKV to stdout |
+| `mouse`      | `move` / `click` / `scroll` (VRChat window-local coordinates)                                                           |
+| `keyboard`   | `press` (`--duration` defaults to 0.1s)                                                                                 |
+| `paste`      | Input text through clipboard + Ctrl+V (non-ASCII safe)                                                                  |
+| `ocr`        | Run OCR on a `Screenshot` YAML (stdin pipe or `--screenshot <path>`)                                                    |
+| `detect`     | Template-search a `Screenshot` YAML with a query image. `-q query.png` / `--threshold` / `--top-k`                      |
+| `mic`        | Stream WAV / raw s16le PCM into a virtual mic device (Windows + VB-Cable, Linux + PipeWire); defaults to reading stdin  |
+| `linux-mic`  | Register / unregister / inspect the `VRCPilotMic` PipeWire virtual mic (Linux only)                                     |
 
 ## Shell Completion
 
 `vrcpilot` supports tab completion through [`argcomplete`](https://pypi.org/project/argcomplete/). The following items can be completed:
 
-- Subcommands (`launch` / `pid` / `terminate` / `focus` / `unfocus` / `screenshot` / `capture` / `mouse` / `keyboard` / `paste` / `ocr` / `detect` / `mic` / `linux-mic`)
+- Subcommands (`launch` / `pid` / `terminate` / `focus` / `unfocus` / `screenshot` / `record` / `mouse` / `keyboard` / `paste` / `ocr` / `detect` / `osc` / `mic` / `linux-mic`)
 - Options (`--steam-path`, etc.)
 - Options that take file paths (`.exe` for `--steam-path`, `.png` for `--query`, etc.)
 

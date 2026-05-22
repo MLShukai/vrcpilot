@@ -24,7 +24,6 @@ from .audio import (
     FakePulseModuleInfo,
     FakePulseRegistry,
     FakePwRecordProcess,
-    FakeRawPcmStdoutSink,
     FakeSoundCard,
     FakeSoundCardMicrophone,
     FakeSoundCardPlayer,
@@ -34,16 +33,13 @@ from .audio import (
     FakeSoundCardSpeaker,
     FakeSpeaker,
     FakeSpeakerLoop,
-    FakeWavSink,
 )
 from .capture import (
     FakeCapture,
     FakeCaptureLoop,
-    FakeMp4Sink,
     FakeWindowsCapture,
     FakeWindowsCaptureControl,
     FakeWindowsFrame,
-    FakeY4mStdoutSink,
     make_fresh_windows_capture_subclass,
 )
 from .inputtino import FakeInputtinoKeyboard, FakeInputtinoMouse, FakeMouseButton
@@ -51,6 +47,7 @@ from .ocr import FakeOCREngine
 from .osc import FakeUDPClient
 from .process import FakePopen, FakeProcess
 from .pydirectinput import FakePyDirectInput
+from .record_muxer import FakeMkvStdoutMuxer, FakeMp4FileMuxer, FakeWavFileMuxer
 from .screenshot import patch_stdin_with_screenshot, write_screenshot_payload
 from .x11 import (
     FakePixmap,
@@ -68,8 +65,9 @@ __all__ = [
     "FakeInputtinoKeyboard",
     "FakeInputtinoMouse",
     "FakeMic",
+    "FakeMkvStdoutMuxer",
     "FakeMouseButton",
-    "FakeMp4Sink",
+    "FakeMp4FileMuxer",
     "FakeOCREngine",
     "FakePixmap",
     "FakePixmapImage",
@@ -82,7 +80,6 @@ __all__ = [
     "FakePulseRegistry",
     "FakePwRecordProcess",
     "FakePyDirectInput",
-    "FakeRawPcmStdoutSink",
     "FakeSoundCard",
     "FakeSoundCardMicrophone",
     "FakeSoundCardPlayer",
@@ -93,14 +90,13 @@ __all__ = [
     "FakeSpeaker",
     "FakeSpeakerLoop",
     "FakeUDPClient",
-    "FakeWavSink",
+    "FakeWavFileMuxer",
     "FakeWindowsCapture",
     "FakeWindowsCaptureControl",
     "FakeWindowsFrame",
     "FakeXDisplay",
     "FakeXGeometry",
     "FakeXWindow",
-    "FakeY4mStdoutSink",
     "fake_x11_display_cm",
     "make_fresh_windows_capture_subclass",
     "make_xerror_subclass",

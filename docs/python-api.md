@@ -165,15 +165,15 @@ Drives a `Capture` on a background thread at a fixed `fps`. Each frame is delive
 
 **Raises**: `ValueError` when `fps` or `frame_timeout` is non-positive; `RuntimeError` when the inner `Capture` cannot start; `NotImplementedError` on unsupported platforms.
 
-The CLI `vrcpilot capture` command uses internal sinks (`Mp4FrameSink`, `Y4mStdoutFrameSink`) on top of `CaptureLoop`. Custom sinks are written by passing your own `callback`.
+The CLI `vrcpilot record` command composes `CaptureLoop` (for video) and `SpeakerLoop` (for audio) with internal PyAV-backed muxers (`vrcpilot.cli.record.muxer`, not part of the public surface). Build your own writer by passing a `callback` that consumes `(H, W, 3) uint8` RGB frames — for example wrap PyAV or a `ffmpeg` subprocess to mux into whatever container you need.
 
 ______________________________________________________________________
 
 ## Speaker (audio capture)
 
-Process-isolated audio capture for VRChat. The backend is `proc-tap` (a cross-platform native extension that taps a single PID's audio rather than the whole system mix), so the resulting stream contains **only VRChat's output** — Discord, OBS, other applications are not mixed in. Windows / Linux are stable; macOS is experimental.
+Process-isolated audio capture for VRChat. On Linux the backend is a native PipeWire pipeline (virtual null-sink + `pw-link` + `pw-record`); on Windows and macOS it is `proc-tap`, a cross-platform native extension that taps a single PID's audio rather than the whole system mix. Either way the stream contains **only VRChat's output** — Discord, OBS, and other applications are not mixed in. Windows / Linux are stable; macOS is experimental.
 
-The backend produces `float32 (N, CHANNELS)` chunks at 48 kHz stereo. The two built-in sinks (`WavFileSink`, `RawPcmStdoutSink`) consume that float32 layout directly and quantise to signed 16-bit PCM internally on write — callers do not need to convert.
+The backend produces `float32 (N, CHANNELS)` chunks at 48 kHz stereo. The CLI `vrcpilot record` command muxes these via internal PyAV-backed writers (`vrcpilot.cli.record.muxer`, not part of the public surface); to persist audio from your own code, feed the chunks into a writer of your choice — for example PyAV (`WAV`, `MP4`, `MKV`, ...) or a `ffmpeg` subprocess. The `(N, 2) float32` layout maps cleanly onto PyAV's planar/packed float frames.
 
 ### `vrcpilot.speaker.Speaker`
 
@@ -215,43 +215,6 @@ Background-thread driver around `Speaker`. Constructs and owns its own `Speaker`
 
 **Raises**: `ValueError` when `chunk_seconds` or `read_timeout` is non-positive; `RuntimeError` from the inner `Speaker`.
 
-### `vrcpilot.speaker.WavFileSink`
-
-```python
-class WavFileSink:
-    def __init__(self, output_path: Path) -> None: ...
-
-    @property
-    def sample_count(self) -> int: ...
-
-    def write(self, frame: NDArray[np.float32]) -> None: ...
-    def close(self) -> None: ...
-```
-
-Persists `(N, 2)` float32 chunks to a 48 kHz / stereo / 16-bit PCM WAV file. The output format is fixed (mirrors the backend contract) — there is no constructor knob for sample rate or bit depth. Out-of-range samples (outside `[-1.0, 1.0]`) are clipped to the full int16 range before quantisation, so overdriven input saturates rather than wrapping. The constructor opens the underlying `wave` writer eagerly, so the parent directory must already exist; otherwise `FileNotFoundError` propagates. `close()` is idempotent and patches the WAV header with the final payload length. Supports `with`.
-
-**Raises**:
-
-- `RuntimeError` when `write()` is called after `close()`.
-- `ValueError` when `frame` is not `(N, 2) float32`.
-
-### `vrcpilot.speaker.RawPcmStdoutSink`
-
-```python
-class RawPcmStdoutSink:
-    def __init__(self, *, stream: BinaryIO | None = None) -> None: ...
-
-    @property
-    def sample_count(self) -> int: ...
-
-    def write(self, frame: NDArray[np.float32]) -> None: ...
-    def close(self) -> None: ...
-```
-
-Headerless counterpart to `WavFileSink`: emits the same int16 PCM payload directly to a binary stream (`sys.stdout.buffer` by default; tests pass a `BytesIO`). Used by the CLI `vrcpilot record` command's pipe mode. The stream is **not self-describing** — consumers must specify the format explicitly, e.g. `ffmpeg -f s16le -ar 48000 -ac 2 -i - ...`. `close()` flushes the stream but never closes it, because the default target (`sys.stdout`) is owned by the interpreter and must outlive the sink. Supports `with`.
-
-**Raises**: same as `WavFileSink.write`.
-
 ### `vrcpilot.speaker.AudioCallback`
 
 ```python
@@ -262,21 +225,27 @@ The chunk-callback signature accepted by `SpeakerLoop`. Each callback invocation
 
 ### End-to-end snippet
 
+`SpeakerLoop` accepts any callable that consumes `(N, 2) float32` chunks. The example below collects everything into a single ndarray; in real code you would instead feed each chunk to a streaming writer (PyAV, a `ffmpeg` subprocess, a network socket, etc.).
+
 ```python
 import time
-from pathlib import Path
 
-from vrcpilot.speaker import SpeakerLoop, WavFileSink
+import numpy as np
+from numpy.typing import NDArray
+
+from vrcpilot.speaker import SpeakerLoop
+
+chunks: list[NDArray[np.float32]] = []
 
 # VRChat must already be running; SpeakerLoop raises RuntimeError otherwise.
-with (
-    WavFileSink(Path("/tmp/vrc.wav")) as sink,
-    SpeakerLoop(sink.write, chunk_seconds=0.05) as loop,
-):
+with SpeakerLoop(chunks.append, chunk_seconds=0.05) as loop:
     loop.start()
     time.sleep(5.0)
-# Leaving the with-blocks flushes the WAV header and releases the proc-tap session.
+
+audio = np.concatenate(chunks, axis=0) if chunks else np.empty((0, 2), np.float32)
 ```
+
+To persist the recording, write `audio` (or each incoming chunk) with PyAV, the standard `wave` module, or the `vrcpilot record` CLI command — see [cli.md record](cli.md#record).
 
 ______________________________________________________________________
 

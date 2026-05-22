@@ -1,12 +1,18 @@
 """E2E scenario: drive CaptureLoop at 30fps and save the output as mp4.
 
 Drives :class:`vrcpilot.CaptureLoop` against a real running VRChat
-client to confirm the fixed-FPS API works end-to-end. The scenario
-opens ``CaptureLoop(callback, fps=30.0)``, sleeps the wall-clock
-duration on the main thread while the worker thread writes through
-:class:`vrcpilot.capture.sinks.Mp4FrameSink`, and logs the
-per-frame interval distribution so a human can sanity-check the
-cadence.
+client to confirm the fixed-FPS Python API works end-to-end. The
+scenario opens ``CaptureLoop(callback, fps=30.0)``, sleeps the
+wall-clock duration on the main thread while the worker thread writes
+each frame through a small e2e-local PyAV recorder
+(:class:`_pyav_recorder.Mp4VideoRecorder`), and logs the per-frame
+interval distribution so a human can sanity-check the cadence.
+
+This scenario is intentionally **CLI-independent**: it does not
+shell out to ``vrcpilot record`` or import the CLI's internal muxer.
+That keeps the e2e suite stable against CLI rearrangement and doubles
+as a worked example of "compose your own PyAV writer around
+CaptureLoop" for downstream library users.
 
 The mp4 is muxed at the same target fps used to drive the loop; mp4
 playback duration should therefore match the recorded wall-clock
@@ -36,12 +42,13 @@ from datetime import datetime
 from pathlib import Path
 
 import numpy as np
+from numpy.typing import NDArray
 
 import vrcpilot
-from vrcpilot.capture.sinks import Mp4FrameSink
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _helpers  # noqa: E402
+import _pyav_recorder  # noqa: E402
 
 #: Wall-clock duration of the recording. ~10 s is long enough to see
 #: the cadence and any glitches, short enough that the e2e scenario
@@ -53,24 +60,24 @@ _TARGET_FPS: float = 30.0
 
 
 class _FrameRecorder:
-    """Callback target: forwards frames to the sink and logs intervals.
+    """Callback target: forwards frames to the recorder and logs intervals.
 
     Both attributes are touched only from the CaptureLoop worker
     thread; the main thread reads them after :meth:`CaptureLoop.stop`
     has joined the worker, so no lock is required.
     """
 
-    def __init__(self, sink: Mp4FrameSink) -> None:
-        self._sink = sink
+    def __init__(self, recorder: _pyav_recorder.Mp4VideoRecorder) -> None:
+        self._recorder = recorder
         self._last_t: float | None = None
         self.intervals: list[float] = []
 
-    def on_frame(self, frame: np.ndarray) -> None:
+    def on_frame(self, frame: NDArray[np.uint8]) -> None:
         now = time.monotonic()
         if self._last_t is not None:
             self.intervals.append(now - self._last_t)
         self._last_t = now
-        self._sink.write(frame)
+        self._recorder.write(frame)
 
 
 def _scenario() -> None:
@@ -95,18 +102,18 @@ def _scenario() -> None:
         f"{_DURATION_SECONDS:.1f}s to {out_path}"
     )
 
-    with Mp4FrameSink(out_path, _TARGET_FPS) as sink:
-        recorder = _FrameRecorder(sink)
-        with vrcpilot.CaptureLoop(recorder.on_frame, fps=_TARGET_FPS) as loop:
+    with _pyav_recorder.Mp4VideoRecorder(out_path, _TARGET_FPS) as recorder:
+        callback = _FrameRecorder(recorder)
+        with vrcpilot.CaptureLoop(callback.on_frame, fps=_TARGET_FPS) as loop:
             loop.start()
             time.sleep(_DURATION_SECONDS)
             loop.stop()
 
-        frame_count = sink.frame_count
+        frame_count = recorder.frame_count
 
     _helpers.log(f"saved video: {out_path} (frames={frame_count})")
 
-    intervals = recorder.intervals
+    intervals = callback.intervals
     if intervals:
         # All log output stays in ASCII to dodge the cp932 encode trap
         # on Windows (CLAUDE.md "Windows 日本語環境（cp932）の非 ASCII

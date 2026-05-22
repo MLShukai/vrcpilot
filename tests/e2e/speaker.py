@@ -2,12 +2,20 @@
 
 Drives :class:`vrcpilot.speaker.SpeakerLoop` against a real running
 VRChat client to confirm that the proc-tap process-loopback backend
-plus the loop and sink pipeline produces a playable WAV file end to
-end. The scenario opens ``SpeakerLoop(callback, chunk_seconds=0.05)``,
-sleeps the wall-clock duration on the main thread while the worker
-thread writes each chunk through :class:`vrcpilot.speaker.WavFileSink`,
-and logs the RMS level of the resulting file so a human can sanity
-check the recorded signal.
+plus the loop and a Python-side PyAV recorder pipeline produces a
+playable WAV file end to end. The scenario opens
+``SpeakerLoop(callback, chunk_seconds=0.05)``, sleeps the wall-clock
+duration on the main thread while the worker thread writes each
+chunk through an e2e-local PyAV recorder
+(:class:`_pyav_recorder.WavAudioRecorder`), and logs the RMS level
+of the resulting file so a human can sanity check the recorded
+signal.
+
+This scenario is intentionally **CLI-independent**: it does not
+shell out to ``vrcpilot record`` or import the CLI's internal muxer.
+That keeps the e2e suite stable against CLI rearrangement and doubles
+as a worked example of "compose your own PyAV writer around
+SpeakerLoop" for downstream library users.
 
 Run with::
 
@@ -37,10 +45,11 @@ import numpy as np
 from numpy.typing import NDArray
 
 import vrcpilot
-from vrcpilot.speaker import SpeakerLoop, WavFileSink
+from vrcpilot.speaker import SpeakerLoop
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _helpers  # noqa: E402
+import _pyav_recorder  # noqa: E402
 
 #: Wall-clock duration of the recording. 5 s is long enough to expose
 #: backend startup hiccups while keeping the scenario brisk.
@@ -52,33 +61,35 @@ _DURATION_SECONDS: float = 5.0
 _CHUNK_SECONDS: float = 0.05
 
 
-class _WavRecorder:
-    """Callback target: forwards chunks to the sink and tallies frames.
+class _WavRecorderCallback:
+    """Callback target: forwards chunks to the recorder and tallies frames.
 
     The state is only touched from the SpeakerLoop worker thread; the
     main thread reads :attr:`frames_written` after ``SpeakerLoop.stop``
     has joined the worker, so no lock is required.
     """
 
-    def __init__(self, sink: WavFileSink) -> None:
-        self._sink = sink
+    def __init__(self, recorder: _pyav_recorder.WavAudioRecorder) -> None:
+        self._recorder = recorder
         self.frames_written: int = 0
 
     def on_chunk(self, chunk: NDArray[np.float32]) -> None:
-        # Empty reads (silence ticks) are valid; ``WavFileSink.write``
-        # is a no-op for ``N == 0`` so we can forward unconditionally.
-        self._sink.write(chunk)
+        # Empty reads (silence ticks) are valid; the recorder's
+        # ``write`` is a no-op for ``N == 0`` so we can forward
+        # unconditionally.
+        self._recorder.write(chunk)
         self.frames_written += int(chunk.shape[0])
 
 
 def _rms_dbfs(path: Path) -> float:
     """Return the RMS level of *path* in dBFS, or ``-inf`` for pure silence.
 
-    The WAV is 16-bit signed PCM (see :class:`WavFileSink`); we read
-    the entire file and compute the RMS over both channels combined.
-    A perfectly silent file (all zero samples) maps to ``-inf`` rather
-    than producing a math-domain error, which is the natural meaning
-    of "no signal at all".
+    The WAV is 16-bit signed PCM (see
+    :class:`_pyav_recorder.WavAudioRecorder`); we read the entire
+    file and compute the RMS over both channels combined. A perfectly
+    silent file (all zero samples) maps to ``-inf`` rather than
+    producing a math-domain error, which is the natural meaning of
+    "no signal at all".
     """
     with wave.open(str(path), "rb") as reader:
         n_frames = reader.getnframes()
@@ -123,19 +134,19 @@ def _scenario() -> None:
         f"for {_DURATION_SECONDS:.1f}s to {out_path}"
     )
 
-    with WavFileSink(out_path) as sink:
-        recorder = _WavRecorder(sink)
-        with SpeakerLoop(recorder.on_chunk, chunk_seconds=_CHUNK_SECONDS) as loop:
+    with _pyav_recorder.WavAudioRecorder(out_path) as recorder:
+        callback = _WavRecorderCallback(recorder)
+        with SpeakerLoop(callback.on_chunk, chunk_seconds=_CHUNK_SECONDS) as loop:
             loop.start()
             time.sleep(_DURATION_SECONDS)
             loop.stop()
 
-        frames_written = recorder.frames_written
-        sample_count = sink.sample_count
+        frames_written = callback.frames_written
+        sample_count = recorder.sample_count
 
     _helpers.log(
         f"saved wav: {out_path} "
-        f"(callback_frames={frames_written} sink_samples={sample_count})"
+        f"(callback_frames={frames_written} recorder_samples={sample_count})"
     )
 
     # First-pass observation only: no threshold assertion yet (see

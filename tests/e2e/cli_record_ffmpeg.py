@@ -1,18 +1,20 @@
-"""E2E scenario: ``vrcpilot record`` in both WAV and ffmpeg-pipe modes.
+"""E2E scenario: ``vrcpilot record --audio`` in both WAV-file and MKV-pipe modes.
 
-Validates the two output paths added by the ``vrcpilot record`` CLI:
+Validates the two audio output paths of the unified ``vrcpilot
+record`` CLI:
 
-* **Step A** - ``vrcpilot record --duration <N> -o <path.wav>`` writes a
-  self-contained 16-bit PCM WAV file. Stdout is expected to be exactly
-  the absolute path of the saved file, on a single line; the WAV
-  itself is inspected via :mod:`wave` for the documented contract
-  (48 kHz / stereo / 16-bit) and its RMS level is logged so a human
-  can sanity-check the signal.
-* **Step B** - ``vrcpilot record --duration <N>`` with no ``-o`` writes
-  headerless raw s16le (48 kHz / stereo / interleaved / little-endian)
-  to stdout. Piped into ``ffmpeg -f s16le -ar 48000 -ac 2 -i - <out>``
-  it should round-trip into a playable WAV that ``ffprobe`` parses as
-  ``pcm_s16le`` with the right rate and channel count.
+* **Step A** - ``vrcpilot record --audio --duration <N> -o <path.wav>``
+  writes a self-contained 16-bit PCM WAV file. Stdout is expected to
+  be exactly the absolute path of the saved file, on a single line;
+  the WAV itself is inspected via :mod:`wave` for the documented
+  contract (48 kHz / stereo / 16-bit) and its RMS level is logged so
+  a human can sanity-check the signal.
+* **Step B** - ``vrcpilot record --audio --duration <N>`` with no
+  ``-o`` writes a Matroska (MKV) byte stream to stdout. Because MKV
+  is self-describing we can pipe it into
+  ``ffmpeg -i - -c:a pcm_s16le <out.wav>`` with no codec/rate flags
+  on the ffmpeg side and round-trip back to a pcm_s16le WAV. The
+  resulting file is then validated the same way as Step A.
 
 Run with::
 
@@ -40,6 +42,7 @@ import sys
 import wave
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -72,7 +75,7 @@ _EXPECTED_CHANNELS: int = 2
 _EXPECTED_SAMPWIDTH: int = 2
 
 
-def _ffprobe_format(path: Path) -> dict[str, object]:
+def _ffprobe_format(path: Path) -> dict[str, Any]:
     """Return ``ffprobe -show_format -show_streams`` JSON for *path*."""
     cmd = [
         "ffprobe",
@@ -86,7 +89,10 @@ def _ffprobe_format(path: Path) -> dict[str, object]:
     ]
     _helpers.log(f"$ {' '.join(cmd)}")
     result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-    return json.loads(result.stdout)
+    parsed: Any = json.loads(result.stdout)
+    assert isinstance(parsed, dict), f"ffprobe output not a JSON object: {parsed!r}"
+    parsed_dict: dict[Any, Any] = parsed  # pyright: ignore[reportUnknownVariableType]
+    return parsed_dict
 
 
 def _rms_dbfs(path: Path) -> float:
@@ -153,7 +159,8 @@ def _assert_wav_contract(path: Path, *, label: str) -> int:
 
 
 def _step_a_wav_file(stamp: str) -> None:
-    """Drive ``vrcpilot record -o <wav>`` and validate the saved file."""
+    """Drive ``vrcpilot record --audio -o <wav>`` and validate the saved
+    file."""
     out_path = _helpers.ARTIFACT_DIR / f"cli_record_wav_{stamp}.wav"
 
     cmd = [
@@ -161,6 +168,7 @@ def _step_a_wav_file(stamp: str) -> None:
         "run",
         "vrcpilot",
         "record",
+        "--audio",
         "--duration",
         f"{_DURATION_SECONDS}",
         "-o",
@@ -203,7 +211,14 @@ def _step_a_wav_file(stamp: str) -> None:
 
 
 def _step_b_stdout_ffmpeg(stamp: str) -> None:
-    """Drive ``vrcpilot record | ffmpeg -f s16le ...`` and validate."""
+    """Drive ``vrcpilot record --audio | ffmpeg -i - -c:a pcm_s16le <wav>``.
+
+    The MKV stream emitted by ``vrcpilot record --audio`` carries an
+    AAC audio stream (see :class:`vrcpilot.cli.record.muxer.MkvStdoutMuxer`).
+    ffmpeg re-encodes that AAC payload back to pcm_s16le so the rest
+    of the assertions can reuse the WAV-file contract checks from
+    Step A.
+    """
     out_path = _helpers.ARTIFACT_DIR / f"cli_record_pipe_{stamp}.wav"
 
     ffmpeg_cmd = [
@@ -212,14 +227,10 @@ def _step_b_stdout_ffmpeg(stamp: str) -> None:
         "-hide_banner",
         "-loglevel",
         "error",
-        "-f",
-        "s16le",
-        "-ar",
-        f"{_EXPECTED_SAMPLE_RATE}",
-        "-ac",
-        f"{_EXPECTED_CHANNELS}",
         "-i",
         "-",
+        "-c:a",
+        "pcm_s16le",
         str(out_path),
     ]
     vrcpilot_cmd = [
@@ -227,6 +238,7 @@ def _step_b_stdout_ffmpeg(stamp: str) -> None:
         "run",
         "vrcpilot",
         "record",
+        "--audio",
         "--duration",
         f"{_DURATION_SECONDS}",
     ]
@@ -268,29 +280,33 @@ def _step_b_stdout_ffmpeg(stamp: str) -> None:
     assert vrc_rc == 0, f"[Step B] vrcpilot record exit code: expected 0, got {vrc_rc}"
     assert ffmpeg_rc == 0, f"[Step B] ffmpeg exit code: expected 0, got {ffmpeg_rc}"
 
-    assert out_path.exists(), f"[Step B] ffmpeg did not write {out_path}"
-    size = out_path.stat().st_size
-    assert size > 0, f"[Step B] output wav is empty: {out_path}"
-    _helpers.log(f"[Step B] saved wav: {out_path} ({size} bytes)")
+    n_frames = _assert_wav_contract(out_path, label="Step B")
+    _helpers.log(
+        f"[Step B] saved wav: {out_path} ({out_path.stat().st_size} bytes, "
+        f"frames={n_frames})"
+    )
 
     info = _ffprobe_format(out_path)
-    streams = info.get("streams", [])
+    streams_raw: Any = info.get("streams", [])
     assert isinstance(
-        streams, list
-    ), f"[Step B] ffprobe streams not a list: {streams!r}"
+        streams_raw, list
+    ), f"[Step B] ffprobe streams not a list: {streams_raw!r}"
+    streams_list: list[Any] = streams_raw  # pyright: ignore[reportUnknownVariableType]
     assert (
-        len(streams) == 1
-    ), f"[Step B] expected exactly 1 stream, got {len(streams)}: {streams!r}"
+        len(streams_list) == 1
+    ), f"[Step B] expected exactly 1 stream, got {len(streams_list)}: {streams_list!r}"
     audio_streams = [
-        s for s in streams if isinstance(s, dict) and s.get("codec_type") == "audio"
+        s
+        for s in streams_list
+        if isinstance(s, dict) and s.get("codec_type") == "audio"
     ]
     assert (
         len(audio_streams) == 1
-    ), f"[Step B] expected 1 audio stream, got {len(audio_streams)}: {streams!r}"
-    audio = audio_streams[0]
-    codec = audio.get("codec_name")
+    ), f"[Step B] expected 1 audio stream, got {len(audio_streams)}: {streams_list!r}"
+    audio: dict[Any, Any] = audio_streams[0]  # pyright: ignore[reportUnknownVariableType]
+    codec: Any = audio.get("codec_name")
     assert codec == "pcm_s16le", f"[Step B] expected pcm_s16le codec, got {codec!r}"
-    sample_rate_str = audio.get("sample_rate")
+    sample_rate_str: Any = audio.get("sample_rate")
     assert isinstance(
         sample_rate_str, str
     ), f"[Step B] missing sample_rate in ffprobe audio stream: {audio!r}"
@@ -298,14 +314,15 @@ def _step_b_stdout_ffmpeg(stamp: str) -> None:
         f"[Step B] sample_rate: expected {_EXPECTED_SAMPLE_RATE}, "
         f"got {sample_rate_str}"
     )
-    channels = audio.get("channels")
+    channels: Any = audio.get("channels")
     assert (
         channels == _EXPECTED_CHANNELS
     ), f"[Step B] channels: expected {_EXPECTED_CHANNELS}, got {channels!r}"
 
-    fmt = info.get("format")
-    assert isinstance(fmt, dict), f"[Step B] ffprobe format not a dict: {fmt!r}"
-    duration_str = fmt.get("duration")
+    fmt_raw: Any = info.get("format")
+    assert isinstance(fmt_raw, dict), f"[Step B] ffprobe format not a dict: {fmt_raw!r}"
+    fmt: dict[Any, Any] = fmt_raw  # pyright: ignore[reportUnknownVariableType]
+    duration_str: Any = fmt.get("duration")
     assert isinstance(
         duration_str, str
     ), f"[Step B] missing duration in ffprobe output: {fmt!r}"

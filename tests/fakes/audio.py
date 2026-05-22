@@ -38,15 +38,11 @@ Stand-ins mirroring the speaker modality's public surface:
   drive the drain thread via :meth:`FakePwRecordProcess.emit_pcm` /
   :meth:`FakePwRecordProcess.close_stdout`.
 
-* :class:`FakeSpeakerLoop` / :class:`FakeWavSink` /
-  :class:`FakeRawPcmStdoutSink` mirror the CLI-facing
-  :class:`vrcpilot.speaker.SpeakerLoop` /
-  :class:`vrcpilot.speaker.WavFileSink` /
-  :class:`vrcpilot.speaker.RawPcmStdoutSink` so ``vrcpilot.cli.record``
-  tests can run without proc-tap (and without touching the filesystem
-  or stdout). Each mirrors :mod:`tests.fakes.capture` 1:1 (``instances``
-  class-level list, ``frames_per_start`` / ``init_side_effect``
-  knobs).
+* :class:`FakeSpeakerLoop` mirrors the CLI-facing
+  :class:`vrcpilot.speaker.SpeakerLoop` so ``vrcpilot.cli.record``
+  tests can run without proc-tap. Mirrors :mod:`tests.fakes.capture`
+  1:1 (``instances`` class-level list, ``frames_per_start`` /
+  ``init_side_effect`` knobs).
 
 * :class:`FakeSoundCard` (with :class:`FakeSoundCardSpeaker` /
   :class:`FakeSoundCardPlayer` / :class:`FakeSoundCardPlayerCM` /
@@ -73,7 +69,6 @@ import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
 from types import TracebackType
 from typing import BinaryIO, Self
 
@@ -688,85 +683,6 @@ class FakeSpeakerLoop:
         exc_tb: TracebackType | None,
     ) -> None:
         del exc_type, exc_val, exc_tb
-
-
-class FakeWavSink:
-    """Stand-in for :class:`vrcpilot.speaker.WavFileSink`.
-
-    Captures every written chunk in :attr:`writes` so CLI / loop
-    integration tests can assert what would have been encoded without
-    invoking the stdlib :mod:`wave` writer (which also keeps tests
-    free of filesystem side effects).
-    """
-
-    instances: list[FakeWavSink] = []
-
-    def __init__(self, output_path: Path) -> None:
-        self.output_path = output_path
-        self.writes: list[NDArray[np.float32]] = []
-        self.closed = False
-        FakeWavSink.instances.append(self)
-
-    @property
-    def sample_count(self) -> int:
-        return sum(chunk.shape[0] for chunk in self.writes)
-
-    def write(self, frame: NDArray[np.float32]) -> None:
-        self.writes.append(frame)
-
-    def close(self) -> None:
-        self.closed = True
-
-    def __enter__(self) -> Self:
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
-    ) -> None:
-        del exc_type, exc_val, exc_tb
-        self.close()
-
-
-class FakeRawPcmStdoutSink:
-    """Stand-in for :class:`vrcpilot.speaker.RawPcmStdoutSink`.
-
-    Captures every written chunk in :attr:`writes` so CLI / loop
-    integration tests can assert what would have been streamed to
-    stdout without actually emitting s16le bytes.
-    """
-
-    instances: list[FakeRawPcmStdoutSink] = []
-
-    def __init__(self, *, stream: BinaryIO | None = None) -> None:
-        self.stream = stream
-        self.writes: list[NDArray[np.float32]] = []
-        self.closed = False
-        FakeRawPcmStdoutSink.instances.append(self)
-
-    @property
-    def sample_count(self) -> int:
-        return sum(chunk.shape[0] for chunk in self.writes)
-
-    def write(self, frame: NDArray[np.float32]) -> None:
-        self.writes.append(frame)
-
-    def close(self) -> None:
-        self.closed = True
-
-    def __enter__(self) -> Self:
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
-    ) -> None:
-        del exc_type, exc_val, exc_tb
-        self.close()
 
 
 class FakeSoundCardPlayer:

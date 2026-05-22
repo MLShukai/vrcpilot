@@ -160,7 +160,33 @@ When a menu is open, the cursor returns to UI-click mode.
 
 ______________________________________________________________________
 
-## 8. Send audio into VRChat's mic
+## 8. Recording video and audio
+
+`vrcpilot record` captures video, audio, or both. File output picks the container from the resolved mode (MP4 for anything with video, WAV for audio only); stdout is always a self-describing Matroska (MKV) byte stream so downstream tools like `ffmpeg` can consume it without extra format flags.
+
+```bash
+# Video + audio MP4, 10 seconds
+vrcpilot record -o /tmp/vrc.mp4 --duration 10
+
+# Video only
+vrcpilot record --video -o /tmp/vrc_video.mp4 --duration 10
+
+# Audio only (proc-tap process loopback — VRChat-only, no system audio)
+vrcpilot record --audio -o /tmp/vrc_audio.wav --duration 10
+
+# Stream MKV to ffmpeg for re-encoding without temp files
+vrcpilot record --duration 5 | ffmpeg -i - -c copy /tmp/vrc.mkv
+```
+
+- The extension of `-o PATH` must match the mode (`.mp4` for video / both, `.wav` for audio-only); a mismatch exits `2`.
+- `--fps` defaults to 30 and is rejected (exit `2`) when combined with `--audio` alone.
+- Omit `--duration` to keep recording until Ctrl+C.
+
+See [`cli.md` record](cli.md#record) for the full flag reference and exit codes.
+
+______________________________________________________________________
+
+## 9. Send audio into VRChat's mic
 
 `vrcpilot mic` plays a float32 PCM stream into a virtual-cable output device. With VRChat configured to use that cable as its mic, anything the CLI plays reaches other players as if you had spoken into a real microphone. The primary use case is hooking an LLM agent's TTS up to VRChat.
 
@@ -192,11 +218,12 @@ registration with `vrcpilot linux-mic unregister`.
 vrcpilot mic -i greeting.wav
 ```
 
-The CLI logs progress (sample rate, etc.) to stderr and blocks until the WAV has finished playing. Stdout is silent so the command can sit downstream of `vrcpilot record` without polluting its byte stream:
+The CLI logs progress (sample rate, etc.) to stderr and blocks until the WAV has finished playing. Stdout is silent so the command can sit downstream of any raw-PCM producer without polluting the byte stream:
 
 ```bash
-# Record VRChat's own audio for 3 seconds, then play it back into the mic.
-vrcpilot record -o - --duration 3 | vrcpilot mic --format s16le --channels 2
+# Decode any audio source to raw s16le and play it through the virtual mic.
+ffmpeg -i greeting.mp3 -f s16le -ar 48000 -ac 2 - \
+  | vrcpilot mic --format s16le --rate 48000 --channels 2
 ```
 
 ### Stream from an LLM agent
@@ -225,7 +252,7 @@ The chunk shape must match the channel count chosen at construction time (`(N,)`
 
 ______________________________________________________________________
 
-## 9. Pipeline patterns
+## 10. Pipeline patterns
 
 ### Probe → act → re-probe
 
@@ -273,7 +300,7 @@ This launches VRChat, captures and OCRs the Launch Pad, then shuts down — a us
 
 ______________________________________________________________________
 
-## 10. Recovering from common failures
+## 11. Recovering from common failures
 
 | Symptom                                      | Likely cause                                                | Fix                                                     |
 | -------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------- |
@@ -288,7 +315,7 @@ ______________________________________________________________________
 
 ______________________________________________________________________
 
-## 11. Python equivalents
+## 12. Python equivalents
 
 Everything above has a Python counterpart in [`python-api.md`](python-api.md). The end-to-end flow:
 
