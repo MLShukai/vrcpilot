@@ -59,7 +59,7 @@ class TestNonLinuxGuard:
         mocker: MockerFixture,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        mocker.patch.object(cli_linux_mic.sys, "platform", "darwin")
+        mocker.patch.object(cli_linux_mic.sys, "platform", "freebsd")
 
         exit_code = main(["linux-mic", "unregister"])
 
