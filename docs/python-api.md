@@ -188,7 +188,7 @@ Context-managed capture session. VRChat must already be running when the constru
 
 **Raises**:
 
-- `RuntimeError` when VRChat is not running or the `proc-tap` backend cannot start.
+- `RuntimeError` when VRChat is not running or the Speaker backend cannot start (the PipeWire pipeline on Linux, `proc-tap` on Windows / macOS).
 - `ValueError` when `read_timeout <= 0`.
 
 ### `vrcpilot.speaker.SpeakerLoop`
@@ -211,7 +211,7 @@ class SpeakerLoop:
     def close(self) -> None: ...
 ```
 
-Background-thread driver around `Speaker`. Constructs and owns its own `Speaker`, so VRChat must already be running when the loop is instantiated. Each tick drains one chunk and forwards it to `callback`; the worker sleeps `chunk_seconds` between drains (default 50 ms, chosen to match the proc-tap buffer cadence). Empty chunks are forwarded verbatim so consumers can treat them as a "silence tick". Exceptions raised by the callback or by `Speaker.read()` are captured and re-raised on the next `stop()` / `close()` so worker-thread failures are never lost. Supports `with`.
+Background-thread driver around `Speaker`. Constructs and owns its own `Speaker`, so VRChat must already be running when the loop is instantiated. Each tick drains one chunk and forwards it to `callback`; the worker sleeps `chunk_seconds` between drains (default 50 ms, chosen to match the backend buffer cadence). Empty chunks are forwarded verbatim so consumers can treat them as a "silence tick". Exceptions raised by the callback or by `Speaker.read()` are captured and re-raised on the next `stop()` / `close()` so worker-thread failures are never lost. Supports `with`.
 
 **Raises**: `ValueError` when `chunk_seconds` or `read_timeout` is non-positive; `RuntimeError` from the inner `Speaker`.
 
