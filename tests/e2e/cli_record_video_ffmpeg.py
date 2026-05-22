@@ -1,24 +1,31 @@
-"""E2E scenario: ``vrcpilot capture`` piped into ``ffmpeg`` for re-encoding.
+"""E2E scenario: ``vrcpilot record --video`` piped into ``ffmpeg``.
 
-Validates the y4m self-describing pipe contract added in the capture
-CLI's no-``-o`` branch: ``vrcpilot capture | ffmpeg -i - -c:v libx264
-out.mp4`` should "just work" -- ffmpeg picks W/H/fps/colorspace out of
-the y4m header without us having to pass ``-f rawvideo`` /
-``-video_size`` / ``-framerate`` flags.
+Validates the Matroska self-describing pipe contract baked into the
+unified ``vrcpilot record`` CLI: with no ``-o``, the command writes a
+Matroska (MKV) byte stream to stdout. Because Matroska carries
+codec, resolution, frame-rate and pixel-format in its own header,
+``ffmpeg -i - <out>`` just works — there is no need for
+``-f rawvideo`` / ``-video_size`` / ``-framerate`` flags on the
+ffmpeg side.
+
+The pipeline here is video-only (``--video``): ffmpeg copies the
+H.264 elementary stream straight into a fresh ``.mp4`` container
+(``-c:v copy``). No audio stream is muxed; the ``ffprobe`` round-trip
+asserts exactly one video stream and zero audio streams.
 
 Run with::
 
-    just e2e-test cli_capture_ffmpeg
+    just e2e-test cli_record_video_ffmpeg
 
 VRChat is launched in Desktop mode at 1280x720 to match the other
 capture-related scenarios. The encoded mp4 is written to
-``_e2e_artifacts/cli_capture_ffmpeg_<YYYYMMDD_HHMMSS>.mp4`` and a
+``_e2e_artifacts/cli_record_video_ffmpeg_<YYYYMMDD_HHMMSS>.mp4`` and a
 ``ffprobe`` round-trip verifies the file is a valid h264 mp4 with
 roughly the expected duration.
 
 The pipeline is wired with the standard "tee a Popen pipe" idiom: we
 open ``ffmpeg`` first with ``stdin=PIPE``, hand its write-end to the
-``vrcpilot capture`` Popen as its ``stdout``, then close our own
+``vrcpilot record`` Popen as its ``stdout``, then close our own
 reference to ``ffmpeg.stdin`` so ``vrcpilot`` becomes the sole writer.
 When the recording duration elapses ``vrcpilot`` exits, the pipe sees
 EOF, and ``ffmpeg`` flushes and exits cleanly.
@@ -31,6 +38,7 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import vrcpilot
 
@@ -42,8 +50,8 @@ import _helpers  # noqa: E402
 #: container duration.
 _DURATION_SECONDS: float = 5.0
 
-#: Target frame rate written into the y4m header by ``vrcpilot
-#: capture`` and faithfully transferred to the mp4 by ffmpeg.
+#: Target frame rate stored in the MKV header by ``vrcpilot record``
+#: and faithfully copied to the mp4 by ffmpeg.
 _TARGET_FPS: float = 30.0
 
 #: Tolerance around ``_DURATION_SECONDS`` when checking the encoded
@@ -53,7 +61,7 @@ _TARGET_FPS: float = 30.0
 _DURATION_TOLERANCE_SECONDS: float = 1.5
 
 
-def _ffprobe_format(path: Path) -> dict[str, object]:
+def _ffprobe_format(path: Path) -> dict[str, Any]:
     """Return ``ffprobe -show_format -show_streams`` JSON for *path*."""
     cmd = [
         "ffprobe",
@@ -67,7 +75,10 @@ def _ffprobe_format(path: Path) -> dict[str, object]:
     ]
     _helpers.log(f"$ {' '.join(cmd)}")
     result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-    return json.loads(result.stdout)
+    parsed: Any = json.loads(result.stdout)
+    assert isinstance(parsed, dict), f"ffprobe output not a JSON object: {parsed!r}"
+    parsed_dict: dict[Any, Any] = parsed  # pyright: ignore[reportUnknownVariableType]
+    return parsed_dict
 
 
 def _scenario() -> None:
@@ -85,8 +96,11 @@ def _scenario() -> None:
 
     _helpers.ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_path = _helpers.ARTIFACT_DIR / f"cli_capture_ffmpeg_{stamp}.mp4"
+    out_path = _helpers.ARTIFACT_DIR / f"cli_record_video_ffmpeg_{stamp}.mp4"
 
+    # Matroska is self-describing, so ffmpeg picks codec/resolution/fps
+    # out of the header. ``-c:v copy`` keeps the H.264 elementary
+    # stream intact instead of re-encoding.
     ffmpeg_cmd = [
         "ffmpeg",
         "-y",
@@ -96,16 +110,15 @@ def _scenario() -> None:
         "-i",
         "-",
         "-c:v",
-        "libx264",
-        "-preset",
-        "ultrafast",
+        "copy",
         str(out_path),
     ]
     vrcpilot_cmd = [
         "uv",
         "run",
         "vrcpilot",
-        "capture",
+        "record",
+        "--video",
         "--fps",
         f"{_TARGET_FPS}",
         "--duration",
@@ -144,7 +157,7 @@ def _scenario() -> None:
             f"  ffmpeg stderr: {ffmpeg_stderr.decode(errors='replace').strip()}"
         )
 
-    assert vrc_rc == 0, f"vrcpilot capture exit code: expected 0, got {vrc_rc}"
+    assert vrc_rc == 0, f"vrcpilot record exit code: expected 0, got {vrc_rc}"
     assert ffmpeg_rc == 0, f"ffmpeg exit code: expected 0, got {ffmpeg_rc}"
 
     assert out_path.exists(), f"ffmpeg did not write {out_path}"
@@ -153,21 +166,33 @@ def _scenario() -> None:
     _helpers.log(f"saved encoded video: {out_path} ({size} bytes)")
 
     info = _ffprobe_format(out_path)
-    streams = info.get("streams", [])
-    assert isinstance(streams, list), f"ffprobe streams not a list: {streams!r}"
+    streams_raw: Any = info.get("streams", [])
+    assert isinstance(streams_raw, list), f"ffprobe streams not a list: {streams_raw!r}"
+    streams_list: list[Any] = streams_raw  # pyright: ignore[reportUnknownVariableType]
     video_streams = [
-        s for s in streams if isinstance(s, dict) and s.get("codec_type") == "video"
+        s
+        for s in streams_list
+        if isinstance(s, dict) and s.get("codec_type") == "video"
+    ]
+    audio_streams = [
+        s
+        for s in streams_list
+        if isinstance(s, dict) and s.get("codec_type") == "audio"
     ]
     assert (
         len(video_streams) == 1
-    ), f"expected 1 video stream, got {len(video_streams)}: {streams!r}"
-    video = video_streams[0]
-    codec = video.get("codec_name")
+    ), f"expected 1 video stream, got {len(video_streams)}: {streams_list!r}"
+    assert (
+        len(audio_streams) == 0
+    ), f"expected 0 audio streams in --video mode, got {len(audio_streams)}"
+    video_stream: dict[Any, Any] = video_streams[0]  # pyright: ignore[reportUnknownVariableType]
+    codec: Any = video_stream.get("codec_name")
     assert codec == "h264", f"expected h264 codec, got {codec!r}"
 
-    fmt = info.get("format")
-    assert isinstance(fmt, dict), f"ffprobe format not a dict: {fmt!r}"
-    duration_str = fmt.get("duration")
+    fmt_raw: Any = info.get("format")
+    assert isinstance(fmt_raw, dict), f"ffprobe format not a dict: {fmt_raw!r}"
+    fmt: dict[Any, Any] = fmt_raw  # pyright: ignore[reportUnknownVariableType]
+    duration_str: Any = fmt.get("duration")
     assert isinstance(duration_str, str), f"missing duration in ffprobe output: {fmt!r}"
     duration = float(duration_str)
     delta = abs(duration - _DURATION_SECONDS)
@@ -182,7 +207,7 @@ def _scenario() -> None:
 
 
 def main() -> int:
-    return _helpers.run_scenario("cli_capture_ffmpeg", _scenario)
+    return _helpers.run_scenario("cli_record_video_ffmpeg", _scenario)
 
 
 if __name__ == "__main__":

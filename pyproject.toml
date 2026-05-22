@@ -112,7 +112,6 @@ exclude = [
   "**/node_modules",
   "**/__pycache__",
   "**/.venv",
-  "tests/e2e/",
   "tests/vrcpilot/",
   ".claude/worktrees/",
 ]
