@@ -22,15 +22,11 @@ _FOCUS_RECHECK_INTERVAL: float = 0.05
 def ensure_target() -> None:
     """Verify VRChat is running and the foreground window.
 
-    Idempotent: safe to call before every input event or once before a
-    tight loop. Native Wayland fails fast with
-    :class:`NotImplementedError` because the focus retry loop would
-    never converge there.
-
-    Raises:
-        NotImplementedError: Native Wayland session detected.
-        VRChatNotRunningError: VRChat process was not found.
-        VRChatNotFocusedError: Window cannot be brought to foreground.
+    Idempotent; safe to call before every input event. Native Wayland
+    raises :class:`NotImplementedError` because the focus retry loop
+    would never converge there. Raises :class:`VRChatNotRunningError`
+    when no VRChat process exists, or :class:`VRChatNotFocusedError`
+    when the window cannot be brought to the foreground.
     """
     if is_wayland_native():
         raise NotImplementedError(

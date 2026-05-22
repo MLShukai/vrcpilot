@@ -1,9 +1,7 @@
 """Synthetic mouse input for VRChat (platform dispatch).
 
-The concrete backend (``LinuxMouse`` / ``Win32Mouse``) lives in
-:mod:`vrcpilot.controls.mouse.linux` /
-:mod:`vrcpilot.controls.mouse.windows` and is imported lazily on first
-call to :func:`_get` so the off-platform implementation never loads.
+The platform backend is imported lazily on first call so the off-
+platform implementation never loads.
 """
 
 from __future__ import annotations

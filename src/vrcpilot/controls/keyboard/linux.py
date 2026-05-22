@@ -120,11 +120,7 @@ _INPUTTINO_CODES: dict[Key, inputtino.KeyCode] = {
 
 
 class LinuxKeyboard(Keyboard):
-    """``inputtino``-backed :class:`Keyboard`.
-
-    Opens ``/dev/uinput`` at construction; inputtino raises
-    :class:`RuntimeError` if the caller lacks permission.
-    """
+    """``inputtino``-backed :class:`Keyboard` (opens ``/dev/uinput``)."""
 
     def __init__(self) -> None:
         self._imp = inputtino.Keyboard()

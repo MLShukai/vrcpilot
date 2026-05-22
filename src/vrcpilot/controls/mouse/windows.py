@@ -37,9 +37,8 @@ _WHEEL_DELTA = 120
 def _scroll_wheel(amount: int) -> None:
     """Synthesize a vertical wheel event via ``SendInput``.
 
-    Win32 wheel sign convention: positive = up. Caller is expected
-    to have already sign-flipped to match the public API
-    (positive = down).
+    Win32 convention is positive = up; the caller must already have
+    sign-flipped to match the public API (positive = down).
     """
     extra = ctypes.c_ulong(0)
     ii = pydirectinput.Input_I()
@@ -56,10 +55,7 @@ def _scroll_wheel(amount: int) -> None:
 
 
 class Win32Mouse(Mouse):
-    """``pydirectinput``-backed :class:`Mouse`.
-
-    Uses Windows screen coordinates directly (no mss capture).
-    """
+    """``pydirectinput``-backed :class:`Mouse` (no mss capture)."""
 
     @override
     def _do_move(self, x: int, y: int, *, relative: bool) -> None:

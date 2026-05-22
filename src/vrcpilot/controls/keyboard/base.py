@@ -1,10 +1,7 @@
 """Cross-platform :class:`Key` enum and :class:`Keyboard` ABC.
 
-Lives in its own module so the platform-specific backends
-(:mod:`vrcpilot.controls.keyboard.windows`,
-:mod:`vrcpilot.controls.keyboard.linux`) can import it without dragging
-each other in. The dispatcher in :mod:`vrcpilot.controls.keyboard`
-imports the right backend lazily on first use.
+Lives in its own module so platform backends can import it without
+dragging each other in.
 """
 
 from __future__ import annotations
@@ -19,9 +16,8 @@ from vrcpilot.controls.guard import ensure_target
 class Key(StrEnum):
     """Normalized key identifiers.
 
-    Values follow the pydirectinput naming convention so the Win32
-    backend forwards ``key.value`` straight through; the Linux backend
-    maps each member via :data:`vrcpilot.controls.keyboard.linux._INPUTTINO_CODES`.
+    Values follow pydirectinput naming so the Win32 backend can
+    forward ``key.value`` straight through.
     """
 
     # Letters
@@ -129,22 +125,17 @@ class Key(StrEnum):
 class Keyboard(ABC):
     """Keyboard ABC: runs :func:`ensure_target`, then delegates to ``_do_*``.
 
-    All public methods accept one or more :class:`Key` values via the
-    ``*keys`` variadic. Combos are pressed simultaneously: ``down`` is
-    issued left-to-right, ``up`` is issued right-to-left so modifier
-    keys outlive the keys they modify (the standard ``Ctrl+C`` release
-    order used by ``pyautogui.hotkey`` / ``xdotool`` / AutoHotkey).
+    Public methods accept one or more :class:`Key` values; combos go
+    down left-to-right and come up in reverse so modifiers outlive the
+    keys they modify (the ``Ctrl+C`` convention). Every public method
+    raises :class:`TypeError` when called with zero keys.
     """
 
     def press(self, *keys: Key, duration: float = 0.1, focus: bool = True) -> None:
-        """Tap ``keys`` simultaneously (down all, sleep, up all reversed).
+        """Tap ``keys`` simultaneously, holding for ``duration`` seconds.
 
-        ``duration`` is the down-to-up hold in seconds applied **once**
-        across the whole combo. The default of 0.1 is tuned to be
-        reliably picked up by Unity / VRChat -- shorter holds (including
-        ``0.0``) get dropped in practice.
-
-        Raises :class:`TypeError` when called with zero keys.
+        The 0.1s default is tuned for Unity / VRChat — shorter holds
+        (including ``0.0``) get dropped in practice.
         """
         if not keys:
             raise TypeError("press() requires at least one Key")
@@ -159,13 +150,9 @@ class Keyboard(ABC):
     def down(self, *keys: Key, focus: bool = True) -> None:
         """Press and hold ``keys`` until a matching :meth:`up`.
 
-        Keys are pressed left-to-right with no sleep. Pair with
-        :meth:`up` (which releases in reverse order) to express
-        modifier combos -- e.g. ``down(Key.CTRL); press(Key.C);
-        up(Key.CTRL)`` for ``Ctrl+C``, or ``press(Key.CTRL, Key.C)``
-        for the same combo in a single call.
-
-        Raises :class:`TypeError` when called with zero keys.
+        Half-action; only valid within a single Python process. For a
+        one-shot combo prefer ``press(Key.CTRL, Key.C)`` over the
+        explicit down / press / up triple.
         """
         if not keys:
             raise TypeError("down() requires at least one Key")
@@ -177,11 +164,8 @@ class Keyboard(ABC):
     def up(self, *keys: Key, focus: bool = True) -> None:
         """Release ``keys`` previously pressed with :meth:`down`.
 
-        Keys are released right-to-left so passing the same argument
-        list to :meth:`down` and :meth:`up` yields LIFO release order
-        (modifiers held in :meth:`down` outlive the keys they modify).
-
-        Raises :class:`TypeError` when called with zero keys.
+        Passing the same argument list to :meth:`down` and :meth:`up`
+        yields LIFO release order.
         """
         if not keys:
             raise TypeError("up() requires at least one Key")

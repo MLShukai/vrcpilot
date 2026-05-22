@@ -1,17 +1,9 @@
 """Synthetic keyboard input for VRChat (platform dispatch).
 
-Keys are passed as :class:`Key` (a :class:`enum.StrEnum`) so pyright
-and IDE completion catch typos. Combos can be expressed either as
-explicit ``down`` / ``press`` / ``up`` triples or, equivalently, as a
-single :func:`press` call with multiple positional keys
-(``press(Key.CTRL_LEFT, Key.C)`` for ``Ctrl+C``); there is no
-``"ctrl+c"`` string parsing.
-
-The concrete backend (``LinuxKeyboard`` / ``Win32Keyboard``) lives in
-:mod:`vrcpilot.controls.keyboard.linux` /
-:mod:`vrcpilot.controls.keyboard.windows` and is imported lazily on
-first call to :func:`_get` so the off-platform implementation never
-loads.
+Keys are passed as :class:`Key` (a :class:`enum.StrEnum`); combos are
+expressed by passing multiple keys to :func:`press` rather than parsing
+strings like ``"ctrl+c"``. The platform backend is imported lazily on
+first call so the off-platform implementation never loads.
 """
 
 from __future__ import annotations
