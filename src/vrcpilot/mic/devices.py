@@ -83,25 +83,19 @@ def lookup_speaker(name: str) -> Any:
 
     try:
         return sc.get_speaker(name)  # pyright: ignore[reportUnknownMemberType]
-    except (LookupError, IndexError):
-        # soundcard raises LookupError on a clean miss; the fuzzy-match
-        # implementation can also surface IndexError when the candidate
-        # list is empty. Both map to "no match" for our contract.
+    except LookupError:
+        # soundcard raises LookupError on a clean miss (its public
+        # contract). Re-raise as MicDeviceNotFoundError below with a
+        # listing so the user can see what *is* available.
         pass
 
     speakers: list[Any] = list(
         sc.all_speakers()  # pyright: ignore[reportUnknownMemberType]
     )
-    listing_lines: list[str] = []
-    for s in speakers:
-        s_name = str(
-            getattr(s, "name", "")  # pyright: ignore[reportUnknownArgumentType]
-        )
-        s_id = str(
-            getattr(s, "id", "")  # pyright: ignore[reportUnknownArgumentType]
-        )
-        listing_lines.append(f"  {s_name!r} (id={s_id!r})")
-    listing = "\n".join(listing_lines)
+    listing = "\n".join(
+        f"  {speaker.name!r} (id={speaker.id!r})"  # pyright: ignore[reportUnknownMemberType]
+        for speaker in speakers
+    )
     if sys.platform == "linux":
         setup_hint = (
             "Run 'vrcpilot linux-mic register' to create the VRCPilotMic "

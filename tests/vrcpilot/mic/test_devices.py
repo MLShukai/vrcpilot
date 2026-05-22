@@ -106,13 +106,20 @@ class TestLookupSpeaker:
         speaker = lookup_speaker("cable input")
         assert speaker.id == "cable-input"
 
-    def test_first_match_wins_among_multiple(self, mocker: MockerFixture) -> None:
+    def test_returns_one_of_the_matches_when_multiple(
+        self, mocker: MockerFixture
+    ) -> None:
+        # ``lookup_speaker`` delegates to ``soundcard.get_speaker`` whose
+        # selection among multiple substring hits is implementation-
+        # defined (substring + fuzzy id, internal ordering not guaranteed).
+        # The contract we own is "returns some matching speaker" -- not
+        # which one -- so assert membership rather than identity.
         fake = FakeSoundCard()
         fake.add_speaker("foo CABLE Input", id="first")
         fake.add_speaker("bar CABLE Input", id="second")
         self._install_fake(mocker, fake)
         speaker = lookup_speaker("CABLE Input")
-        assert speaker.id == "first"
+        assert speaker.id in {"first", "second"}
 
     def test_input_only_device_is_skipped(self, mocker: MockerFixture) -> None:
         # ``all_speakers()`` only returns output devices on soundcard, so

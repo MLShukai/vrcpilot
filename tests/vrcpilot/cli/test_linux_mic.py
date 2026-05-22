@@ -260,6 +260,40 @@ class TestStatusAction:
         # No error -> stderr stays empty on the happy path.
         assert captured.err == ""
 
+    def test_status_visible_via_id_only_match(
+        self,
+        isolate_config: Path,
+        mocker: MockerFixture,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Regression: 8ed1b73 fixed ``VRCPilotMic`` (id) /
+        ``VRCPilot_Virtual_Mic`` (name) divergence.
+
+        PipeWire surfaces the null-sink with ``Speaker.id="VRCPilotMic"``
+        and ``Speaker.name="VRCPilot_Virtual_Mic"`` (the description
+        with spaces rewritten). The ``soundcard.get_speaker`` lookup
+        in ``_soundcard_visible`` must hit this entry via its **id**
+        even though the needle does not appear in ``name``. Without the
+        id-aware match in ``FakeSoundCard.get_speaker`` the fake would
+        not catch a regression to a name-only scan.
+        """
+        del isolate_config
+        # runtime side is not what we are testing here; keep it green
+        # so only the soundcard branch is in play.
+        pulse = FakePulse("vrcpilot-mic-status")
+        mocker.patch.object(mic_linux, "open_pulse_control", return_value=pulse)
+
+        fake_sc = FakeSoundCard()
+        # id contains the needle ("VRCPilotMic"); name does NOT.
+        fake_sc.add_speaker("VRCPilot_Virtual_Mic", id="VRCPilotMic")
+        mocker.patch.dict(sys.modules, {"soundcard": fake_sc})
+
+        exit_code = main(["linux-mic", "status"])
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "soundcard: visible" in captured.out
+
     def test_status_all_absent(
         self,
         isolate_config: Path,

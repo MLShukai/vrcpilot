@@ -22,10 +22,17 @@ sounddevice and may bite again:
   context manager**, not a stream. Mic owns `self._player_cm` and calls
   `self._player_cm.__enter__()` / `.__exit__(None, None, None)` manually
   so the existing `Mic.close()` lifecycle stays intact.
-- **`get_speaker(name)` raises `LookupError` on miss** (substring + fuzzy
-  match). `lookup_speaker` in `src/vrcpilot/mic/devices.py` deliberately
-  reimplements the substring scan to keep "first match wins" semantics
-  and produce the existing listing-style error message.
+- **`get_speaker(name)` raises `LookupError` on miss** (case-insensitive
+  substring on `name` + fuzzy id match -- internal ordering among
+  multiple matches is implementation-defined, do not assert
+  "first match wins" in tests). `lookup_speaker` in
+  `src/vrcpilot/mic/devices.py` delegates to `sc.get_speaker(name)` and
+  catches `LookupError` only (the public contract); on miss it
+  enumerates `all_speakers()` to produce the listing-style
+  `MicDeviceNotFoundError` message. The earlier defensive
+  `IndexError` catch was removed because no reproducer was ever
+  documented and `IndexError` from soundcard internals would now signal
+  a real upstream bug rather than be silently swallowed.
 - **Native errors surface as `RuntimeError`** (libpulse) or `OSError`
   (missing shared library). `Mic` lets these propagate.
 - **`Speaker.id`** is the PulseAudio sink name on Linux (e.g.

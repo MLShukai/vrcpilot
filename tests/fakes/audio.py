@@ -1032,22 +1032,42 @@ class FakeSoundCard:
         return list(self.microphones)
 
     def get_speaker(self, name: str) -> FakeSoundCardSpeaker:
-        """Return the first speaker whose name contains ``name``.
+        """Return the first speaker matching ``name`` by name or id.
 
-        Mirrors the real ``soundcard.get_speaker`` substring semantic;
-        raises :class:`LookupError` on miss for parity.
+        Mirrors the real ``soundcard.get_speaker`` which matches against
+        both ``Speaker.name`` (case-insensitive substring) and
+        ``Speaker.id`` (exact match plus substring fallback). Without
+        id-aware matching the fake misses the
+        ``id="VRCPilotMic"`` / ``name="VRCPilot_Virtual_Mic"``
+        divergence PipeWire exposes for the null-sink, which is the
+        exact bug fixed in 8ed1b73. Raises :class:`LookupError` on miss
+        for parity.
         """
         needle = name.lower()
         for speaker in self.speakers:
-            if needle in speaker.name.lower():
+            if (
+                needle in speaker.name.lower()
+                or needle == speaker.id.lower()
+                or needle in speaker.id.lower()
+            ):
                 return speaker
         raise LookupError(f"no speaker matches {name!r}")
 
     def get_microphone(self, name: str) -> FakeSoundCardMicrophone:
-        """Return the first microphone whose name contains ``name``."""
+        """Return the first microphone matching ``name`` by name or id.
+
+        Mirrors :meth:`get_speaker`'s id-aware match so the input side
+        stays symmetric (the PipeWire monitor source surfaces as
+        ``id="VRCPilotMic.monitor"`` with a description-derived
+        ``name``, which is the same divergence shape as the sink).
+        """
         needle = name.lower()
         for microphone in self.microphones:
-            if needle in microphone.name.lower():
+            if (
+                needle in microphone.name.lower()
+                or needle == microphone.id.lower()
+                or needle in microphone.id.lower()
+            ):
                 return microphone
         raise LookupError(f"no microphone matches {name!r}")
 

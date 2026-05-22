@@ -172,14 +172,16 @@ _SINE_AMPLITUDE = 0.7
 _FREQUENCY_BIN_TOLERANCE = 2
 
 
-def _query_speakers() -> list[Any] | None:
-    """Return soundcard's speaker list, or ``None`` if soundcard missing.
+def _try_import_soundcard() -> Any | None:
+    """Return the :mod:`soundcard` module, or ``None`` on failure.
 
-    Returning ``None`` (rather than re-raising) lets the caller treat
-    the import failure the same as a missing virtual mic and produce a
-    single "skipped" branch. ``OSError`` covers the libpulse-missing
-    case on Linux (soundcard raises it when the shared library cannot
-    be loaded).
+    Logs the failure and returns ``None`` so callers can treat both
+    "soundcard not installed" and "libpulse not loadable" the same way:
+    a single "skipped" branch in :func:`_scenario`. ``OSError`` covers
+    the Linux libpulse-missing case (soundcard raises it when the
+    shared library cannot be dlopened). Consolidating the try/except
+    in one helper keeps the 4 callsites that previously duplicated this
+    block down to one.
     """
     try:
         import soundcard as sc  # pyright: ignore[reportMissingTypeStubs]
@@ -189,7 +191,25 @@ def _query_speakers() -> list[Any] | None:
     except OSError as exc:
         _helpers.log(f"soundcard import failed (libpulse missing?): {exc!r}")
         return None
-    return list(sc.all_speakers())  # pyright: ignore[reportUnknownMemberType]
+    return sc
+
+
+def _query_speakers() -> list[Any] | None:
+    """Return soundcard's speaker list, or ``None`` if soundcard missing.
+
+    Also returns ``None`` when ``all_speakers()`` itself raises
+    ``RuntimeError`` -- some libpulse builds dlopen lazily on the first
+    enumeration and the failure only surfaces here. Treating that as
+    "skip" matches the import-failure path the caller already handles.
+    """
+    sc = _try_import_soundcard()
+    if sc is None:
+        return None
+    try:
+        return list(sc.all_speakers())  # pyright: ignore[reportUnknownMemberType]
+    except (OSError, RuntimeError) as exc:
+        _helpers.log(f"sc.all_speakers() failed: {exc!r}")
+        return None
 
 
 def _query_microphones() -> list[Any] | None:
@@ -201,21 +221,22 @@ def _query_microphones() -> list[Any] | None:
     source registered by ``vrcpilot linux-mic register``) in the
     enumeration -- they are filtered out of the default
     :func:`soundcard.all_microphones` view, which made the Linux
-    loopback scenario fail to find anything earlier.
+    loopback scenario fail to find anything earlier. ``RuntimeError`` is
+    folded into the skip branch for the same reason as
+    :func:`_query_speakers`.
     """
+    sc = _try_import_soundcard()
+    if sc is None:
+        return None
     try:
-        import soundcard as sc  # pyright: ignore[reportMissingTypeStubs]
-    except ImportError as exc:
-        _helpers.log(f"soundcard not installed: {exc!r}")
-        return None
-    except OSError as exc:
-        _helpers.log(f"soundcard import failed (libpulse missing?): {exc!r}")
-        return None
-    return list(
-        sc.all_microphones(  # pyright: ignore[reportUnknownMemberType]
-            include_loopback=True
+        return list(
+            sc.all_microphones(  # pyright: ignore[reportUnknownMemberType]
+                include_loopback=True
+            )
         )
-    )
+    except (OSError, RuntimeError) as exc:
+        _helpers.log(f"sc.all_microphones() failed: {exc!r}")
+        return None
 
 
 def _resolve_speaker(*, name: str) -> Any | None:
@@ -227,13 +248,12 @@ def _resolve_speaker(*, name: str) -> Any | None:
     :func:`vrcpilot.mic.devices.lookup_speaker` so the scenario picks
     the same handle the library would.
     """
-    try:
-        import soundcard as sc  # pyright: ignore[reportMissingTypeStubs]
-    except (ImportError, OSError):
+    sc = _try_import_soundcard()
+    if sc is None:
         return None
     try:
         return sc.get_speaker(name)  # pyright: ignore[reportUnknownMemberType]
-    except (LookupError, IndexError):
+    except LookupError:
         return None
 
 
@@ -246,15 +266,14 @@ def _resolve_microphone(*, name: str) -> Any | None:
     is performed by :func:`soundcard.get_microphone` (id + name with
     fuzzy fallback).
     """
-    try:
-        import soundcard as sc  # pyright: ignore[reportMissingTypeStubs]
-    except (ImportError, OSError):
+    sc = _try_import_soundcard()
+    if sc is None:
         return None
     try:
         return sc.get_microphone(  # pyright: ignore[reportUnknownMemberType]
             name, include_loopback=True
         )
-    except (LookupError, IndexError):
+    except LookupError:
         return None
 
 
@@ -348,7 +367,7 @@ class _LoopbackRecorder:
         self._stop_event = threading.Event()
         self._ready = threading.Event()
         self._thread: threading.Thread | None = None
-        self._thread_exc: BaseException | None = None
+        self._thread_exc: Exception | None = None
 
     def __enter__(self) -> _LoopbackRecorder:
         self._thread = threading.Thread(
@@ -391,12 +410,16 @@ class _LoopbackRecorder:
                     self._chunks.append(arr)
                     if not self._ready.is_set():
                         self._ready.set()
-        except BaseException as exc:  # noqa: BLE001
+        except Exception as exc:
             # Surface the failure to the main thread via __exit__ so
             # the scenario can FAIL rather than silently producing an
             # empty buffer. Also flip ``_ready`` so the main thread
             # doesn't deadlock waiting for a recorder that already
-            # crashed.
+            # crashed. ``Exception`` (not ``BaseException``) so that
+            # ``KeyboardInterrupt`` / ``SystemExit`` still propagate
+            # naturally; soundcard surfaces backend errors as
+            # ``RuntimeError`` / ``OSError`` which are both under
+            # ``Exception``.
             self._thread_exc = exc
             self._ready.set()
 

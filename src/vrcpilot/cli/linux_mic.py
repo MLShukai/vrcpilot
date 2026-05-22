@@ -28,6 +28,8 @@ import argparse
 import sys
 from typing import cast
 
+from vrcpilot.mic.base import LIBPULSE_HINT
+
 from ._common import SubParsersAction
 
 
@@ -191,10 +193,7 @@ def _soundcard_visible(sink_name: str) -> tuple[bool, str | None]:
         # library is missing on Linux (libpulse0 on Debian/Ubuntu) or
         # WASAPI is unavailable on Windows. Surface a hint along with
         # the underlying error.
-        return False, (
-            f"soundcard import failed ({exc}); install libpulse "
-            "(e.g. 'sudo apt-get install libpulse0')"
-        )
+        return False, f"soundcard import failed ({exc}); {LIBPULSE_HINT}"
 
     try:
         sc.get_speaker(sink_name)  # pyright: ignore[reportUnknownMemberType]
@@ -203,10 +202,7 @@ def _soundcard_visible(sink_name: str) -> tuple[bool, str | None]:
     except OSError as exc:
         # libpulse / WASAPI sometimes load lazily on first enumeration.
         # Reuse the same hint so users see consistent guidance.
-        return False, (
-            f"soundcard probe failed ({exc}); install libpulse "
-            "(e.g. 'sudo apt-get install libpulse0')"
-        )
+        return False, f"soundcard probe failed ({exc}); {LIBPULSE_HINT}"
     except Exception as exc:  # noqa: BLE001
         return False, f"get_speaker failed ({exc})"
     return True, None

@@ -31,6 +31,7 @@ from argcomplete.completers import FilesCompleter
 from numpy.typing import NDArray
 
 from vrcpilot.mic import Mic, MicDeviceNotFoundError
+from vrcpilot.mic.base import LIBPULSE_HINT
 
 from ._common import SubParsersAction, attach_completer
 
@@ -285,7 +286,12 @@ def run(args: argparse.Namespace) -> int:
         # runtime fault channel (libpulse server errors, WASAPI device
         # I/O failures); routing both through the same exit-code-1 path
         # keeps the CLI contract intact instead of crashing with a
-        # traceback.
-        print(f"vrcpilot: {exc}", file=sys.stderr)
+        # traceback. When the failure mentions libpulse, surface the
+        # same install hint ``vrcpilot linux-mic status`` uses so the
+        # two CLIs guide the user the same way.
+        msg = str(exc)
+        print(f"vrcpilot: {msg}", file=sys.stderr)
+        if "libpulse" in msg.lower():
+            print(f"vrcpilot: hint: {LIBPULSE_HINT}", file=sys.stderr)
         return 1
     return 0
