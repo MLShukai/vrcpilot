@@ -1,4 +1,4 @@
-"""Tests for :mod:`vrcpilot.x11`.
+"""Tests for :mod:`vrcpilot.linux`.
 
 The module under test raises ``ImportError`` on non-Linux platforms,
 and the real connection paths require a reachable X server. Two
@@ -29,7 +29,7 @@ from tests.fakes import (
     FakeXWindow,
     make_xerror_subclass,
 )
-from vrcpilot.x11 import (
+from vrcpilot.linux import (
     find_vrchat_window,
     get_window_rect,
     open_x11_display,
