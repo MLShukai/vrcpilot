@@ -18,14 +18,10 @@ def register(subparsers: SubParsersAction) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
-    """Execute the ``pid`` subcommand.
+    """Print live VRChat PIDs; exit 1 (with empty stdout) when none run.
 
-    Prints one PID per line on stdout. Exit code is state-dependent so
-    shells can branch with ``if vrcpilot pid >/dev/null; then ...``.
-
-    Returns:
-        ``0`` when at least one VRChat PID is running; ``1`` when none
-        is observed (stdout stays empty in that case).
+    State-dependent exit lets shells branch with
+    ``if vrcpilot pid >/dev/null; then ...``.
     """
     del args
     pids = find_pids()

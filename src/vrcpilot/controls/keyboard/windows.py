@@ -29,12 +29,7 @@ pydirectinput.FAILSAFE = False
 
 
 class Win32Keyboard(Keyboard):
-    """``pydirectinput``-backed :class:`Keyboard`.
-
-    :class:`Key` values are forwarded as ``key.value`` directly into
-    ``pydirectinput.KEYBOARD_MAPPING``; add a translation table here
-    if any member turns out to be unsupported.
-    """
+    """``pydirectinput``-backed :class:`Keyboard`."""
 
     @override
     def _do_down(self, key: Key) -> None:

@@ -92,22 +92,12 @@ def register(subparsers: SubParsersAction) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
-    """Execute the ``launch`` subcommand.
+    """Run ``launch``; print the PID on stdout when a wait succeeds.
 
-    ``osc_in_port`` gates the entire OSC triple: when ``None`` no
-    ``--osc`` flag is forwarded and ``osc_out_ip`` / ``osc_out_port``
-    are silently ignored. Keeps the CLI ergonomic at the cost of
-    accepting unused flags without warning.
-
-    When ``--wait-timeout`` is positive the command blocks until a
-    VRChat PID is observed, then prints it on stdout. ``--wait-timeout
-    0`` (or any non-positive value) spawns and returns immediately
-    without waiting; callers can use ``vrcpilot pid`` to discover the
-    PID later.
-
-    Returns:
-        ``0`` on launch (PID printed when waited), ``1`` if the wait
-        timed out before VRChat appeared, ``2`` if Steam was not found.
+    ``osc_in_port`` gates the OSC triple: without it the other
+    ``--osc-out-*`` flags are silently ignored. ``--wait-timeout 0`` (or
+    negative) spawns and returns without waiting. Exit codes: 0 success,
+    1 wait timed out, 2 Steam not found.
     """
     osc = (
         OscConfig(

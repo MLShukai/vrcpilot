@@ -1,16 +1,9 @@
-"""``vrcpilot keyboard`` subcommand.
+"""``vrcpilot keyboard`` subcommand (``press`` only).
 
-Thin CLI wrapper over :mod:`vrcpilot.controls.keyboard`. Only ``press``
-is exposed: a separate ``up`` / ``down`` per CLI invocation cannot work
-because each ``vrcpilot`` process opens and closes its own backend
-(``/dev/uinput`` on Linux), and the kernel auto-releases all held keys
-when the virtual device is destroyed. ``press`` keeps the down -> sleep
--> up sequence inside one process so the keypress actually lands.
-
-The :data:`keyboard_api` alias below is a stable patch target: tests bind
-their fakes by patching ``vrcpilot.controls.keyboard._get`` so the real
-public ``keyboard.press`` flows through to a recording
-:class:`~vrcpilot.controls.keyboard.Keyboard` impl.
+Only ``press`` is exposed because each CLI invocation owns its own
+``/dev/uinput`` device on Linux and the kernel auto-releases all
+held keys when that device closes — so a separate ``down`` / ``up``
+across processes cannot keep a key held.
 """
 
 from __future__ import annotations
@@ -57,16 +50,10 @@ def register(subparsers: SubParsersAction) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
-    """Execute the ``keyboard press`` subcommand.
+    """Run ``keyboard press``; silent on success, exit 1 on guard failure.
 
-    Silent on success. Guard failures (VRChat not running / not focused)
-    print a single ``vrcpilot: <message>`` line to stderr and return
-    exit 1. Keys are pressed simultaneously: ``down`` is issued
-    left-to-right, then a single ``duration`` sleep, then ``up`` is
-    issued right-to-left. The guard runs once before any input.
-
-    Returns:
-        ``0`` on success, ``1`` on guard failure.
+    All keys are pressed simultaneously: down left-to-right, single
+    ``duration`` sleep, up right-to-left.
     """
     keys: list[Key] = args.keys
     duration: float = args.duration

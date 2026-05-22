@@ -1,10 +1,8 @@
-"""OCR engine abstract base class and the :class:`OCRWord` value type.
+"""OCR engine ABC and the :class:`OCRWord` value type.
 
-All coordinates handled here are *image-local* — the origin is the
-top-left of the captured image. For VRChat window screenshots this
-coincides with the window-local frame used by
-:func:`vrcpilot.controls.mouse.move`, so the values are click-ready
-without translation.
+Coordinates are image-local (top-left origin). For VRChat window
+screenshots this matches the window-local frame consumed by
+:func:`vrcpilot.controls.mouse.move`, so values are click-ready.
 """
 
 from __future__ import annotations
@@ -23,11 +21,9 @@ from vrcpilot.types import Polygon
 class OCRWord:
     """Single OCR detection in image-local coordinates.
 
-    Attributes:
-        text: 認識されたテキスト。
-        polygon: 4 頂点 (TL, TR, BR, BL)。傾いたテキストにも対応するため
-            一般四角形を許容する。
-        confidence: 0.0–1.0 の信頼度。
+    ``polygon`` is a 4-vertex quad in TL, TR, BR, BL order — a general
+    quadrilateral is used (not an axis-aligned rect) so rotated text
+    survives the round trip. ``confidence`` is on ``[0.0, 1.0]``.
     """
 
     text: str
@@ -46,10 +42,10 @@ class OCRWord:
 
     @property
     def bbox(self) -> tuple[int, int, int, int]:
-        """Axis-aligned bounding box ``(x, y, width, height)``.
+        """Axis-aligned bounding box as ``(x, y, width, height)`` in pixels.
 
-        ``width`` and ``height`` are always non-negative (zero for a
-        degenerate polygon).
+        ``width`` / ``height`` are non-negative (zero for a degenerate
+        polygon).
         """
         xs = [p[0] for p in self.polygon]
         ys = [p[1] for p in self.polygon]
@@ -66,27 +62,23 @@ class OCRWord:
 
     @property
     def center(self) -> tuple[float, float]:
-        """Mean of polygon vertices as ``(x, y)`` floats."""
+        """Polygon centroid as ``(x, y)`` in image-local pixels."""
         mean_x = sum(p[0] for p in self.polygon) / 4
         mean_y = sum(p[1] for p in self.polygon) / 4
         return (float(mean_x), float(mean_y))
 
 
 class OCREngine(ABC):
-    """差し替え可能な OCR バックエンドの抽象基底。
+    """Swappable OCR backend.
 
-    ユーザーは自前のサブクラスを定義することで rapidocr 以外のエンジン (PaddleOCR、Tesseract、商用 API
-    等) を差し込める。
+    Subclass this to plug in non-default engines (PaddleOCR, Tesseract,
+    cloud APIs, ...) alongside the built-in :class:`RapidOCREngine`.
     """
 
     @abstractmethod
     def recognize(self, image: NDArray[np.uint8]) -> Sequence[OCRWord]:
-        """``(H, W, 3)`` uint8 RGB ndarray を受け取り、検出語列を返す。
+        """Recognize text in an ``(H, W, 3)`` uint8 RGB image.
 
-        Args:
-            image: 認識対象の RGB 画像。``np.uint8`` dtype 必須。
-
-        Returns:
-            検出された :class:`OCRWord` の列。座標はすべて image-local
-            (画像左上原点)。デスクトップ座標への変換は呼び出し側の責務。
+        Returned :class:`OCRWord` coordinates are image-local; mapping
+        them to desktop coordinates is the caller's responsibility.
         """

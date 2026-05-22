@@ -1,19 +1,11 @@
-"""Public :class:`Speaker` session and backend selection.
+"""Public :class:`Speaker` session and platform dispatch.
 
-Thin context-manager wrapper around a :class:`SpeakerBackend`,
-mirroring :class:`vrcpilot.capture.Capture`. The wrapper owns the
-closed-state flag so backend implementations only have to honour the
-ABC contract.
-
-Strict two-way platform dispatch: Linux uses
-:class:`vrcpilot.speaker.linux.PipeWireSpeakerBackend` (native PipeWire
-CLIs + ``pulsectl`` control plane) and Windows uses
-:class:`vrcpilot.speaker.windows.ProcTapSpeakerBackend` (process
-loopback via the ``proc-tap`` package, which is Windows-only here).
-Every other platform raises :class:`NotImplementedError` at dispatch
-time. Both backends are imported lazily so a missing optional
-dependency on one platform never breaks ``import vrcpilot.speaker``
-on the other.
+Linux selects :class:`vrcpilot.speaker.linux.PipeWireSpeakerBackend`
+(native PipeWire pipeline) and Windows selects
+:class:`vrcpilot.speaker.windows.ProcTapSpeakerBackend` (``proc-tap``
+process loopback). Both are imported lazily so the other platform's
+optional dependency is never required. Every other platform raises
+:class:`NotImplementedError`.
 """
 
 from __future__ import annotations
@@ -32,15 +24,7 @@ def _select_speaker_backend(
     *,
     read_timeout: float,
 ) -> SpeakerBackend:
-    """Return a started :class:`SpeakerBackend` for the host platform.
-
-    Imports the chosen backend lazily so platform-specific dependencies
-    (``proc-tap`` on Windows, ``pulsectl`` and the PipeWire CLIs on
-    Linux) never need to be importable on the other platform. Linux
-    selects :class:`PipeWireSpeakerBackend`, Windows selects
-    :class:`ProcTapSpeakerBackend`, and every other platform raises
-    :class:`NotImplementedError` -- there is no fall-through path.
-    """
+    """Return a started :class:`SpeakerBackend` for the host platform."""
     if sys.platform == "linux":
         from vrcpilot.speaker.linux import PipeWireSpeakerBackend
 
@@ -55,23 +39,15 @@ def _select_speaker_backend(
 class Speaker:
     """Process-isolated audio capture session for VRChat.
 
-    VRChat must already be running when the constructor is called; the
-    backend resolves the target PID via :func:`vrcpilot.process.find_pid`
-    and raises :class:`RuntimeError` otherwise. The session is
-    single-use: one backend connection is held open until :meth:`close`,
-    and each :meth:`read` returns every sample buffered since the
-    previous call.
-
-    ``read_timeout`` is in seconds and must be strictly positive -- it
-    bounds how long :meth:`read` blocks on a quiet stream before
-    returning an empty ndarray.
+    VRChat must already be running when the constructor is called.
+    ``read_timeout`` is in seconds and bounds how long :meth:`read`
+    waits on a quiet stream before returning an empty ndarray.
 
     Raises:
-        RuntimeError: Backend cannot start (VRChat is not running, or
-            the underlying platform-specific capture failed to open).
+        RuntimeError: VRChat is not running, or the platform backend
+            failed to open.
         ValueError: ``read_timeout`` is not strictly positive.
-        NotImplementedError: The host platform is neither Linux nor
-            Windows.
+        NotImplementedError: Host platform is neither Linux nor Windows.
     """
 
     _backend: SpeakerBackend
@@ -89,28 +65,24 @@ class Speaker:
         self._backend = _select_speaker_backend(read_timeout=read_timeout)
 
     def read(self) -> NDArray[np.float32]:
-        """Return every sample accumulated since the previous read.
+        """Return every sample buffered since the previous read.
 
-        Shape ``(N, CHANNELS)``, dtype ``float32``, sample rate
-        ``SAMPLE_RATE`` Hz. ``N == 0`` is a valid "no new audio" signal
-        and is returned when the backend's underlying event does not
-        fire within ``read_timeout`` seconds.
+        Shape ``(N, CHANNELS)``; ``N == 0`` is the valid "no new audio"
+        signal, returned when no samples arrive within ``read_timeout``.
 
         Raises:
-            RuntimeError: The session has been closed, or the backend
-                reports a fatal error.
+            RuntimeError: Session is closed or the backend reports a
+                fatal error.
         """
         if self._closed:
             raise RuntimeError("Speaker is closed")
         return self._backend.read()
 
     def close(self) -> None:
-        """Release the backend; idempotent and never raises.
+        """Release the backend.
 
-        Backend cleanup failures inside :meth:`SpeakerBackend.close`
-        are the backend's contract to surface (typically as
-        :class:`RuntimeWarning`); the wrapper just flips ``_closed``
-        and forwards once.
+        Idempotent; backend cleanup failures
+        surface as :class:`RuntimeWarning` from the backend itself.
         """
         if self._closed:
             return

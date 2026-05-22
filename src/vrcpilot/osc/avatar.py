@@ -1,11 +1,8 @@
 """VRChat OSC ``/avatar/parameters/*`` send-side view.
 
-Thin wrapper over :class:`vrcpilot.osc.sender.OscSender` that maps
-parameter *names* to the ``/avatar/parameters/<name>`` address space and
-delegates the typed send to the same sender. Range validation lives on
-:class:`OscSender` (``[0, 255]`` for ints / ``[-1.0, 1.0]`` for floats);
-custom avatars that need values outside those ranges should bypass via
-``sender.send("/avatar/parameters/Foo", value)``.
+Range validation lives on :class:`OscSender` (``[0, 255]`` ints,
+``[-1.0, 1.0]`` floats); avatars that need values outside those ranges
+should bypass via ``sender.send("/avatar/parameters/Foo", value)``.
 """
 
 from __future__ import annotations
@@ -22,8 +19,7 @@ class AvatarParameters:
     """OSC view bound to an :class:`OscSender` for avatar-parameter writes.
 
     Each method takes a bare parameter *name* (no slashes, non-empty);
-    the ``/avatar/parameters/`` prefix and range validation live on the
-    sender so there is one validation path.
+    the ``/avatar/parameters/`` prefix is prepended here.
     """
 
     def __init__(self, sender: sender.OscSender) -> None:

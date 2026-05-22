@@ -32,10 +32,8 @@ _BUTTON_MAP: dict[MouseButton, inputtino.MouseButton] = {
 class LinuxMouse(Mouse):
     """``inputtino``-backed :class:`Mouse`.
 
-    Opens ``/dev/uinput`` at construction; inputtino raises
-    :class:`RuntimeError` if the caller lacks permission. Screen
-    size for absolute moves is captured once from ``mss.monitors[0]``
-    (whole-desktop bounding box).
+    Opens ``/dev/uinput`` at construction. Screen size for absolute
+    moves is captured once from ``mss.monitors[0]`` (whole desktop).
     """
 
     def __init__(self) -> None:

@@ -1,4 +1,4 @@
-"""Private geometry helpers (IoU + NMS) shared by detect engines."""
+"""IoU + NMS helpers shared by detect engines."""
 
 from __future__ import annotations
 
@@ -31,10 +31,10 @@ def nms(
     detections: list[Detection],
     iou_threshold: float,
 ) -> list[Detection]:
-    """Greedy non-maximum suppression, returned confidence-descending.
+    """Greedy NMS; drops a detection whose bbox IoU with any kept detection
+    exceeds ``iou_threshold``.
 
-    A detection is dropped if its bbox IoU with any already-kept
-    detection exceeds ``iou_threshold``.
+    Output is confidence-descending.
     """
     if not detections:
         return []

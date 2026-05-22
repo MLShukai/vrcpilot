@@ -40,16 +40,16 @@ class Screenshot:
     use :func:`dataclasses.replace` for derived copies.
 
     Attributes:
-        image: ``(H, W, 3)`` ``uint8`` ndarray in RGB. Detached copy.
+        image: ``(H, W, 3)`` ``uint8`` RGB ndarray, detached from the
+            capture buffer.
         x, y: Window-frame top-left in absolute desktop pixels at
-            capture time. Informational only — :func:`mouse.move`
-            takes window-local coordinates so callers no longer need
-            to add these offsets. May be negative on multi-monitor
+            capture time. Informational only — :func:`mouse.move` takes
+            window-local coordinates. May be negative on multi-monitor
             layouts.
         width, height: Window-frame size in physical pixels.
         monitor_index: Index into ``mss.MSS().monitors`` (``0`` is the
-            composite, ``1..N`` are individual monitors). Falls back to
-            ``0`` when the window centre lies outside every monitor.
+            composite). Falls back to ``0`` when the window centre lies
+            outside every monitor.
         captured_at: UTC timestamp of the grab.
     """
 
@@ -64,39 +64,24 @@ class Screenshot:
     def save(self, png_path: Path | None = None) -> str:
         """Serialise the screenshot to YAML, optionally backed by a PNG file.
 
-        Two emission modes share one return type so callers can always
-        pipe the result to stdout or a ``.yaml`` file:
+        Round-trippable through :meth:`load`. Two emission modes share
+        one return type so callers can always pipe the result to stdout
+        or a ``.yaml`` file:
 
         * **path mode** (``png_path`` given): the PNG is written to
-          ``png_path`` and the YAML records an absolute ``path:``
-          reference. Keys appear in the order ``path``, ``x``, ``y``,
-          ``width``, ``height``, ``monitor_index``, ``captured_at`` —
-          the historical ``vrcpilot screenshot`` CLI contract.
-        * **inline mode** (``png_path is None``): no file is written;
-          the PNG bytes are encoded as base64 and stored under
-          ``image:``. To keep the metadata grep-friendly the
-          (potentially very long) ``image`` value is emitted **last**;
-          keys appear in the order ``x``, ``y``, ``width``, ``height``,
-          ``monitor_index``, ``captured_at``, ``image``.
+          ``png_path`` and the YAML records the ``resolve()``-d absolute
+          ``path:`` reference. Keys appear in the order ``path``, ``x``,
+          ``y``, ``width``, ``height``, ``monitor_index``,
+          ``captured_at`` — the historical ``vrcpilot screenshot`` CLI
+          contract. The parent directory must already exist (callers do
+          their own ``mkdir(parents=True)``).
+        * **inline mode** (``png_path is None``): no file is touched;
+          the PNG bytes are base64-encoded under ``image:``. To keep
+          the metadata grep-friendly the (potentially very long)
+          ``image`` value is emitted **last**.
 
-        Args:
-            png_path: Optional PNG destination. May be relative; when
-                given, the YAML records its ``resolve()``-d absolute
-                form and the parent directory must already exist
-                (callers are responsible for ``mkdir(parents=True)``
-                when needed). When ``None``, no file is touched and the
-                YAML is fully self-contained.
-
-        Raises:
-            FileNotFoundError: ``png_path`` is supplied and its parent
-                directory does not exist (propagated from
-                :class:`PIL.Image.Image.save`). The inline path writes
-                to an in-memory buffer and effectively never raises in
-                normal use.
-
-        Returns:
-            YAML text that :meth:`load` round-trips back into an
-            equivalent :class:`Screenshot`.
+        Raises :class:`FileNotFoundError` in path mode when ``png_path``'s
+        parent directory does not exist (propagated from PIL).
         """
         if png_path is not None:
             Image.fromarray(self.image).save(png_path)
@@ -127,40 +112,17 @@ class Screenshot:
     def load(cls, text: str) -> Screenshot:
         """Restore a :class:`Screenshot` from YAML text written by ``save``.
 
-        Two YAML shapes are accepted, mirroring :meth:`save`:
+        Accepts both shapes emitted by :meth:`save` (``path:`` references
+        a PNG on disk; ``image:`` carries base64 PNG bytes inline).
+        Exactly one of the two keys must be present — both or neither
+        is a :class:`ValueError` so the schema stays unambiguous. The
+        returned ``image`` is a detached ``(H, W, 3)`` ``uint8`` RGB
+        copy, safe to keep after the source file is removed.
 
-        * **path mode** — the document carries a ``path:`` key and the
-          referenced PNG is read from disk.
-        * **inline mode** — the document carries an ``image:`` key
-          containing base64-encoded PNG bytes and no file system access
-          is performed.
-
-        Exactly one of ``path`` / ``image`` must be present; supplying
-        both or neither is a :class:`ValueError` so the schema stays
-        unambiguous. The decoded image is converted to ``(H, W, 3)``
-        ``uint8`` RGB regardless of the source path.
-
-        Other field types are coerced via :func:`int` / :func:`str`, so
-        any non-mapping payload, missing key, malformed value, invalid
-        ISO-8601 timestamp, or invalid base64 is surfaced as
-        :class:`ValueError`. A missing or non-image PNG is reported
-        with a dedicated message that names the offending file.
-
-        Args:
-            text: YAML text emitted by :meth:`save` (either mode).
-
-        Raises:
-            ValueError: ``text`` is not a YAML mapping; both ``path``
-                and ``image`` are present, or neither; a required key
-                is missing; a field cannot be coerced; the
-                ``captured_at`` timestamp is not ISO-8601; the
-                referenced PNG is missing or undecodable; the inline
-                ``image`` value is not valid base64 or PNG.
-
-        Returns:
-            A new :class:`Screenshot` whose ``image`` is detached from
-            any backing file or buffer (safe to keep after the source
-            is removed).
+        :class:`ValueError` is raised for every malformed input: non-
+        mapping payload, missing key, uncoercible field, non-ISO-8601
+        ``captured_at``, base64 / PNG decoding failures, and missing
+        referenced PNGs (the message names the offending file).
         """
         raw = yaml.safe_load(text)
         if not isinstance(raw, dict):
@@ -231,22 +193,16 @@ def _resolve_monitor_index(
 def take_screenshot(*, settle_seconds: float = 0.05) -> Screenshot | None:
     """Focus VRChat, wait, then grab one window-only screenshot.
 
-    Args:
-        settle_seconds: Sleep between focus and grab, giving the
-            compositor time to finish raising the window. Must be
-            ``>= 0``. Default 50 ms is a generous margin for typical
-            desktops.
+    ``settle_seconds`` is the post-focus sleep that lets the compositor
+    finish raising the window (must be ``>= 0``; the 50 ms default is a
+    generous margin for typical desktops).
 
-    Raises:
-        NotImplementedError: Platform other than Windows or Linux.
-        ValueError: ``settle_seconds`` is negative.
-
-    Returns:
-        :class:`Screenshot` on success, ``None`` on recoverable failure
-        (Wayland native, focus refused, window unmapped, ``mss``
-        error). Wayland native also emits :class:`RuntimeWarning`; this
-        asymmetry with :class:`Capture` (which raises) lets polling
-        callers retry while streaming sessions fail loudly.
+    Returns ``None`` on recoverable failure (Wayland native, focus
+    refused, window unmapped, ``mss`` error). Wayland native also emits
+    :class:`RuntimeWarning`; this asymmetry with :class:`Capture` (which
+    raises) lets polling callers retry while streaming sessions fail
+    loudly. Raises :class:`ValueError` for negative ``settle_seconds``
+    and :class:`NotImplementedError` outside Windows / Linux.
     """
     if settle_seconds < 0:
         raise ValueError("settle_seconds must be >= 0")

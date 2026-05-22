@@ -1,7 +1,7 @@
-"""Draw a :class:`DetectResult` onto a copy of its screenshot.
+"""Render a :class:`DetectResult` onto a copy of its screenshot.
 
-Auto-contrast picks black or white labels per detection from the
-underlying patch luminance unless the caller pins ``text_color``.
+Label colour is auto-picked (black/white) per detection from patch
+luminance unless the caller pins ``text_color``.
 """
 
 from __future__ import annotations
@@ -17,11 +17,8 @@ def _decide_text_color(
     original: NDArray[np.uint8],
     bbox: tuple[int, int, int, int],
 ) -> tuple[int, int, int]:
-    """Pick black or white based on the mean luminance of *bbox*.
-
-    A fully-out-of-bounds bbox is treated as bright (default to black
-    text, readable on white).
-    """
+    """Black on bright patches, white on dark; out-of-bounds defaults to black
+    (readable on the typical white margin)."""
     h, w = original.shape[:2]
     bx, by, bw, bh = bbox
     x0 = max(0, bx)
@@ -48,9 +45,9 @@ def render(
 ) -> NDArray[np.uint8]:
     """Draw detections as polygons with a confidence/scale label.
 
-    Labels go above the bbox when there is room, otherwise below
-    (matching :func:`vrcpilot.ocr.render`). The input image is left
-    untouched; a fresh copy is returned.
+    Labels sit above the bbox when there is room, otherwise below
+    (matching :func:`vrcpilot.ocr.render`). The screenshot is not
+    mutated; a fresh copy is returned.
     """
     original = result.screenshot.image
     canvas: NDArray[np.uint8] = original.copy()

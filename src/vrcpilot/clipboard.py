@@ -26,13 +26,11 @@ def paste(text: str, *, focus: bool = True) -> None:
 
     The brief sleep between copy and paste is load-bearing: on Linux,
     xclip / xsel take selection ownership asynchronously, so an
-    immediate Ctrl+V can paste the *previous* clipboard contents.
-    ``focus`` is forwarded to :func:`vrcpilot.controls.keyboard.press`;
-    pass ``False`` only inside loops that have already verified the
+    immediate Ctrl+V can paste the *previous* clipboard contents. Pass
+    ``focus=False`` only inside loops that have already verified the
     target window is foreground. Raises
-    :class:`pyperclip.PyperclipException` when the clipboard backend is
-    missing (e.g. no ``xclip`` / ``xsel`` on Linux) -- CLI callers wrap
-    this for user-facing reporting.
+    :class:`pyperclip.PyperclipException` when the clipboard backend
+    is missing (e.g. no ``xclip`` / ``xsel`` on Linux).
     """
     pyperclip.copy(text)
     time.sleep(_CLIPBOARD_SETTLE)

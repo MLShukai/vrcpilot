@@ -1,19 +1,8 @@
-"""``vrcpilot mic`` subcommand.
+"""``vrcpilot mic`` subcommand: stream PCM into the virtual mic.
 
-Stream float32 PCM into a virtual mic device (VB-Cable on Windows,
-the ``VRCPilotMic`` PipeWire null-sink on Linux). Reads from a WAV
-file (``-i path.wav``) or raw ``s16le`` over stdin so upstream tools
-such as ``ffmpeg -f s16le ...`` or a Python LLM-TTS pipeline can pipe
-audio directly into VRChat's mic.
-
-Exit codes:
-    * ``0`` -- playback completed.
-    * ``1`` -- recoverable runtime failure: device lookup miss
-      (:class:`~vrcpilot.mic.MicDeviceNotFoundError`), unsupported WAV
-      (sampwidth != 2), or a soundcard / libpulse / WASAPI failure
-      (``ImportError`` / ``OSError`` / ``RuntimeError``).
-    * ``2`` -- bad argument combination (no input on a tty, ``auto``
-      format against a non-WAV extension).
+Accepts a WAV file (``-i path.wav``) or raw ``s16le`` over stdin so
+upstream tools (ffmpeg, TTS pipelines, ...) can pipe audio into
+VRChat's mic. Exit codes: 0 ok, 1 runtime failure, 2 bad argument shape.
 """
 
 from __future__ import annotations

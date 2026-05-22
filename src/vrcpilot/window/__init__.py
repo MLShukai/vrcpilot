@@ -1,8 +1,8 @@
 """VRChat window z-order control (focus / unfocus / is_foreground).
 
-Windows and Linux (X11 / XWayland). Native Wayland is unsupported -
-``focus()`` / ``unfocus()`` / ``is_foreground()`` warn and return
-``False``.
+Supported on Windows and Linux (X11 / XWayland). Native Wayland sessions
+emit :class:`RuntimeWarning` and return ``False`` from every entry point,
+since EWMH activation primitives are not exposed there.
 """
 
 from __future__ import annotations
@@ -11,20 +11,15 @@ import sys
 
 
 def focus() -> bool:
-    """Bring the running VRChat window to the foreground.
+    """Bring the running VRChat window to the foreground, restoring it if
+    minimized.
 
-    Restored if minimized (Win32 ``ShowWindow(SW_RESTORE)``; on X11 an
-    EWMH window manager typically deminimizes in response to
-    ``_NET_ACTIVE_WINDOW``). Only meaningful in Desktop mode — VR
-    exclusive mode has no desktop window to surface.
-
-    Raises:
-        NotImplementedError: Platform other than Windows or Linux.
-
-    Returns:
-        ``True`` on success. ``False`` when VRChat is not running, the
-        window cannot be located, the platform call fails, or the
-        session is native Wayland (also emits :class:`RuntimeWarning`).
+    Only meaningful in Desktop mode — VR exclusive mode has no desktop
+    window to surface. Returns ``False`` (rather than raising) when
+    VRChat is not running, the window cannot be located, the platform
+    call fails, or the session is native Wayland (which also emits
+    :class:`RuntimeWarning`). Raises ``NotImplementedError`` on
+    platforms other than Windows or Linux.
     """
     if sys.platform == "win32":
         from .windows import focus_window as _impl
@@ -38,16 +33,13 @@ def focus() -> bool:
 
 
 def is_foreground() -> bool:
-    """Return ``True`` when the running VRChat window is foreground.
+    """Return whether VRChat currently owns the foreground window.
 
-    Raises:
-        NotImplementedError: Platform other than Windows or Linux.
-
-    Returns:
-        ``True`` when VRChat owns the foreground window. ``False`` when
-        VRChat is not running, the window cannot be located, the
-        platform call fails, or the session is native Wayland (also
-        emits :class:`RuntimeWarning`).
+    Returns ``False`` (rather than raising) when VRChat is not running,
+    the window cannot be located, the platform call fails, or the
+    session is native Wayland (which also emits
+    :class:`RuntimeWarning`). Raises ``NotImplementedError`` on
+    platforms other than Windows or Linux.
     """
     if sys.platform == "win32":
         from .windows import is_window_foreground as _impl
@@ -61,18 +53,15 @@ def is_foreground() -> bool:
 
 
 def unfocus() -> bool:
-    """Send the running VRChat window to the bottom of the z-order.
+    """Send the running VRChat window to the bottom of the z-order, leaving
+    input focus where the caller had it.
 
-    Unlike minimizing, no other window is activated, so input focus
-    stays where the caller had it.
-
-    Raises:
-        NotImplementedError: Platform other than Windows or Linux.
-
-    Returns:
-        ``True`` on success. ``False`` when VRChat is not running, the
-        window cannot be located, the platform call fails, or the
-        session is native Wayland (also emits :class:`RuntimeWarning`).
+    Useful for hiding VRChat without minimizing — no other window is
+    activated. Returns ``False`` (rather than raising) when VRChat is
+    not running, the window cannot be located, the platform call fails,
+    or the session is native Wayland (which also emits
+    :class:`RuntimeWarning`). Raises ``NotImplementedError`` on
+    platforms other than Windows or Linux.
     """
     if sys.platform == "win32":
         from .windows import unfocus_window as _impl

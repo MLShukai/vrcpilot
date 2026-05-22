@@ -1,5 +1,7 @@
 # Python API Reference
 
+**English** | [日本語](python-api.ja.md)
+
 This is a hand-curated reference for every symbol exposed at `vrcpilot.<name>`. For runnable examples see [`usage.md`](usage.md); for the equivalent CLI see [`cli.md`](cli.md). Function signatures match the source as of `0.2.0rc1`.
 
 ## Conventions

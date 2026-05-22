@@ -1,10 +1,7 @@
 """Cross-platform :class:`MouseButton` enum and :class:`Mouse` ABC.
 
-Lives in its own module so the platform-specific backends
-(:mod:`vrcpilot.controls.mouse.windows`,
-:mod:`vrcpilot.controls.mouse.linux`) can import it without dragging
-each other in. The dispatcher in :mod:`vrcpilot.controls.mouse`
-imports the right backend lazily on first use.
+Lives in its own module so platform backends can import it without
+dragging each other in.
 """
 
 from __future__ import annotations
@@ -21,13 +18,9 @@ from vrcpilot.geometry import get_vrchat_window_rect
 class MouseButton(StrEnum):
     """Mouse button identifiers.
 
-    Values are the lower-case strings ``pydirectinput`` expects on its
-    ``button=`` kwarg, so the Win32 backend forwards ``button.value``
-    straight through. The Linux backend maps each member via
-    :data:`vrcpilot.controls.mouse.linux._BUTTON_MAP`. Being a
-    :class:`enum.StrEnum`, members compare equal to their string value,
-    which lets ``argparse(type=MouseButton)`` accept ``left`` /
-    ``right`` / ``middle`` directly from the CLI.
+    Values are the lower-case strings ``pydirectinput`` expects, which
+    also lets ``argparse(type=MouseButton)`` accept ``left`` / ``right``
+    / ``middle`` directly from the CLI.
     """
 
     LEFT = "left"
@@ -43,24 +36,16 @@ class Mouse(ABC):
     ) -> None:
         """Move the cursor.
 
-        With ``relative=False`` (default), ``(x, y)`` are VRChat
-        window-local pixels: ``(0, 0)`` is the top-left of the VRChat
-        window. This lets coordinates from
-        :func:`vrcpilot.ocr.ocr` / :func:`vrcpilot.detect.detect` feed
-        straight in without translation.
+        Default is VRChat window-local pixels (``(0, 0)`` = window
+        top-left), so coordinates from :func:`vrcpilot.ocr.ocr` /
+        :func:`vrcpilot.detect.detect` feed in directly. With
+        ``relative=True``, ``(x, y)`` are deltas and the window is not
+        consulted. Out-of-window coordinates are forwarded as-is, never
+        clamped — drag gestures and off-screen parking rely on that.
 
-        With ``relative=True``, ``(x, y)`` are mouse deltas and the
-        VRChat window is not consulted.
-
-        Out-of-window coordinates are forwarded to the OS as-is rather
-        than clamped — callers driving drag gestures or off-screen
-        parking rely on that pass-through.
-
-        Raises:
-            VRChatNotRunningError: ``relative=False`` and the VRChat
-                window cannot be located, so window-local coordinates
-                cannot be resolved. ``focus=False`` does not suppress
-                this — the lookup is required to interpret ``(x, y)``.
+        Raises :class:`VRChatNotRunningError` when ``relative=False``
+        and the VRChat window cannot be located (``focus=False`` does
+        not suppress this — the lookup is needed to interpret ``(x, y)``).
         """
         if focus:
             ensure_target()
@@ -71,11 +56,10 @@ class Mouse(ABC):
         self._do_move(dx, dy, relative=False)
 
     def _to_desktop(self, x: int, y: int) -> tuple[int, int]:
-        """Translate VRChat window-local ``(x, y)`` to desktop pixels.
+        """Translate window-local ``(x, y)`` to desktop pixels.
 
-        Raises :class:`VRChatNotRunningError` when the VRChat window
-        cannot be located, since the translation has no defined answer
-        without a window origin.
+        Raises :class:`VRChatNotRunningError` when the window cannot
+        be located, since the translation is undefined without an origin.
         """
         rect = get_vrchat_window_rect()
         if rect is None:
@@ -92,18 +76,12 @@ class Mouse(ABC):
         duration: float = 0.0,
         focus: bool = True,
     ) -> None:
-        """Click one or more buttons simultaneously, ``count`` times.
+        """Click ``buttons`` simultaneously, repeated ``count`` times.
 
-        ``buttons`` are pressed left-to-right, held for ``duration``
-        seconds (skipped when ``duration == 0``), then released in
-        reverse order. The combo is repeated ``count`` times back-to-back
-        with no inter-cycle delay. ``duration`` is the down-to-up hold
-        per cycle in seconds; use ``0.02``-``0.05`` when VRChat / Unity
-        drops zero-length presses.
-
-        Calling ``click()`` with no ``buttons`` is treated as
-        ``click(MouseButton.LEFT)`` for back-compat with the previous
-        single-button signature.
+        ``duration`` is the per-cycle hold in seconds; use 0.02 – 0.05
+        when VRChat / Unity drops zero-length presses. Cycles run
+        back-to-back with no inter-cycle delay. Empty ``buttons``
+        defaults to :attr:`MouseButton.LEFT`.
         """
         if focus:
             ensure_target()
@@ -118,10 +96,10 @@ class Mouse(ABC):
                 self._do_release(b)
 
     def press(self, *buttons: MouseButton, focus: bool = True) -> None:
-        """Press and hold one or more buttons until a matching :meth:`release`.
+        """Press and hold ``buttons`` until a matching :meth:`release`.
 
-        Buttons are pressed left-to-right. Empty argument list falls
-        back to :attr:`MouseButton.LEFT` for back-compat.
+        Half-action; only valid within a single Python process. Empty
+        ``buttons`` defaults to :attr:`MouseButton.LEFT`.
         """
         if focus:
             ensure_target()
@@ -131,11 +109,10 @@ class Mouse(ABC):
             self._do_press(b)
 
     def release(self, *buttons: MouseButton, focus: bool = True) -> None:
-        """Release one or more buttons previously held with :meth:`press`.
+        """Release buttons previously held with :meth:`press`.
 
-        Buttons are released in reverse order so a paired ``press(*bs)``
-        / ``release(*bs)`` follows LIFO stack semantics. Empty argument
-        list falls back to :attr:`MouseButton.LEFT` for back-compat.
+        Reversed release order makes ``press(*bs)`` / ``release(*bs)``
+        LIFO. Empty ``buttons`` defaults to :attr:`MouseButton.LEFT`.
         """
         if focus:
             ensure_target()

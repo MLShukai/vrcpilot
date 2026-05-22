@@ -1,21 +1,9 @@
-"""``vrcpilot paste`` subcommand.
+"""``vrcpilot paste`` subcommand: clipboard + Ctrl+V into VRChat.
 
-Thin CLI wrapper over :func:`vrcpilot.clipboard.paste`. Reads the text
-to paste from a positional argument or, when omitted, from stdin -- the
-stdin fallback exists so callers can avoid shell-quoting headaches and
-pipe multi-line text directly (``cat msg.txt | vrcpilot paste``). Both
-:class:`~vrcpilot.controls.VRChatNotRunningError` /
-:class:`~vrcpilot.controls.VRChatNotFocusedError` (raised by the keyboard
-focus guard) and :class:`pyperclip.PyperclipException` (raised when the
-clipboard backend is missing or busy) are caught and reported as a
-single ``vrcpilot: <message>`` line on stderr with exit ``1``.
-
-Exit codes:
-    * ``0`` -- paste succeeded (silent on stdout/stderr).
-    * ``1`` -- VRChat guard failure or clipboard backend error.
-    * ``2`` -- no text supplied: positional omitted AND stdin is a tty.
-      Without the tty check, an interactive ``vrcpilot paste`` would
-      block on ``sys.stdin.read()`` waiting for EOF.
+Text comes from the positional arg or piped stdin (the stdin fallback
+avoids shell-quoting hassles for multi-line text). Exit codes: 0 ok, 1
+guard or clipboard backend failure, 2 no text supplied (positional
+omitted and stdin is a tty, where reading would block forever).
 """
 
 from __future__ import annotations

@@ -1,5 +1,7 @@
 # Usage Guide
 
+**English** | [日本語](usage.ja.md)
+
 This guide walks through the practical loop for driving VRChat with `vrcpilot`: launch, observe, act, and verify. For flag-by-flag details see [`cli.md`](cli.md); for the equivalent Python API see [`python-api.md`](python-api.md).
 
 The examples target Linux with X11 (or XWayland). The same flow works on Windows after dropping the `.env` setup in [Section 1](#1-load-environment-once-per-shell).

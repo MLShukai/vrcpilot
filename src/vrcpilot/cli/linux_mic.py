@@ -1,14 +1,8 @@
 """``vrcpilot linux-mic`` subcommand: manage the PipeWire virtual mic.
 
-Wraps :mod:`vrcpilot.mic.linux` with three actions: ``register``
-(persist + live load), ``unregister`` (remove + live unload), and
-``status`` (config / runtime module / soundcard visibility). The
-parent-subparser shape matches :mod:`vrcpilot.cli.osc`.
-
-The top-level CLI only registers ``linux-mic`` when
-``sys.platform == "linux"``; on other platforms this module is never
-imported. The defensive ``ImportError`` guard below makes a direct
-``import vrcpilot.cli.linux_mic`` off-Linux fail loudly.
+Linux-only; importing this module on any other platform raises
+:class:`ImportError`. The top-level CLI only wires the subcommand in
+when ``sys.platform == "linux"``.
 """
 
 from __future__ import annotations
@@ -229,10 +223,8 @@ def _run_status() -> int:
 def run(args: argparse.Namespace) -> int:
     """Dispatch the requested ``linux-mic`` action.
 
-    Reaching this function already implies ``sys.platform == "linux"``
-    because :mod:`vrcpilot.cli` only registers ``linux-mic`` in
-    ``_COMMANDS`` on Linux and this module's import-time guard would
-    have raised :class:`ImportError` otherwise.
+    Reaching this function implies Linux: the module's import guard
+    would have raised on any other platform.
     """
     match args.action:
         case "register":

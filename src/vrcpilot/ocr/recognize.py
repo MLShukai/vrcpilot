@@ -1,23 +1,15 @@
 """High-level :func:`ocr` helper and the :class:`OCRResult` value type.
 
-:class:`OCRResult` ties a :class:`Screenshot` to the
-:class:`OCRWord` list produced by an :class:`OCREngine`. All
-coordinates exposed by :class:`OCRWord` are window-local (origin =
-``screenshot`` top-left).
+Capture and OCR are kept separate: the caller passes a
+:class:`Screenshot` (usually from
+:func:`vrcpilot.screenshot.take_screenshot`, but any source works) and
+this module just runs the engine. All resulting :class:`OCRWord`
+coordinates are window-local (origin = ``screenshot`` top-left).
 
-:func:`ocr` is a thin pure-OCR step: the caller supplies the
-:class:`Screenshot` (typically from
-:func:`vrcpilot.screenshot.take_screenshot`), and this function only
-runs the engine and packages the result. Capture and OCR are kept as
-separate concerns so the same OCR pipeline can be replayed against
-existing images, fed cropped regions, or driven by a custom capture
-source.
-
-The module-level ``_default_engine`` cache keeps :func:`ocr` cheap on
-repeat calls: the (heavy) :class:`RapidOCREngine` is built exactly
-once per process when the user does not pass an ``engine`` argument.
-Tests that need a fresh cache should reset the variable explicitly
-(``vrcpilot.ocr.recognize._default_engine = None``).
+The default :class:`RapidOCREngine` is heavy, so it is built once per
+process and cached in ``_default_engine``. Tests that need a fresh
+cache must reset it explicitly:
+``vrcpilot.ocr.recognize._default_engine = None``.
 """
 
 from __future__ import annotations
@@ -34,18 +26,11 @@ from .rapidocr import RapidOCREngine
 class OCRResult:
     """Captured screenshot bundled with its OCR detections.
 
-    ``eq=False`` mirrors :class:`vrcpilot.screenshot.Screenshot`:
-    ``screenshot.image`` is a numpy ``ndarray`` and element-wise
-    ``__eq__`` cannot back the dataclass-synthesised equality.
-
-    Attributes:
-        screenshot: The :class:`Screenshot` the words were extracted
-            from.
-        words: Detected :class:`OCRWord` tuple. All word coordinates
-            (``polygon`` / ``bbox``) are window-local (origin =
-            ``screenshot`` top-left). Always a ``tuple`` so the
-            sequence is immutable from the caller's point of view
-            (matches the frozen-dataclass posture of :class:`OCRWord`).
+    ``words`` coordinates are window-local (origin = ``screenshot``
+    top-left); ``words`` is a tuple to keep the sequence immutable in
+    line with :class:`OCRWord`'s frozen-dataclass posture. ``eq=False``
+    mirrors :class:`vrcpilot.screenshot.Screenshot`: the underlying
+    ndarray cannot back the dataclass-synthesized ``__eq__``.
     """
 
     screenshot: Screenshot
@@ -56,12 +41,11 @@ _default_engine: OCREngine | None = None
 
 
 def _get_default_engine() -> OCREngine:
-    """Return the cached default :class:`OCREngine`, building it if needed.
+    """Return the process-wide cached :class:`RapidOCREngine`, building it
+    lazily.
 
-    The first call constructs a :class:`RapidOCREngine`; subsequent
-    calls reuse the cached instance. Not thread-safe — the project
-    runs in a single context, so the worst case under racy access is
-    a transient duplicate engine that is immediately replaced.
+    Not thread-safe; under racy access the worst case is a transient
+    duplicate engine that is immediately replaced.
     """
     global _default_engine
     if _default_engine is None:
@@ -76,23 +60,11 @@ def ocr(
 ) -> OCRResult:
     """Run OCR on *screenshot* and bundle the words with it.
 
-    The caller is responsible for capture; pass any
-    :class:`Screenshot` (typically from
-    :func:`vrcpilot.screenshot.take_screenshot`, but a hand-built one
-    or a replayed capture works just as well).
-
-    Args:
-        screenshot: Image to recognise. ``screenshot.image`` is fed
-            to the engine and the :class:`Screenshot` is preserved on
-            the returned :class:`OCRResult` so callers retain the
-            capture metadata (``captured_at``, ``x`` / ``y`` offsets).
-        engine: OCR backend. ``None`` (default) lazily builds and
-            caches a :class:`RapidOCREngine` via
-            :func:`_get_default_engine`.
-
-    Returns:
-        :class:`OCRResult` pairing *screenshot* with the detected
-        words (possibly empty). Never returns ``None``.
+    Capture is the caller's job — pass any :class:`Screenshot` (live
+    capture, hand-built, or replayed). The original
+    :class:`Screenshot` is preserved on the result so capture metadata
+    (``captured_at``, ``x`` / ``y`` offsets) survives the round trip.
+    ``engine=None`` reuses the cached default :class:`RapidOCREngine`.
     """
     if engine is None:
         engine = _get_default_engine()

@@ -1,14 +1,10 @@
 """Render an :class:`OCRResult` onto a copy of its screenshot image.
 
-The output is an RGB ``uint8`` ndarray; callers typically save it via
-``PIL.Image.fromarray(...)``. The screenshot image inside the result is
-**not** mutated — :func:`render` always works on a fresh copy.
-
-Auto-contrast: when ``text_color`` is left ``None``, each word picks
-its own colour by sampling the original (pre-draw) bbox patch. A
-mostly-bright background gets black text, a mostly-dark background
-gets white. This avoids producing unreadable white-on-white or
-black-on-black overlays without forcing the caller to think about it.
+The output is an RGB ``uint8`` ndarray suitable for
+``PIL.Image.fromarray``; the screenshot inside the result is never
+mutated. When ``text_color`` is ``None`` each word picks black or
+white by sampling its pre-draw bbox luminance, avoiding unreadable
+white-on-white / black-on-black overlays without caller involvement.
 """
 
 from __future__ import annotations
@@ -26,10 +22,8 @@ def _decide_text_color(
 ) -> tuple[int, int, int]:
     """Pick black or white based on the mean luminance of *bbox*.
 
-    The patch is clipped to the image bounds; a fully-out-of-bounds bbox
-    yields an empty slice, which we treat as a bright background (mean =
-    255) so the resulting text is black. This matches the "default to
-    readable on white" intuition when no signal exists.
+    A bbox fully outside the image is treated as bright (black text),
+    matching the "readable on white" default when no signal exists.
     """
     h, w = original.shape[:2]
     bx, by, bw, bh = bbox
@@ -57,28 +51,12 @@ def render(
 ) -> NDArray[np.uint8]:
     """Draw OCR detections onto a copy of the screenshot image.
 
-    Each :class:`~vrcpilot.ocr.OCRWord` in ``result.words`` is rendered
-    as a polygon outline in ``box_color`` plus the recognised text
-    placed just above the bounding box (or just below, when the text
-    would otherwise go off the top of the image).
-
-    Args:
-        result: OCR result whose ``screenshot.image`` provides the
-            background and whose ``words`` are drawn on top.
-        box_color: RGB triple used for the polygon outline. The image
-            is treated as RGB end-to-end, so passing ``(0, 255, 0)``
-            yields green strokes when saved via
-            ``PIL.Image.fromarray``.
-        text_color: RGB triple for the text. ``None`` (default) picks
-            black or white per word based on the underlying patch's
-            mean luminance.
-        font_scale: ``cv2.putText`` font scale.
-        thickness: Stroke thickness for both polygon and text.
-
-    Returns:
-        ``(H, W, 3)`` ``uint8`` RGB ndarray with the same shape and
-        dtype as ``result.screenshot.image``. The input image is left
-        untouched.
+    Each word becomes a polygon outline in ``box_color`` plus its text
+    placed just above the bbox (or just below when the top edge has no
+    room). Colors are RGB end-to-end, so ``(0, 255, 0)`` saves as green
+    via ``PIL.Image.fromarray``. ``text_color=None`` picks black or
+    white per word from the underlying patch luminance. The input
+    image is never mutated.
     """
     original = result.screenshot.image
     canvas: NDArray[np.uint8] = original.copy()

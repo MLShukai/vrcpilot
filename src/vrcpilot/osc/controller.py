@@ -1,12 +1,7 @@
 """VRChat OSC input-controller view.
 
-Thin wrapper around :class:`vrcpilot.osc.sender.OscSender` that exposes
-every ``/input/*`` and ``/chatbox/*`` address documented at
-<https://docs.vrchat.com/docs/osc-as-input-controller> as a typed
-method. All sends delegate back to the underlying sender so socket
-ownership and value normalization stay in one place.
-
-Buttons are split into three flavors:
+Exposes every ``/input/*`` and ``/chatbox/*`` address documented at
+<https://docs.vrchat.com/docs/osc-as-input-controller> in three flavors:
 
 * **Axes** — float in ``[-1.0, 1.0]`` (validated by ``send_float``).
 * **Tap** — single-shot ``1 -> sleep(button_hold) -> 0`` transitions.
@@ -27,11 +22,9 @@ CHATBOX_MAX_LENGTH: Final[int] = 144
 class InputController:
     """OSC input-controller view bound to a single :class:`OscSender`.
 
-    ``button_hold`` controls how long a tap stays in the "pressed"
-    state; set it to ``0.0`` to skip the sleep entirely (the off
-    message still fires). Negative values are rejected eagerly so the
-    misconfiguration surfaces at construction time, not on the first
-    tap.
+    ``button_hold`` is the seconds a tap stays "pressed"; ``0.0`` skips
+    the sleep (the off message still fires). Negative values are
+    rejected at construction time, not on the first tap.
     """
 
     def __init__(self, sender: sender.OscSender, *, button_hold: float = 0.05) -> None:
@@ -138,11 +131,8 @@ class InputController:
         self._hold("/input/Run", active)
 
     def hold_voice(self, active: bool = True) -> None:
-        """Press/release ``/input/Voice`` for push-to-mute use cases.
-
-        Coexists with :meth:`voice` because VRChat exposes both toggle
-        and push modes; the caller picks which behavior they need.
-        """
+        """Press/release ``/input/Voice`` for push-to-mute (vs toggle
+        :meth:`voice`)."""
         self._hold("/input/Voice", active)
 
     def move_forward(self, active: bool = True) -> None:
@@ -190,10 +180,9 @@ class InputController:
     def chatbox(self, text: str, *, send: bool = True, sfx: bool = True) -> None:
         """Post ``text`` to the in-game chatbox via ``/chatbox/input``.
 
-        ``send=True`` posts immediately; ``send=False`` only places the
-        text in the input field. ``sfx`` controls the notification
-        sound. Text longer than :data:`CHATBOX_MAX_LENGTH` characters
-        is rejected to mirror VRChat's own limit.
+        ``send=False`` only fills the input field. ``sfx`` toggles the
+        notification sound. Text over :data:`CHATBOX_MAX_LENGTH` is
+        rejected to mirror VRChat's own limit.
         """
         if len(text) > CHATBOX_MAX_LENGTH:
             raise ValueError(

@@ -1,9 +1,8 @@
 """VRChat OSC send-side client.
 
-Wraps a single ``python-osc`` :class:`SimpleUDPClient` and provides the
-typed low-level send primitives plus factories for the higher-level
-``InputController`` / ``AvatarParameters`` views (which delegate back
-into the same sender to keep one socket and one validation path).
+Owns the single ``python-osc`` socket and exposes typed send primitives
+plus factories for :class:`InputController` / :class:`AvatarParameters`,
+which delegate back here to share one validation path.
 """
 
 from __future__ import annotations
@@ -24,9 +23,8 @@ FLOAT_RANGE: tuple[float, float] = (-1.0, 1.0)
 class OscSender:
     """Single-socket OSC client for VRChat.
 
-    Construct with the host/port VRChat is listening on; defaults match
-    a local VRChat with factory OSC settings. Inject ``client`` to
-    bypass UDP construction in tests.
+    Defaults target a local VRChat with factory OSC settings. Inject
+    ``client`` to bypass UDP construction in tests.
 
     Typical usage::
 
@@ -63,11 +61,7 @@ class OscSender:
         self._client.send_message(address, value)
 
     def send_bool(self, address: str, value: bool) -> None:
-        """Send ``int(bool(value))`` (VRChat's 0/1 integer convention).
-
-        VRChat input-controller buttons expect an OSC int tag, not a
-        bool tag, so ``bool`` is converted explicitly here.
-        """
+        """Send ``value`` as an OSC int tag (VRChat rejects the bool tag)."""
         self._client.send_message(address, int(bool(value)))
 
     def send_int(self, address: str, value: int) -> None:

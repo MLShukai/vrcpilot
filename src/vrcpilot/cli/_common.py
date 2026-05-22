@@ -18,26 +18,19 @@ type SubParsersAction = argparse._SubParsersAction[argparse.ArgumentParser]  # p
 
 
 def attach_completer(action: argparse.Action, completer: object) -> None:
-    """Attach an ``argcomplete`` completer to an argparse ``Action``.
+    """Attach an ``argcomplete`` completer to ``action``.
 
-    ``argcomplete`` reads ``action.completer`` at completion time but
-    argparse itself does not declare the attribute, so a direct
-    assignment trips ``reportAttributeAccessIssue`` under pyright
-    strict. Routing through ``setattr`` keeps that noise out of
-    the subparser registration sites.
+    ``argcomplete`` reads ``action.completer`` dynamically; routing via
+    ``setattr`` keeps pyright-strict noise off the registration sites.
     """
     setattr(action, "completer", completer)  # noqa: B010 - argcomplete's documented hook
 
 
 def add_screenshot_input_arg(parser: argparse.ArgumentParser) -> None:
-    """Register ``--screenshot <yaml-path>`` on ``parser``.
+    """Register the shared ``-s/--screenshot <yaml>`` input flag.
 
-    Subcommands that operate on a :class:`~vrcpilot.screenshot.Screenshot`
-    use this to opt into the shared input-resolution contract handled by
-    :func:`resolve_screenshot`. No short form is exposed so future
-    subcommand-local flags (notably ``vrcpilot detect``'s query options)
-    can claim ``-s`` without colliding. The completer offers
-    ``.yaml`` / ``.yml`` files plus directories.
+    Pair with :func:`resolve_screenshot` so subcommands consume
+    screenshots through one contract (file flag or piped stdin).
     """
     action = parser.add_argument(
         "-s",
@@ -57,22 +50,13 @@ def add_screenshot_input_arg(parser: argparse.ArgumentParser) -> None:
 
 
 def resolve_screenshot(args: argparse.Namespace) -> Screenshot | None:
-    """Resolve a :class:`Screenshot` from CLI args or piped stdin.
+    """Resolve a :class:`Screenshot` from ``--screenshot`` or piped stdin.
 
-    Priority order:
-
-    1. ``args.screenshot`` (set by :func:`add_screenshot_input_arg`) — read
-       the YAML file from disk and decode via :meth:`Screenshot.load`.
-    2. Piped stdin (``not sys.stdin.isatty()``) — read the YAML text from
-       stdin and decode via :meth:`Screenshot.load`.
-
-    When ``--screenshot`` is given, stdin is *not* read even if it is
-    piped (the flag takes precedence and the stdin payload is silently
-    ignored). Pass exactly one source per invocation to avoid surprises.
-
-    If neither is available (no flag and stdin is a tty), an explanatory
-    message is written to stderr and ``None`` is returned. Callers
-    typically map ``None`` to ``return 1``.
+    ``--screenshot`` wins over stdin when both are present (the stdin
+    payload is silently ignored). Returns ``None`` after writing a
+    ``vrcpilot: ...`` stderr line on every failure mode (missing file,
+    bad YAML, or no source at all); callers typically map that to
+    ``return 1``.
     """
     screenshot_arg: Path | None = getattr(args, "screenshot", None)
     if screenshot_arg is not None:

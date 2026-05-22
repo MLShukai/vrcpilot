@@ -90,8 +90,8 @@ class X11CaptureBackend(CaptureBackend):
 
     @override
     def read(self) -> np.ndarray:
-        """Re-grab the window pixmap through Composite and return RGB
-        ndarray."""
+        """Re-grab the window pixmap through Composite and return an RGB
+        frame."""
         try:
             geom = self._window.get_geometry()
             width = int(geom.width)

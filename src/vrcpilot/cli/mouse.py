@@ -1,19 +1,9 @@
-"""``vrcpilot mouse`` subcommand.
+"""``vrcpilot mouse`` subcommand (``move`` / ``click`` / ``scroll``).
 
-Thin CLI wrapper over :mod:`vrcpilot.controls.mouse`. Exposes
-``move`` / ``click`` / ``scroll`` -- all stateless one-shot actions
-that complete inside a single CLI invocation. ``press`` / ``release``
-are intentionally NOT exposed: each ``vrcpilot`` process opens and
-closes its own backend (``/dev/uinput`` on Linux), and the kernel
-auto-releases all held buttons when the virtual device is destroyed,
-so a separate ``press`` and ``release`` invocation cannot keep a
-button held. Mirrors the same trade-off applied to ``keyboard``
-(only ``press`` is exposed there for the same reason).
-
-The :data:`mouse_api` alias below is a stable patch target: tests bind
-their fakes by patching ``vrcpilot.controls.mouse._get`` so the real
-public ``mouse.move`` / ``mouse.click`` / ``mouse.scroll`` flow through
-to a recording :class:`~vrcpilot.controls.mouse.Mouse` impl.
+``press`` / ``release`` are intentionally not exposed: each CLI
+invocation owns its own ``/dev/uinput`` device on Linux and the kernel
+auto-releases held buttons when that device closes, so cross-process
+holds cannot work (same trade-off as :mod:`vrcpilot.cli.keyboard`).
 """
 
 from __future__ import annotations
@@ -90,16 +80,7 @@ def register(subparsers: SubParsersAction) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
-    """Execute the ``mouse`` subcommand.
-
-    Silent on success. Guard failures (VRChat not running / not focused)
-    print a single ``vrcpilot: <message>`` line to stderr and return
-    exit 1. The action dispatch uses ``args.mouse_action`` set by the
-    sub-subparser.
-
-    Returns:
-        ``0`` on success, ``1`` on guard failure.
-    """
+    """Dispatch ``mouse {move,click,scroll}``; exit 1 on guard failure."""
     try:
         match args.mouse_action:
             case "move":

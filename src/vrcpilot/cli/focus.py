@@ -19,15 +19,10 @@ def register(subparsers: SubParsersAction) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
-    """Execute the ``focus`` subcommand.
+    """Run ``focus``; silent on success, exit 1 on any failure.
 
-    Silent on success so callers can ``vrcpilot focus && ...`` without
-    parsing stdout. On failure, a single ``vrcpilot: ...`` line is
-    written to stderr.
-
-    Returns:
-        ``0`` on success, ``1`` on any failure (VRChat not running,
-        window unavailable, native Wayland).
+    Failures (VRChat not running, no window, native Wayland) print one
+    ``vrcpilot: ...`` line to stderr.
     """
     del args
     if focus():
