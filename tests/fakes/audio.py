@@ -48,6 +48,19 @@ Stand-ins mirroring the speaker modality's public surface:
   class-level list, ``frames_per_start`` / ``init_side_effect``
   knobs).
 
+* :class:`FakeSoundCard` (with :class:`FakeSoundCardSpeaker` /
+  :class:`FakeSoundCardPlayer` / :class:`FakeSoundCardPlayerCM` /
+  :class:`FakeSoundCardMicrophone` / :class:`FakeSoundCardRecorder` /
+  :class:`FakeSoundCardRecorderCM`) is the module-shaped stand-in for
+  the :mod:`soundcard` package. Installed via ``mocker.patch.dict(
+  sys.modules, {"soundcard": FakeSoundCard()})`` so the lazy ``import
+  soundcard as sc`` inside :mod:`vrcpilot.mic.devices` and
+  :mod:`vrcpilot.mic.session` resolves here instead of touching real
+  libpulse / WASAPI.
+
+* :class:`FakeMic` is the CLI-side stand-in for
+  :class:`vrcpilot.mic.Mic` for ``vrcpilot.cli.mic`` tests.
+
 The fakes only implement methods production actually calls; the
 ``feedback_fakes_mirror_production`` rule in the project memory
 applies.
@@ -331,25 +344,19 @@ class FakePulse:
 
 
 class FakePulseRegistry:
-    """Hand out a fresh :class:`FakePulse` on every ``open_pulse_control``
-    call.
+    """Hand out a fresh :class:`FakePulse` per ``open_pulse_control`` call.
 
-    :class:`FakePulse.close` flips ``closed=True`` irreversibly (it
-    mirrors the real ``pulsectl.Pulse.close()`` contract that the
-    PipeWire speaker tests assert against), so test code that drives a
-    production path which opens *and* closes multiple control
-    connections back-to-back -- as ``vrcpilot.mic.linux``'s
-    ``register_virtual_mic`` + ``unregister_virtual_mic`` cycle does --
-    cannot reuse a single fake.
-
-    This registry produces a new :class:`FakePulse` per call, but
-    preserves the in-memory PulseAudio model
-    (``modules`` / ``next_module_id``) across calls so an
-    ``unregister`` after a prior ``register`` still sees the
-    null-sink the earlier connection loaded. The accumulated
-    :attr:`module_load_calls` / :attr:`module_unload_calls` lists span
-    every instance so assertions read the full scenario trace without
-    caring how many control connections the production code opened.
+    :class:`FakePulse.close` flips ``closed=True`` irreversibly (mirrors
+    real ``pulsectl.Pulse.close()``), so production paths that open
+    *and* close multiple control connections in sequence -- like
+    ``register_virtual_mic`` + ``unregister_virtual_mic`` --  cannot
+    reuse a single fake. This registry produces a new fake per call but
+    keeps the in-memory PulseAudio model (``modules`` /
+    ``next_module_id``) in sync across calls, so a later ``unregister``
+    still sees the null-sink an earlier connection loaded. The
+    aggregated :attr:`module_load_calls` / :attr:`module_unload_calls`
+    span every instance so assertions read the full scenario trace
+    without caring how many control connections production opened.
 
     Usage::
 
@@ -372,14 +379,13 @@ class FakePulseRegistry:
 
     @property
     def module_load_calls(self) -> list[tuple[str, str]]:
-        """Concatenated ``module_load`` trace across every handed-out
-        instance."""
+        """``module_load`` trace concatenated across every handed-out fake."""
         return [call for inst in self.instances for call in inst.module_load_calls]
 
     @property
     def module_unload_calls(self) -> list[int]:
-        """Concatenated ``module_unload`` trace across every handed-out
-        instance."""
+        """``module_unload`` trace concatenated across every handed-out
+        fake."""
         return [idx for inst in self.instances for idx in inst.module_unload_calls]
 
     def open(self, client_name: str = "vrcpilot-mic") -> FakePulse:
@@ -764,16 +770,13 @@ class FakeRawPcmStdoutSink:
 
 
 class FakeSoundCardPlayer:
-    """Stand-in for the ``_Player`` instance yielded by
-    :meth:`soundcard.pulseaudio._Speaker.player`'s context manager.
+    """Stand-in for the ``_Player`` yielded by ``_Speaker.player``'s CM.
 
     Captures every chunk passed to :meth:`play` in :attr:`writes` and
-    tracks lifecycle flags so tests can assert the player was closed
-    via the context manager's ``__exit__``.
-
-    Constructor arguments mirror the kwargs production code passes into
-    :meth:`FakeSoundCardSpeaker.player` so tests can assert each was
-    forwarded verbatim.
+    flips :attr:`closed` on CM ``__exit__`` so tests can assert
+    :meth:`Mic.close` released the resource. Constructor kwargs mirror
+    the ones :meth:`FakeSoundCardSpeaker.player` is called with so
+    tests can assert verbatim forwarding.
     """
 
     def __init__(
@@ -798,20 +801,18 @@ class FakeSoundCardPlayer:
         return total
 
     def play(self, chunk: NDArray[np.float32]) -> None:
-        """Record ``chunk`` exactly the way :meth:`Mic.play` forwards it."""
+        """Record ``chunk`` exactly the way :meth:`Mic.play` forwards it.
+
+        Raises:
+            RuntimeError: The enclosing CM has already exited.
+        """
         if self.closed:
             raise RuntimeError("play after close")
         self.writes.append(chunk)
 
 
 class FakeSoundCardPlayerCM:
-    """Context-manager half of :class:`FakeSoundCardSpeaker.player`.
-
-    Mirrors the protocol the real soundcard player exposes:
-    ``__enter__`` returns a :class:`FakeSoundCardPlayer` and
-    ``__exit__`` flips its ``closed`` flag so tests can confirm
-    :meth:`Mic.close` released the resource.
-    """
+    """Context-manager half of :meth:`FakeSoundCardSpeaker.player`."""
 
     def __init__(
         self,
@@ -840,15 +841,12 @@ class FakeSoundCardPlayerCM:
 class FakeSoundCardSpeaker:
     """Stand-in for :class:`soundcard.pulseaudio._Speaker`.
 
-    Exposes the duck-typed surface :func:`vrcpilot.mic.devices.lookup_speaker`
-    and :class:`vrcpilot.mic.session.Mic` read: ``name`` / ``id`` /
-    ``channels`` attributes and a ``player(samplerate, channels,
-    blocksize)`` factory that returns a context-manager whose
-    ``__enter__`` yields a :class:`FakeSoundCardPlayer`.
-
-    Each :meth:`player` call records the produced
-    :class:`FakeSoundCardPlayerCM` in :attr:`players` so tests can
-    inspect samplerate / channels / blocksize and the captured chunks.
+    Exposes the duck-typed surface
+    :func:`vrcpilot.mic.devices.lookup_speaker` and
+    :class:`vrcpilot.mic.session.Mic` read (``name`` / ``id`` /
+    ``channels`` + ``player(...)`` factory). Every :meth:`player` call
+    is recorded in :attr:`players` so tests can inspect the kwargs and
+    the chunks the resulting player captured.
     """
 
     def __init__(self, name: str, *, id: str | None = None, channels: int = 2) -> None:
@@ -872,13 +870,12 @@ class FakeSoundCardSpeaker:
 
 
 class FakeSoundCardRecorder:
-    """Stand-in for the recorder yielded by
-    :meth:`soundcard.pulseaudio._Microphone.recorder`'s context manager.
+    """Stand-in for the recorder yielded by ``_Microphone.recorder``'s CM.
 
     Backed by an in-memory FIFO of float32 chunks. Tests push samples
-    via :meth:`emit_samples`; production-style ``record(numframes)``
-    pops the next queued chunk or returns a zero-filled chunk when the
-    queue is empty (synchronous; never blocks).
+    via :meth:`emit_samples`; :meth:`record` pops the next queued chunk
+    or returns ``numframes`` of silence when the queue is empty. Never
+    blocks, so tests stay synchronous.
     """
 
     def __init__(
@@ -902,10 +899,11 @@ class FakeSoundCardRecorder:
     def record(self, numframes: int) -> NDArray[np.float32]:
         """Pop the next queued chunk or return ``numframes`` of silence.
 
-        Mirrors the soundcard pull-model recorder. The fake never
-        blocks so tests stay synchronous; if a test cares about the
-        exact frame count it should push a matching-sized chunk via
-        :meth:`emit_samples`.
+        Tests that care about the returned frame count should push a
+        matching-sized chunk via :meth:`emit_samples` first.
+
+        Raises:
+            RuntimeError: The enclosing CM has already exited.
         """
         if self.closed:
             raise RuntimeError("record after close")
@@ -948,10 +946,8 @@ class FakeSoundCardRecorderCM:
 class FakeSoundCardMicrophone:
     """Stand-in for :class:`soundcard.pulseaudio._Microphone`.
 
-    Mirrors :class:`FakeSoundCardSpeaker` on the input side; tests use
-    it from the e2e loopback scenario (Phase 2) and any future
-    integration that exercises a ``microphone.recorder()`` context
-    manager.
+    Input-side mirror of :class:`FakeSoundCardSpeaker`; used wherever a
+    test needs to drive a ``microphone.recorder()`` context manager.
     """
 
     def __init__(self, name: str, *, id: str | None = None, channels: int = 2) -> None:
@@ -980,22 +976,18 @@ class FakeSoundCard:
     Tests install an instance via ``mocker.patch.dict(sys.modules,
     {"soundcard": fake})`` so the lazy ``import soundcard as sc``
     inside :mod:`vrcpilot.mic.devices` and :mod:`vrcpilot.mic.session`
-    resolves to this fake instead of the real libpulse / WASAPI
-    binding. Only the surface :class:`vrcpilot.mic.Mic` actually
-    touches is modelled here; widen the stand-in when new soundcard
-    calls are added in production.
+    resolves here instead of touching real libpulse / WASAPI. Only the
+    surface :class:`vrcpilot.mic.Mic` and the e2e scenario actually
+    use is modelled; widen when production grows new soundcard calls.
 
-    Currently models:
+    Modelled API:
 
-    * :meth:`all_speakers` -- backs
-      :func:`vrcpilot.mic.devices.lookup_speaker`.
-    * :meth:`all_microphones` -- mirrors the input-side enumeration so
-      Phase 2 e2e tests have a parallel surface.
-    * :meth:`get_speaker` / :meth:`get_microphone` -- substring lookups
-      that raise ``LookupError`` on miss, matching the real
-      ``soundcard.get_speaker`` contract.
+    * :meth:`all_speakers` / :meth:`all_microphones` -- enumeration.
+    * :meth:`get_speaker` / :meth:`get_microphone` -- id-aware
+      substring lookup (matches the real ``get_speaker`` contract:
+      ``LookupError`` on miss).
     * :meth:`default_speaker` / :meth:`default_microphone` -- first
-      registered entry of each list, or ``LookupError`` if empty.
+      registered entry, or ``LookupError`` when none have been added.
     """
 
     def __init__(self) -> None:
@@ -1007,9 +999,9 @@ class FakeSoundCard:
     ) -> FakeSoundCardSpeaker:
         """Register an output device and return the created stand-in.
 
-        Returning the instance lets tests stash a reference for later
-        assertions against :attr:`FakeSoundCardSpeaker.players` without
-        threading the index through every helper.
+        Returning the instance lets tests keep a direct reference for
+        :attr:`FakeSoundCardSpeaker.players` assertions without
+        threading an index through every helper.
         """
         speaker = FakeSoundCardSpeaker(name, id=id, channels=channels)
         self.speakers.append(speaker)
@@ -1034,14 +1026,13 @@ class FakeSoundCard:
     def get_speaker(self, name: str) -> FakeSoundCardSpeaker:
         """Return the first speaker matching ``name`` by name or id.
 
-        Mirrors the real ``soundcard.get_speaker`` which matches against
-        both ``Speaker.name`` (case-insensitive substring) and
-        ``Speaker.id`` (exact match plus substring fallback). Without
-        id-aware matching the fake misses the
-        ``id="VRCPilotMic"`` / ``name="VRCPilot_Virtual_Mic"``
-        divergence PipeWire exposes for the null-sink, which is the
-        exact bug fixed in 8ed1b73. Raises :class:`LookupError` on miss
-        for parity.
+        Mirrors the real ``soundcard.get_speaker``: case-insensitive
+        substring on ``Speaker.name`` plus exact + substring fallback
+        on ``Speaker.id``. Without the id branch the fake misses the
+        PipeWire null-sink's ``id="VRCPilotMic"`` /
+        ``name="VRCPilot_Virtual_Mic"`` divergence -- the exact bug an
+        id-aware match fixed. Raises :class:`LookupError` on miss for
+        parity with soundcard.
         """
         needle = name.lower()
         for speaker in self.speakers:
@@ -1056,10 +1047,10 @@ class FakeSoundCard:
     def get_microphone(self, name: str) -> FakeSoundCardMicrophone:
         """Return the first microphone matching ``name`` by name or id.
 
-        Mirrors :meth:`get_speaker`'s id-aware match so the input side
-        stays symmetric (the PipeWire monitor source surfaces as
-        ``id="VRCPilotMic.monitor"`` with a description-derived
-        ``name``, which is the same divergence shape as the sink).
+        Symmetric with :meth:`get_speaker`: the PipeWire monitor source
+        surfaces as ``id="VRCPilotMic.monitor"`` with a
+        description-derived ``name``, the same divergence shape as the
+        sink. Raises :class:`LookupError` on miss.
         """
         needle = name.lower()
         for microphone in self.microphones:
@@ -1072,32 +1063,32 @@ class FakeSoundCard:
         raise LookupError(f"no microphone matches {name!r}")
 
     def default_speaker(self) -> FakeSoundCardSpeaker:
-        """Return the first registered speaker.
+        """First registered speaker; ``LookupError`` when none exist.
 
-        Raises ``LookupError`` when no speakers have been registered --
-        the closest fake-friendly analogue of soundcard surfacing
-        nothing when the host has no audio output.
+        Closest fake-friendly analogue of soundcard surfacing nothing
+        when the host has no audio output.
         """
         if not self.speakers:
             raise LookupError("no default speaker registered")
         return self.speakers[0]
 
     def default_microphone(self) -> FakeSoundCardMicrophone:
-        """Return the first registered microphone."""
+        """First registered microphone; ``LookupError`` when none exist."""
         if not self.microphones:
             raise LookupError("no default microphone registered")
         return self.microphones[0]
 
 
 class FakeMic:
-    """Stand-in for :class:`vrcpilot.mic.Mic` for CLI tests.
+    """Stand-in for :class:`vrcpilot.mic.Mic` in CLI tests.
 
     Mirrors the constructor-opens-stream / single-chunk-play /
-    explicit-close lifecycle so CLI integration tests can assert that
-    the right format was chosen, each chunk was forwarded, and the
-    session was released on the way out. Construction never raises;
-    the CLI's device-not-found path is exercised by patching ``Mic``
-    to raise on instantiation instead.
+    explicit-close lifecycle plus the public ``device_name`` /
+    ``device_id`` / ``sample_rate`` / ``channels`` properties so CLI
+    integration tests can assert the right format was chosen, every
+    chunk was forwarded, and the session was released on the way out.
+    Construction never raises; the device-not-found path is exercised
+    by patching ``Mic`` to raise on instantiation instead.
     """
 
     instances: list[FakeMic] = []

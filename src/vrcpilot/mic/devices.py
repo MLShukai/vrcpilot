@@ -1,10 +1,9 @@
 """Output-device resolution for the mic modality.
 
-OS-specific knowledge is confined here: the per-platform default
-device-name substring (only Windows + VB-Cable and Linux + PipeWire for
-now) and the lazy import of :mod:`soundcard`. :class:`vrcpilot.mic.Mic`
-and the CLI consume the resolved ``Speaker`` handle without touching
-either.
+Confines per-platform default-device knowledge (Windows + VB-Cable,
+Linux + PipeWire) and the lazy :mod:`soundcard` import to one module so
+:class:`vrcpilot.mic.Mic` and the CLI work with a resolved ``Speaker``
+handle without touching either concern.
 """
 
 from __future__ import annotations
@@ -31,21 +30,21 @@ _DEFAULT_DEVICE_BY_PLATFORM: Final[dict[str, str]] = {
 
 
 def default_device_name() -> str | None:
-    """Return the OS-specific default output-device substring.
+    """Return the OS-specific default output-device substring, or ``None``.
 
-    ``None`` on platforms without an established virtual-mic
-    convention; callers must then receive an explicit device name from
-    the user.
+    ``None`` on platforms without an established virtual-mic convention
+    (e.g. macOS); the caller is then responsible for surfacing the
+    "explicit device required" error to the user.
     """
     return _DEFAULT_DEVICE_BY_PLATFORM.get(sys.platform)
 
 
 def resolve_device_name(argument: str | None) -> str:
-    """Apply ``argument > $VRCPILOT_MIC_DEVICE > default_device_name()``.
+    """Resolve ``argument > $VRCPILOT_MIC_DEVICE > default_device_name()``.
 
     Raises:
-        MicDeviceNotFoundError: All three sources yield nothing (e.g.
-            on macOS without explicit configuration).
+        MicDeviceNotFoundError: All three sources yield nothing (the
+            macOS-without-config case).
     """
     if argument is not None:
         return argument
@@ -64,29 +63,28 @@ def resolve_device_name(argument: str | None) -> str:
 def lookup_speaker(name: str) -> Any:
     """Return the soundcard ``Speaker`` matching ``name``.
 
-    Delegates to :func:`soundcard.get_speaker`, which does a
-    case-insensitive substring (and fuzzy id) match and raises
-    :class:`LookupError` on miss. ``soundcard`` is imported lazily so
-    platforms without ``libpulse`` (Linux) or WASAPI (Windows) wired up
-    can still ``import vrcpilot.mic``. The return value is the
-    duck-typed ``_Speaker`` instance exposed by :mod:`soundcard`; it
-    carries ``id`` / ``name`` / ``channels`` attributes and a
-    ``player(samplerate, channels, blocksize=None)`` context-manager
-    factory that :class:`Mic` opens.
+    Delegates to :func:`soundcard.get_speaker` (case-insensitive
+    substring + fuzzy id). ``soundcard`` is imported lazily so the
+    package stays importable on hosts without libpulse / WASAPI; the
+    returned value is the duck-typed ``_Speaker`` instance exposing
+    ``id`` / ``name`` / ``channels`` / ``player(...)``.
 
     Raises:
-        MicDeviceNotFoundError: ``soundcard`` reports no match; the
-            message lists every output device currently visible and
-            points the user at the OS-specific setup step.
+        MicDeviceNotFoundError: No match; the message lists every
+            currently-visible output device and points the user at the
+            OS-specific setup step.
+        ImportError: ``soundcard`` is not installed.
+        OSError: ``soundcard`` cannot dlopen its native backend
+            (libpulse on Linux, WASAPI on Windows).
     """
     import soundcard as sc  # pyright: ignore[reportMissingTypeStubs]
 
     try:
         return sc.get_speaker(name)  # pyright: ignore[reportUnknownMemberType]
     except LookupError:
-        # soundcard raises LookupError on a clean miss (its public
-        # contract). Re-raise as MicDeviceNotFoundError below with a
-        # listing so the user can see what *is* available.
+        # Re-raise below as MicDeviceNotFoundError with a listing so the
+        # user sees what *is* available (soundcard's LookupError carries
+        # only the query string).
         pass
 
     speakers: list[Any] = list(

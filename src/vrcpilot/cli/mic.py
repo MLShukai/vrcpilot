@@ -1,18 +1,17 @@
 """``vrcpilot mic`` subcommand.
 
-Stream float32 PCM into a virtual mic device (typically VB-Cable on
-Windows). Designed as the symmetric counterpart of
-:mod:`vrcpilot.cli.record`: ``record`` writes raw s16le or a WAV file,
-and ``mic`` consumes the same payload to play it back into VRChat's
-microphone input. The default input is stdin so
-``vrcpilot record | vrcpilot mic`` works without intermediate files.
+Stream float32 PCM into a virtual mic device (VB-Cable on Windows,
+the ``VRCPilotMic`` PipeWire null-sink on Linux). The symmetric
+counterpart of :mod:`vrcpilot.cli.record` -- both default to stdin so
+``vrcpilot record | vrcpilot mic`` round-trips audio back into VRChat
+without intermediate files.
 
 Exit codes:
-    * ``0`` -- playback completed successfully.
+    * ``0`` -- playback completed.
     * ``1`` -- recoverable runtime failure: device lookup miss
       (:class:`~vrcpilot.mic.MicDeviceNotFoundError`), unsupported WAV
-      (sampwidth != 2), soundcard / libpulse / WASAPI failure, or
-      soundcard not installed.
+      (sampwidth != 2), or a soundcard / libpulse / WASAPI failure
+      (``ImportError`` / ``OSError`` / ``RuntimeError``).
     * ``2`` -- bad argument combination (no input on a tty, ``auto``
       format against a non-WAV extension).
 """
@@ -35,18 +34,14 @@ from vrcpilot.mic.base import LIBPULSE_HINT
 
 from ._common import SubParsersAction, attach_completer
 
-#: Divisor used to scale ``int16`` -> ``float32`` for playback.
-#:
-#: ``np.int16(-32768) / 32768.0`` is exactly ``-1.0`` and
-#: ``np.int16(32767) / 32768.0`` is ``~0.999969``: the asymmetric divisor
-#: keeps ``int16.min`` from saturating past ``-1.0`` (which would clip
-#: inside soundcard's float -> driver path) while still preserving
-#: near-unity on the positive side.
+#: ``int16`` -> ``float32`` divisor that keeps ``int16.min`` from
+#: saturating past ``-1.0`` (which clips inside soundcard's
+#: float -> driver path) while leaving the positive side at near-unity.
 _INT16_DIVISOR: float = 32768.0
 
 
 def register(subparsers: SubParsersAction) -> None:
-    """Add the ``mic`` subparser to the top-level subparsers."""
+    """Wire the ``mic`` subparser into the top-level CLI."""
     parser = subparsers.add_parser(
         "mic",
         help=(
@@ -119,12 +114,10 @@ def register(subparsers: SubParsersAction) -> None:
 def _wav_to_float32(
     reader: wave.Wave_read,
 ) -> tuple[NDArray[np.float32], int, int]:
-    """Decode an open :class:`wave.Wave_read` to a single float32 chunk.
+    """Decode a WAV into the chunk shape :class:`vrcpilot.mic.Mic` expects.
 
-    Returns ``(samples, framerate, channels)``. ``samples`` is shape
-    ``(N,)`` for mono input or ``(N, channels)`` for multi-channel
-    input -- matching the chunk shape :class:`vrcpilot.mic.Mic`
-    expects for the configured channel count.
+    Returns ``(samples, framerate, channels)`` where ``samples`` is
+    ``(N,)`` for mono input or ``(N, channels)`` otherwise.
 
     Raises:
         wave.Error: ``sampwidth != 2`` (not 16-bit signed PCM).
@@ -151,13 +144,12 @@ def _raw_stream_chunks(
     channels: int,
     chunk_ms: int,
 ) -> Iterator[NDArray[np.float32]]:
-    """Yield float32 chunks read from ``source`` as little-endian s16 PCM.
+    """Yield float32 chunks from a raw little-endian s16 PCM stream.
 
-    ``chunk_ms`` is rounded down to the nearest whole frame so the
-    buffer size stays an exact multiple of ``channels * 2`` bytes and
-    no partial frames survive across reads. A short final read (the
-    stream's leftover bytes that do not fill a chunk) is still yielded
-    as long as it contains at least one whole frame.
+    Reads are aligned to ``channels * 2`` byte boundaries so no
+    partial frames cross chunk boundaries (which would misalign
+    channels). The final short read is still yielded as long as it
+    contains at least one whole frame.
     """
     frame_bytes = channels * 2
     frames_per_chunk = max(1, int(rate * chunk_ms / 1000))
@@ -166,8 +158,8 @@ def _raw_stream_chunks(
         raw = source.read(buf_size)
         if not raw:
             return
-        # Trim any trailing partial frame: feeding it to soundcard
-        # would misalign channels in subsequent chunks.
+        # Trim any trailing partial frame; carrying it forward would
+        # misalign channels in subsequent chunks.
         usable = (len(raw) // frame_bytes) * frame_bytes
         if usable == 0:
             return
@@ -179,24 +171,24 @@ def _raw_stream_chunks(
 
 
 def _is_wav_path(path: Path) -> bool:
-    """Whether ``auto`` should treat ``path`` as a WAV file."""
+    """Whether ``--format auto`` should treat ``path`` as a WAV file."""
     return path.suffix.lower() == ".wav"
 
 
 def _stdin_buffer() -> BinaryIO:
-    """Return ``sys.stdin.buffer`` -- isolated so tests can patch it."""
+    """Indirection over ``sys.stdin.buffer`` so tests can patch it."""
     return sys.stdin.buffer
 
 
 def _resolve_input(
     args: argparse.Namespace,
 ) -> tuple[Iterable[NDArray[np.float32]], int, int] | int:
-    """Decide ``(chunks, channels, sample_rate)`` from CLI args.
+    """Resolve CLI args to ``(chunks, channels, sample_rate)`` or an exit code.
 
-    Returns an exit code instead when the input is unresolvable (tty
-    stdin, ``auto`` against an unknown extension). The chunks iterable
-    is either a one-element list (WAV-decoded into a single array) or
-    a generator (raw s16le streamed in ``chunk_ms`` pieces).
+    Returns an integer exit code in place of the tuple when the input
+    is unresolvable (tty stdin, ``auto`` format against an unknown
+    extension). The chunks iterable is a one-element list for WAV
+    inputs (decoded eagerly) or a generator for raw s16le.
     """
     input_arg: str = args.input
     fmt: str = args.format
@@ -213,9 +205,9 @@ def _resolve_input(
             with wave.open(_stdin_buffer(), "rb") as reader:
                 samples, framerate, channels = _wav_to_float32(reader)
             return [samples], channels, framerate
-        # 'auto' on stdin pipes is treated as raw s16le -- there is
-        # no extension to inspect, and the symmetric 'vrcpilot record'
-        # default emits headerless s16le.
+        # ``auto`` over a stdin pipe is raw s16le: no extension to
+        # inspect and ``vrcpilot record`` emits headerless s16le by
+        # default, so the symmetric pipeline just works.
         chunks = _raw_stream_chunks(
             _stdin_buffer(),
             rate=args.rate,
@@ -231,8 +223,8 @@ def _resolve_input(
             samples, framerate, channels = _wav_to_float32(reader)
         return [samples], channels, framerate
     if fmt == "s16le":
-        # Generator owns the open file handle so it stays alive until
-        # the Mic finishes consuming it.
+        # The generator closes over the open file handle so it stays
+        # alive until Mic finishes consuming it.
         chunks = _raw_stream_chunks(
             path.open("rb"),
             rate=args.rate,
@@ -249,7 +241,8 @@ def _resolve_input(
 
 
 def run(args: argparse.Namespace) -> int:
-    """Execute the ``mic`` subcommand; see module docstring for exits."""
+    """Execute ``vrcpilot mic``; see module docstring for exit-code
+    contract."""
     try:
         resolved = _resolve_input(args)
     except wave.Error as exc:
@@ -280,15 +273,14 @@ def run(args: argparse.Namespace) -> int:
         print(f"vrcpilot: {exc}", file=sys.stderr)
         return 1
     except (OSError, RuntimeError) as exc:
-        # ``OSError`` covers file-open failures (missing path, permission
-        # denied) and the ``OSError`` soundcard raises when libpulse /
-        # WASAPI cannot be loaded. ``RuntimeError`` is soundcard's
-        # runtime fault channel (libpulse server errors, WASAPI device
-        # I/O failures); routing both through the same exit-code-1 path
-        # keeps the CLI contract intact instead of crashing with a
-        # traceback. When the failure mentions libpulse, surface the
-        # same install hint ``vrcpilot linux-mic status`` uses so the
-        # two CLIs guide the user the same way.
+        # ``OSError`` covers file-open failures and soundcard's dlopen
+        # failure (libpulse / WASAPI missing). ``RuntimeError`` is
+        # soundcard's runtime fault channel (libpulse server errors,
+        # WASAPI device I/O failures). Both collapse to exit 1 so the
+        # CLI contract holds instead of bubbling a traceback. When
+        # libpulse is implicated, mirror the install hint
+        # ``vrcpilot linux-mic status`` prints so both CLIs speak in
+        # the same voice.
         msg = str(exc)
         print(f"vrcpilot: {msg}", file=sys.stderr)
         if "libpulse" in msg.lower():

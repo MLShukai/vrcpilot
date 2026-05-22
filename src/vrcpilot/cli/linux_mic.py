@@ -1,25 +1,15 @@
-"""``vrcpilot linux-mic`` subcommand.
+"""``vrcpilot linux-mic`` subcommand: manage the PipeWire virtual mic.
 
-Manage the persistent ``VRCPilotMic`` virtual mic that
-:mod:`vrcpilot.mic.linux` installs into PipeWire. Three actions:
-
-* ``register`` -- write the PipeWire config fragment and (unless
-  ``--no-runtime-load`` is passed) load ``module-null-sink`` now so the
-  sink is usable in the current session.
-* ``unregister`` -- remove the config fragment and unload any matching
-  runtime module.
-* ``status`` -- report what is currently in place: config file, runtime
-  module, and whether ``soundcard`` can see the device.
-
-The action sits under a single parent subparser so the top-level CLI
-exposes only ``linux-mic`` (the actions live one level deeper, matching
-the structure of :mod:`vrcpilot.cli.osc`).
+Wraps :mod:`vrcpilot.mic.linux` with three actions: ``register``
+(persist + live load), ``unregister`` (remove + live unload), and
+``status`` (config / runtime module / soundcard visibility). The
+parent-subparser shape matches :mod:`vrcpilot.cli.osc`.
 
 Non-Linux invocations short-circuit with exit code ``2`` and a hint
 pointing Windows users at VB-Cable. :mod:`vrcpilot.mic.linux` is
-imported lazily inside :func:`run` so this module itself stays
-importable on every platform (the top-level CLI dispatcher constructs
-the parser unconditionally).
+imported lazily inside the per-action helpers so this module itself
+stays importable on every platform (the top-level CLI builds the parser
+unconditionally).
 """
 
 from __future__ import annotations
@@ -34,7 +24,7 @@ from ._common import SubParsersAction
 
 
 def register(subparsers: SubParsersAction) -> None:
-    """Add the ``linux-mic`` parent subparser plus its three actions."""
+    """Wire ``linux-mic`` plus its three actions into the top-level CLI."""
     parser = subparsers.add_parser(
         "linux-mic",
         help=(
@@ -80,8 +70,8 @@ def register(subparsers: SubParsersAction) -> None:
 
 def _run_register(args: argparse.Namespace) -> int:
     """Execute the ``register`` action."""
-    # Lazy: top-level import raises on non-Linux; the OS guard above
-    # must short-circuit first.
+    # Lazy import: ``vrcpilot.mic.linux`` raises off-Linux. The OS
+    # guard in :func:`run` must short-circuit before reaching here.
     from vrcpilot.mic import linux as mic_linux
 
     result = mic_linux.register_virtual_mic(runtime_load=not args.no_runtime_load)
@@ -95,9 +85,9 @@ def _run_register(args: argparse.Namespace) -> int:
             "systemctl --user restart pipewire pipewire-pulse wireplumber",
             file=sys.stderr,
         )
-    # Always print the next-step guidance so users discover the VRChat
-    # setting; persistent config is the source of truth regardless of
-    # whether the runtime load succeeded.
+    # Always print the VRChat-side setup hint; the persistent config is
+    # the source of truth regardless of whether the runtime load
+    # succeeded, so users still need this step.
     print(
         "In VRChat Audio settings, select 'Monitor of VRCPilot Virtual "
         "Mic' as the microphone input",
@@ -108,8 +98,8 @@ def _run_register(args: argparse.Namespace) -> int:
 
 def _run_unregister() -> int:
     """Execute the ``unregister`` action."""
-    # Lazy: top-level import raises on non-Linux; the OS guard above
-    # must short-circuit first.
+    # Lazy import: ``vrcpilot.mic.linux`` raises off-Linux. The OS
+    # guard in :func:`run` must short-circuit before reaching here.
     from vrcpilot.mic import linux as mic_linux
 
     removed = mic_linux.unregister_virtual_mic()
@@ -124,21 +114,19 @@ def _run_unregister() -> int:
 
 
 def _runtime_loaded(sink_name: str) -> tuple[bool, str | None]:
-    """Return ``(loaded, error)`` from inspecting ``pulsectl`` modules.
+    """Return ``(loaded, error)`` for whether PipeWire has the sink loaded.
 
-    ``loaded`` is ``True`` iff a ``module-null-sink`` is currently
-    loaded whose ``argument`` contains ``sink_name=<sink_name>``.
-    ``error`` carries a short human-readable description when the
-    pulsectl probe itself failed (missing dependency, control-plane
-    error); the caller surfaces this alongside the ``not loaded``
-    answer so ``status`` never raises.
+    ``loaded`` is ``True`` iff a ``module-null-sink`` with
+    ``sink_name=<sink_name>`` is currently in ``pulse.module_list()``.
+    ``error`` carries a short description when the pulsectl probe
+    itself failed (missing dependency, control-plane error); ``status``
+    surfaces it alongside the ``not loaded`` answer so it never raises.
 
-    Uses :func:`vrcpilot.mic.linux.open_pulse_control` so the
-    ``register`` / ``unregister`` / ``status`` paths all funnel through
-    the same seam -- unit tests can patch one symbol and cover all three.
+    Goes through :func:`vrcpilot.mic.linux.open_pulse_control` -- the
+    seam ``register`` / ``unregister`` / ``status`` all share.
     """
-    # Lazy: top-level import raises on non-Linux; the OS guard above
-    # must short-circuit first.
+    # Lazy import: ``vrcpilot.mic.linux`` raises off-Linux. The OS
+    # guard in :func:`run` must short-circuit before reaching here.
     from vrcpilot.mic import linux as mic_linux
 
     try:
@@ -169,30 +157,25 @@ def _runtime_loaded(sink_name: str) -> tuple[bool, str | None]:
 
 
 def _soundcard_visible(sink_name: str) -> tuple[bool, str | None]:
-    """Return ``(visible, error)`` from a soundcard speaker probe.
+    """Return ``(visible, error)`` for whether soundcard can see the sink.
 
-    Delegates to :func:`soundcard.get_speaker`, which matches against
-    both ``Speaker.id`` and ``Speaker.name`` (case-insensitive substring
-    + fuzzy id) and raises :class:`LookupError` on miss. PipeWire
-    surfaces the sink under ``id="VRCPilotMic"`` while exposing
-    ``name="VRCPilot_Virtual_Mic"`` (the description with spaces
-    rewritten); only an id-aware match catches this divergence, which
-    is why an earlier ``name``-only scan returned ``not visible`` even
-    when the sink was loaded.
+    Goes through :func:`soundcard.get_speaker` so the match honours
+    both ``Speaker.id`` (PipeWire surfaces the null-sink as
+    ``id="VRCPilotMic"``) and ``Speaker.name`` (description-derived,
+    e.g. ``"VRCPilot_Virtual_Mic"``). A name-only scan misses this
+    divergence -- the regression an id-aware match fixed.
 
-    ``error`` is populated when the probe itself blew up (soundcard
-    missing, libpulse / WASAPI open failure); callers print it
-    alongside the ``not visible`` answer.
+    ``error`` is set when the probe itself blew up (soundcard not
+    installed, libpulse / WASAPI dlopen failure); callers print it
+    alongside the ``not visible`` answer rather than raising.
     """
     try:
         import soundcard as sc  # pyright: ignore[reportMissingTypeStubs]
     except ImportError as exc:
         return False, f"soundcard not installed ({exc})"
     except OSError as exc:
-        # soundcard raises OSError on import when the libpulse shared
-        # library is missing on Linux (libpulse0 on Debian/Ubuntu) or
-        # WASAPI is unavailable on Windows. Surface a hint along with
-        # the underlying error.
+        # soundcard raises OSError on import when the native backend
+        # (libpulse on Linux, WASAPI on Windows) cannot be dlopened.
         return False, f"soundcard import failed ({exc}); {LIBPULSE_HINT}"
 
     try:
@@ -200,8 +183,8 @@ def _soundcard_visible(sink_name: str) -> tuple[bool, str | None]:
     except LookupError:
         return False, None
     except OSError as exc:
-        # libpulse / WASAPI sometimes load lazily on first enumeration.
-        # Reuse the same hint so users see consistent guidance.
+        # libpulse / WASAPI sometimes dlopen lazily on first
+        # enumeration; reuse the same hint for consistent guidance.
         return False, f"soundcard probe failed ({exc}); {LIBPULSE_HINT}"
     except Exception as exc:  # noqa: BLE001
         return False, f"get_speaker failed ({exc})"
@@ -211,17 +194,17 @@ def _soundcard_visible(sink_name: str) -> tuple[bool, str | None]:
 def _run_status() -> int:
     """Execute the ``status`` action.
 
-    Machine-readable state lands on stdout in a stable vocabulary
-    (``present``/``absent`` for config, ``loaded``/``unavailable``/
-    ``not loaded`` for runtime, ``visible``/``unavailable``/``not
-    visible`` for soundcard); human-readable error detail goes to
-    stderr so scripts can ``grep`` stdout without seeing import-failure
-    parentheticals. ``unavailable`` is the fixed label used whenever
-    the probe itself blew up; the matching stderr line carries the
-    underlying ``error: <message>``.
+    Machine-readable state lands on stdout with a stable vocabulary
+    (``present`` / ``absent`` for config, ``loaded`` / ``unavailable`` /
+    ``not loaded`` for runtime, ``visible`` / ``unavailable`` /
+    ``not visible`` for soundcard); ``unavailable`` is the fixed label
+    whenever a probe itself blew up, and the matching stderr line
+    carries the underlying ``error: <message>``. Splitting the streams
+    keeps scripts free to ``grep`` stdout without parsing
+    failure-detail parentheticals.
     """
-    # Lazy: top-level import raises on non-Linux; the OS guard above
-    # must short-circuit first.
+    # Lazy import: ``vrcpilot.mic.linux`` raises off-Linux. The OS
+    # guard in :func:`run` must short-circuit before reaching here.
     from vrcpilot.mic import linux as mic_linux
     from vrcpilot.mic.base import VIRTUAL_MIC_SINK_NAME
 
@@ -251,11 +234,10 @@ def _run_status() -> int:
 def run(args: argparse.Namespace) -> int:
     """Dispatch the requested ``linux-mic`` action.
 
-    On non-Linux platforms returns exit code ``2`` with a hint pointing
-    at the Windows alternative; this is a CLI-entry guard rather than
-    an architectural cross-platform claim, so the ``sys.platform``
+    Off-Linux returns exit ``2`` with a hint pointing at the Windows
+    alternative; this is a CLI-entry guard, so the ``sys.platform``
     check stays here and :mod:`vrcpilot.mic.linux` is imported lazily
-    inside the per-action helpers.
+    inside the per-action helpers (it raises on import off-Linux).
     """
     if sys.platform != "linux":
         print(
