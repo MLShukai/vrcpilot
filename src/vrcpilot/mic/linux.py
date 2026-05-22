@@ -126,8 +126,11 @@ def open_pulse_control(client_name: str = "vrcpilot-mic") -> Any:
     Raises:
         ImportError: ``pulsectl`` is not installed.
     """
-    from pulsectl import (  # pyright: ignore[reportMissingTypeStubs]
-        Pulse,
+    # ``pulsectl`` is a Linux-only conditional dependency
+    # (``sys_platform == 'linux'`` in pyproject.toml); silence the
+    # missing-import + unknown-type fallout when pyright runs on Windows.
+    from pulsectl import (  # pyright: ignore[reportMissingTypeStubs, reportMissingImports]
+        Pulse,  # pyright: ignore[reportUnknownVariableType]
     )
 
     return Pulse(client_name)  # pyright: ignore[reportUnknownVariableType]
