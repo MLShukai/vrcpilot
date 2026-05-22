@@ -1,4 +1,4 @@
-"""Tests for :mod:`vrcpilot.speaker.pipewire`.
+"""Tests for :mod:`vrcpilot.speaker.linux`.
 
 The backend talks to PipeWire / PulseAudio via four seams:
 
@@ -27,8 +27,8 @@ import sys
 
 import pytest
 
-# pipewire raises RuntimeError on import for non-Linux, so skip before
-# the production import below would crash pytest collection.
+# vrcpilot.speaker.linux raises ImportError on non-Linux, so skip
+# before the production import below would crash pytest collection.
 if sys.platform != "linux":
     pytest.skip(
         "PipeWireSpeakerBackend is Linux-only",
@@ -49,7 +49,7 @@ from pytest_mock import MockerFixture
 
 from tests.fakes import FakePulse, FakePulseModuleInfo, FakePwRecordProcess
 from vrcpilot.speaker.base import CHANNELS
-from vrcpilot.speaker.pipewire import PipeWireSpeakerBackend
+from vrcpilot.speaker.linux import PipeWireSpeakerBackend
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -60,7 +60,7 @@ from vrcpilot.speaker.pipewire import PipeWireSpeakerBackend
 def patch_pid(mocker: MockerFixture) -> int:
     """Override the autouse ``find_pid`` patch with a deterministic PID."""
     pid = 12345
-    mocker.patch("vrcpilot.speaker.pipewire.process.find_pid", return_value=pid)
+    mocker.patch("vrcpilot.speaker.linux.process.find_pid", return_value=pid)
     return pid
 
 
@@ -68,7 +68,7 @@ def patch_pid(mocker: MockerFixture) -> int:
 def mock_clis(mocker: MockerFixture) -> None:
     """All required CLIs found by :func:`shutil.which`."""
     mocker.patch(
-        "vrcpilot.speaker.pipewire.shutil.which",
+        "vrcpilot.speaker.linux.shutil.which",
         return_value="/usr/bin/dummy",
     )
 
@@ -132,14 +132,14 @@ def mock_pw_link(mocker: MockerFixture) -> MagicMock:
 
 @pytest.fixture
 def disable_atexit(mocker: MockerFixture) -> MagicMock:
-    """Replace ``pipewire``'s ``atexit`` reference with a mock.
+    """Replace the speaker.linux module's ``atexit`` reference with a mock.
 
     Rebinding the module-level name (rather than patching
     ``atexit.register``) keeps unrelated callers like
     ``coverage.PyTracer`` from leaking into the returned mock.
     """
     atexit_mock = MagicMock()
-    mocker.patch("vrcpilot.speaker.pipewire.atexit", atexit_mock)
+    mocker.patch("vrcpilot.speaker.linux.atexit", atexit_mock)
     return atexit_mock.register
 
 
@@ -176,7 +176,7 @@ class TestPipeWireSpeakerBackendConstruction:
     ) -> None:
         # Validation must fire before any subprocess / pulse work.
         which_spy = mocker.patch(
-            "vrcpilot.speaker.pipewire.shutil.which",
+            "vrcpilot.speaker.linux.shutil.which",
             return_value="/usr/bin/dummy",
         )
         with pytest.raises(ValueError, match="read_timeout must be > 0"):
@@ -185,7 +185,7 @@ class TestPipeWireSpeakerBackendConstruction:
 
     def test_raises_when_clis_missing(self, mocker: MockerFixture) -> None:
         # All CLIs missing -> aggregated error message lists them.
-        mocker.patch("vrcpilot.speaker.pipewire.shutil.which", return_value=None)
+        mocker.patch("vrcpilot.speaker.linux.shutil.which", return_value=None)
         with pytest.raises(RuntimeError, match="PipeWire backend requires"):
             PipeWireSpeakerBackend()
 
@@ -197,7 +197,7 @@ class TestPipeWireSpeakerBackendConstruction:
                 return None
             return "/usr/bin/" + name
 
-        mocker.patch("vrcpilot.speaker.pipewire.shutil.which", side_effect=fake_which)
+        mocker.patch("vrcpilot.speaker.linux.shutil.which", side_effect=fake_which)
         with pytest.raises(RuntimeError) as excinfo:
             PipeWireSpeakerBackend()
         msg = str(excinfo.value)
@@ -509,7 +509,7 @@ class TestPipeWireSpeakerBackendRead:
         )
         proc.emit_pcm(bad_payload.tobytes())
         _wait_for_drained_bytes(backend)
-        with caplog.at_level(logging.WARNING, logger="vrcpilot.speaker.pipewire"):
+        with caplog.at_level(logging.WARNING, logger="vrcpilot.speaker.linux"):
             buf = backend.read()
         assert buf.shape == (2, CHANNELS)
         np.testing.assert_array_equal(
