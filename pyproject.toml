@@ -42,6 +42,7 @@ dependencies = [
     "proc-tap>=1.0.3",
     "psutil>=7.2.2",
     "pydirectinput>=1.0.4 ; sys_platform == 'win32'",
+    "pulsectl>=24.12.0 ; sys_platform == 'linux'",
     "pyperclip>=1.9",
     "python-osc>=1.8",
     "python-xlib>=0.33 ; sys_platform == 'linux'",

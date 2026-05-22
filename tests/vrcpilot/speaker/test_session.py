@@ -121,6 +121,52 @@ class _CountingBackend(ImplSpeakerBackend):
         super().close()
 
 
+class TestBackendDispatch:
+    """``_select_speaker_backend`` picks the right backend per platform.
+
+    The native backend constructors are patched so the test only
+    verifies the seam (platform check + kwargs forwarding) without
+    needing the real audio stack to be importable in CI.
+    """
+
+    def test_linux_dispatches_to_pipewire(self, mocker: MockerFixture):
+        mocker.patch("sys.platform", "linux")
+        pipewire_mock = mocker.patch("vrcpilot.speaker.pipewire.PipeWireSpeakerBackend")
+        # Ensure a hypothetical regression that also calls proctap is
+        # surfaced; Linux must not fall through.
+        proctap_mock = mocker.patch("vrcpilot.speaker.proctap.ProcTapSpeakerBackend")
+
+        from vrcpilot.speaker.session import _select_speaker_backend
+
+        _select_speaker_backend(read_timeout=2.0)
+
+        pipewire_mock.assert_called_once_with(read_timeout=2.0)
+        proctap_mock.assert_not_called()
+
+    def test_win32_dispatches_to_proctap(self, mocker: MockerFixture):
+        mocker.patch("sys.platform", "win32")
+        proctap_mock = mocker.patch("vrcpilot.speaker.proctap.ProcTapSpeakerBackend")
+
+        from vrcpilot.speaker.session import _select_speaker_backend
+
+        _select_speaker_backend(read_timeout=2.0)
+
+        proctap_mock.assert_called_once_with(read_timeout=2.0)
+
+    def test_darwin_falls_through_to_proctap(self, mocker: MockerFixture):
+        # macOS is intentionally a fall-through case: proctap's own
+        # error surface is the right place for an "unsupported host"
+        # diagnosis if upstream cannot load a backend.
+        mocker.patch("sys.platform", "darwin")
+        proctap_mock = mocker.patch("vrcpilot.speaker.proctap.ProcTapSpeakerBackend")
+
+        from vrcpilot.speaker.session import _select_speaker_backend
+
+        _select_speaker_backend(read_timeout=2.0)
+
+        proctap_mock.assert_called_once_with(read_timeout=2.0)
+
+
 class TestClose:
     def test_close_is_idempotent(self, mocker: MockerFixture):
         backend = _CountingBackend()

@@ -5,16 +5,18 @@ mirroring :class:`vrcpilot.capture.Capture`. The wrapper owns the
 closed-state flag so backend implementations only have to honour the
 ABC contract.
 
-The default backend (:class:`vrcpilot.speaker.proctap.ProcTapSpeakerBackend`)
-delegates the OS-specific process-loopback work to the cross-platform
-``proc-tap`` package -- Windows / Linux are production-ready upstream,
-macOS is experimental. We import it lazily so a missing optional
-dependency does not break ``import vrcpilot.speaker`` on machines that
-will not actually use the modality.
+Linux dispatches to :class:`vrcpilot.speaker.pipewire.PipeWireSpeakerBackend`
+(native PipeWire CLIs + ``pulsectl`` control plane). Windows and macOS
+fall through to :class:`vrcpilot.speaker.proctap.ProcTapSpeakerBackend`,
+which delegates process-loopback to the cross-platform ``proc-tap``
+package (Windows is stable upstream; macOS is experimental). Both
+backends are imported lazily so a missing optional dependency on one
+platform never breaks ``import vrcpilot.speaker`` on the other.
 """
 
 from __future__ import annotations
 
+import sys
 from types import TracebackType
 from typing import Self
 
@@ -28,15 +30,21 @@ def _select_speaker_backend(
     *,
     read_timeout: float,
 ) -> SpeakerBackend:
-    """Return a started :class:`SpeakerBackend`.
+    """Return a started :class:`SpeakerBackend` for the host platform.
 
-    Imports the chosen backend lazily so that ``import vrcpilot.speaker``
-    itself never depends on the audio-capture native extension being
-    installed. ``proc-tap`` is currently the only backend; if it fails
-    to load on an unsupported host its own error message (raised from
-    ``proctap.backends.get_backend``) is the most useful place for the
-    diagnosis to surface.
+    Imports the chosen backend lazily so platform-specific dependencies
+    (``proc-tap`` on Windows / macOS, ``pulsectl`` and the PipeWire CLIs
+    on Linux) never need to be importable on the other platform. Linux
+    selects :class:`PipeWireSpeakerBackend`; every other platform falls
+    through to :class:`ProcTapSpeakerBackend`, whose own error message
+    (raised from ``proctap.backends.get_backend``) surfaces the most
+    useful diagnosis if the host OS is unsupported.
     """
+    if sys.platform == "linux":
+        from vrcpilot.speaker.pipewire import PipeWireSpeakerBackend
+
+        return PipeWireSpeakerBackend(read_timeout=read_timeout)
+
     from vrcpilot.speaker.proctap import ProcTapSpeakerBackend
 
     return ProcTapSpeakerBackend(read_timeout=read_timeout)
