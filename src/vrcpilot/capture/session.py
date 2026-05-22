@@ -66,14 +66,14 @@ class Capture:
         """Return the latest unread frame as an ``(H, W, 3)`` uint8 RGB
         ndarray.
 
-        Returned array is detached from internal buffers (safe to retain
-        and mutate). Shape may change across calls if the window is
-        resized.
+        Latest-only: any frame produced while the consumer was busy is
+        discarded so lag cannot accumulate. The returned array is
+        detached from internal buffers (safe to retain and mutate), and
+        its shape may change across calls if the window is resized.
 
         Raises:
-            RuntimeError: Capture is closed or the backend reports a
-                fatal error (X11 ``XError``, invalid geometry, etc.).
-            TimeoutError: No frame within :attr:`frame_timeout` seconds
+            RuntimeError: Capture is closed or the backend reports a fatal error.
+            TimeoutError: No frame within ``frame_timeout`` seconds
                 (Windows / WGC only; the X11 path is synchronous).
         """
         if self._closed:

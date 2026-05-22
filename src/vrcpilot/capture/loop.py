@@ -1,8 +1,7 @@
 """Background-thread driver that paces :class:`Capture` reads at a fixed FPS.
 
-Owns a :class:`Capture` instance for the loop's lifetime and pumps frames
-into a user-supplied callback. Decoupled from :class:`Capture` itself so
-that one-shot ``read()`` callers do not pay for thread machinery.
+Kept separate from :class:`Capture` so one-shot ``read()`` callers do
+not pay for thread machinery.
 """
 
 from __future__ import annotations
@@ -23,24 +22,14 @@ type FrameCallback = Callable[[np.ndarray], None]
 class CaptureLoop:
     """Run a :class:`Capture` on a background thread at a fixed FPS.
 
-    Each tick reads a frame and passes it to ``callback``. The loop is
-    deadline-based (drift-resistant) and uses an :class:`threading.Event`
-    sleep so :meth:`stop` wakes the worker promptly.
-
-    Args:
-        callback: Function invoked with each captured RGB ndarray. Its
-            return value is ignored.
-        fps: Target frames per second. Must be ``> 0``.
-        frame_timeout: Per-frame timeout forwarded to the internal
-            :class:`Capture`. See :class:`Capture` for semantics.
+    The loop is deadline-based (drift-resistant) and uses an
+    :class:`threading.Event` sleep so :meth:`stop` wakes the worker
+    promptly. ``frame_timeout`` is forwarded to the owned
+    :class:`Capture`; startup failures (VRChat not running, unsupported
+    platform, etc.) propagate from it unchanged.
 
     Raises:
-        ValueError: ``fps`` is not strictly positive, or ``frame_timeout``
-            is not strictly positive (forwarded from :class:`Capture`).
-        RuntimeError: The internal :class:`Capture` cannot start (VRChat
-            not running, window not mapped, backend session failed,
-            etc.). See :class:`Capture` for the full list.
-        NotImplementedError: Platform other than Windows or Linux.
+        ValueError: ``fps`` is not strictly positive.
     """
 
     _capture: Capture
