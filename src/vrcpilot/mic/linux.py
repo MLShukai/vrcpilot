@@ -2,21 +2,22 @@
 
 Installs a persistent ``VRCPilotMic`` null-sink that
 :class:`vrcpilot.mic.Mic` writes float32 PCM into and VRChat reads via
-``Monitor of VRCPilotMic``. Registration has two planes:
+``Monitor of VRCPilotMic``. Two planes:
 
 * **Persistence**: a PipeWire config fragment under
-  ``$XDG_CONFIG_HOME/pipewire/pipewire.conf.d/vrcpilot-mic.conf``
-  (or ``~/.config/...``) is the source of truth -- it survives restarts.
-* **Immediate runtime load** (opt-in via ``runtime_load=True``): a
-  ``pulsectl`` ``module_load`` so the sink works in the current session
-  without restarting PipeWire. Failures degrade to a warning on
-  :attr:`RegisterResult.runtime_warning`; they never mask a successful
+  ``$XDG_CONFIG_HOME/pipewire/pipewire.conf.d/vrcpilot-mic.conf`` is
+  the source of truth and survives restarts.
+* **Immediate runtime load** (opt-in via ``runtime_load=True``):
+  a ``pulsectl`` ``module_load`` so the sink works in the current
+  session. Failures degrade to a warning on
+  :attr:`RegisterResult.runtime_warning` and never mask a successful
   config write.
 
-``pulsectl`` is imported lazily inside :func:`open_pulse_control` -- the
-single seam every caller (``register`` / ``unregister`` / ``status``)
-funnels through, so tests patch one symbol to cover all three paths
-and hosts without ``pulsectl`` can still write the persistent config.
+``pulsectl`` is imported lazily inside :func:`open_pulse_control` --
+the single seam every caller (``register`` / ``unregister`` /
+``status``) funnels through, so tests patch one symbol.
+
+Raises ``ImportError`` if imported off-Linux.
 """
 
 from __future__ import annotations
@@ -73,16 +74,10 @@ _NULL_SINK_ARGS: Final[str] = (
 class RegisterResult:
     """Outcome of :func:`register_virtual_mic`.
 
-    Attributes:
-        config_path: Absolute path to the persistent config fragment.
-        created_config: Whether this call wrote the file (``False`` if
-            it already existed with the expected contents).
-        runtime_loaded: Whether the immediate ``pulsectl`` load
-            succeeded. ``False`` when skipped via
-            ``runtime_load=False`` or when the load failed -- see
-            :attr:`runtime_warning` to distinguish.
-        runtime_warning: Human-readable description of the runtime-load
-            failure, or ``None`` on success / skip.
+    ``created_config`` is ``False`` if the file already had the expected
+    contents. ``runtime_loaded`` is ``False`` both when skipped and when
+    the load failed -- ``runtime_warning`` is ``None`` for the skip case
+    and a human-readable string for the failure case.
     """
 
     config_path: Path
@@ -94,10 +89,8 @@ class RegisterResult:
 def config_path() -> Path:
     """Absolute path of the PipeWire config fragment.
 
-    Honours ``$XDG_CONFIG_HOME`` per the XDG Base Directory Spec,
-    falling back to ``~/.config`` when unset/empty. Public so
-    ``vrcpilot linux-mic status`` can surface the location and so unit
-    tests can read it without depending on private internals.
+    Honours ``$XDG_CONFIG_HOME`` with ``~/.config`` as the XDG fallback.
+    Public so ``vrcpilot linux-mic status`` can surface the location.
     """
     base = os.environ.get("XDG_CONFIG_HOME")
     if base:
@@ -111,15 +104,12 @@ def open_pulse_control(client_name: str = "vrcpilot-mic") -> Any:
     """Open the ``pulsectl.Pulse`` connection every mic path shares.
 
     The single seam ``register`` / ``unregister`` / ``status`` funnel
-    through; tests patch this symbol to inject a
-    :class:`tests.fakes.FakePulse`. ``pulsectl`` is imported lazily so
-    hosts without it still get to write the persistent config (the
-    runtime-load step degrades to a warning instead). ``client_name``
-    flows into ``pactl list short clients`` so each entry point is
-    distinguishable in PulseAudio diagnostics.
+    through, so tests patch this one symbol. ``pulsectl`` is imported
+    lazily so hosts without it can still write the persistent config.
+    ``client_name`` shows up in ``pactl list short clients`` to
+    distinguish the entry point in PulseAudio diagnostics.
 
-    Raises:
-        ImportError: ``pulsectl`` is not installed.
+    Raises ``ImportError`` when ``pulsectl`` is not installed.
     """
     # ``pulsectl`` is a Linux-only conditional dependency
     # (``sys_platform == 'linux'`` in pyproject.toml); silence the
@@ -235,17 +225,10 @@ def _runtime_load_null_sink() -> str | None:
 def register_virtual_mic(*, runtime_load: bool = True) -> RegisterResult:
     """Persist the ``VRCPilotMic`` null-sink and (optionally) load it now.
 
-    Args:
-        runtime_load: When ``True`` (default), also invoke
-            ``pulsectl.Pulse.module_load`` so the sink works in the
-            current session. ``False`` skips the live load -- useful
-            for headless CI / chroot setups without a PipeWire daemon.
-
-    Returns:
-        A :class:`RegisterResult`. Runtime failures surface via
-        :attr:`RegisterResult.runtime_warning` rather than raising; the
-        persistent config either writes successfully or an
-        :class:`OSError` propagates from the filesystem layer.
+    Set ``runtime_load=False`` for headless CI / chroot setups without
+    a PipeWire daemon -- the persistent config still writes. Runtime
+    failures surface via :attr:`RegisterResult.runtime_warning` rather
+    than raising; filesystem failures still propagate as ``OSError``.
     """
     path = config_path()
     created_config = _write_config(path)
@@ -301,8 +284,7 @@ def _runtime_unload_null_sink() -> bool:
 def unregister_virtual_mic() -> bool:
     """Remove the persistent config and unload the runtime sink.
 
-    Returns ``True`` iff anything was actually removed (config file,
-    runtime module, or both); ``False`` when neither artefact existed.
+    Returns ``True`` iff anything was actually removed.
     """
     path = config_path()
     removed_file = False

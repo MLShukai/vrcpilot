@@ -14,20 +14,18 @@ DEVICE_ENV_VAR: Final[str] = "VRCPILOT_MIC_DEVICE"
 #: Linux default for :func:`vrcpilot.mic.default_device_name`.
 VIRTUAL_MIC_SINK_NAME: Final[str] = "VRCPilotMic"
 
-#: Shared install hint for libpulse failures.
-#:
-#: Emitted by both :mod:`vrcpilot.cli.linux_mic` (``status`` probe) and
-#: :mod:`vrcpilot.cli.mic` (``OSError`` / ``RuntimeError`` paths) so the
-#: wording stays in lock-step. ``libpulse0`` is the Debian/Ubuntu package
-#: name; other distros ship the library under different names, hence the
-#: generic ``libpulse`` term in the user-facing message.
+#: Shared install hint for libpulse failures. Kept in one place so the
+#: ``status`` probe in :mod:`vrcpilot.cli.linux_mic` and the
+#: ``OSError`` / ``RuntimeError`` paths in :mod:`vrcpilot.cli.mic` stay
+#: in lock-step.
 LIBPULSE_HINT: Final[str] = "install libpulse (e.g. 'sudo apt-get install libpulse0')"
 
 
 class MicDeviceNotFoundError(RuntimeError):
     """Raised when no output device matches the resolved name.
 
-    Surfaces both the ``soundcard`` miss (no enumerated speaker matches
-    the substring/id) and the "no default for this platform" case (macOS
-    without ``--device`` / ``$VRCPILOT_MIC_DEVICE``).
+    Covers both the ``soundcard`` miss and the "no default for this
+    platform" case (macOS without ``--device`` / ``$VRCPILOT_MIC_DEVICE``).
+    Hint at ``vrcpilot linux-mic register`` on Linux or VB-Cable on
+    Windows when surfacing this to users.
     """

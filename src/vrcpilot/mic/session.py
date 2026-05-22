@@ -1,8 +1,7 @@
 """Public :class:`Mic` session bound to a virtual-cable output device.
 
-Callers drive playback cadence with their own loop
-(``for chunk in tts.stream(): mic.play(chunk)``); the soundcard player
-is opened once at construction and released on ``close`` / ``__exit__``
+Callers drive playback cadence with their own loop; the soundcard
+player is opened at construction and released on close / ``__exit__``
 / finaliser.
 """
 
@@ -40,28 +39,18 @@ def _validate_chunk(chunk: NDArray[np.float32], *, expected_channels: int) -> No
 class Mic:
     """Session bound to a virtual-cable output device.
 
-    The constructor resolves the device via :mod:`soundcard` and enters
-    a player context manager for ``(sample_rate, channels)``; that
-    player stays open until :meth:`close`, ``__exit__``, or the
-    finaliser runs.
-
-    Args:
-        device: Device-name substring. ``None`` defers to
-            ``$VRCPILOT_MIC_DEVICE`` and then the OS default.
-        sample_rate: Output rate in Hz. Must match the consumer
-            (VRChat: 48000).
-        channels: Channel count baked into the player and enforced on
-            every :meth:`play` call.
+    Opened at construction, released on :meth:`close` / ``__exit__`` /
+    finaliser. ``device`` is a name substring; ``None`` defers to
+    ``$VRCPILOT_MIC_DEVICE`` then the OS default. ``sample_rate`` must
+    match the consumer (VRChat uses 48000).
 
     Raises:
         MicDeviceNotFoundError: No output device matches the resolved
             name, or no default is configured for this platform.
         ImportError: ``soundcard`` is not installed.
         OSError: ``soundcard`` cannot dlopen libpulse / WASAPI.
-        RuntimeError: Native backend failure on ``player()`` entry
-            (libpulse server error, WASAPI device I/O failure).
-        ValueError: ``sample_rate`` or ``channels`` is not strictly
-            positive.
+        RuntimeError: libpulse / WASAPI runtime failure on player entry.
+        ValueError: ``sample_rate`` or ``channels`` is not positive.
     """
 
     def __init__(
@@ -94,7 +83,7 @@ class Mic:
 
     @property
     def device_name(self) -> str:
-        """Substring that was resolved to pick this device."""
+        """Substring resolved to pick this device."""
         return self._device_name
 
     @property
@@ -102,7 +91,8 @@ class Mic:
         """``Speaker.id`` of the resolved device.
 
         PulseAudio sink name on Linux (e.g. ``"VRCPilotMic"``), WASAPI
-        device id on Windows.
+        device id on Windows -- divergent from :attr:`device_name` for
+        the PipeWire null-sink.
         """
         return self._device_id
 
@@ -123,11 +113,10 @@ class Mic:
         ``(N, channels)`` otherwise.
 
         Raises:
-            RuntimeError: Mic is already closed, or the native backend
-                surfaced a libpulse / WASAPI write failure.
+            RuntimeError: Mic is closed, or libpulse / WASAPI surfaced a
+                write failure.
             ValueError: dtype is not float32, ``ndim`` is not 1 or 2,
-                or the chunk channel count disagrees with
-                :attr:`channels`.
+                or chunk channel count disagrees with :attr:`channels`.
         """
         if self._closed:
             raise RuntimeError("Mic is closed")
@@ -137,8 +126,7 @@ class Mic:
     def close(self) -> None:
         """Release the underlying soundcard player. Idempotent.
 
-        Safe to call after a constructor failure (no player was ever
-        opened in that case).
+        Safe to call after a constructor failure.
         """
         if self._closed:
             return

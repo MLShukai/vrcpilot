@@ -1,9 +1,8 @@
 """Output-device resolution for the mic modality.
 
-Confines per-platform default-device knowledge (Windows + VB-Cable,
-Linux + PipeWire) and the lazy :mod:`soundcard` import to one module so
-:class:`vrcpilot.mic.Mic` and the CLI work with a resolved ``Speaker``
-handle without touching either concern.
+Confines per-platform default-device knowledge and the lazy
+:mod:`soundcard` import so :class:`vrcpilot.mic.Mic` and the CLI can
+work with an already-resolved ``Speaker`` handle.
 """
 
 from __future__ import annotations
@@ -30,11 +29,10 @@ _DEFAULT_DEVICE_BY_PLATFORM: Final[dict[str, str]] = {
 
 
 def default_device_name() -> str | None:
-    """Return the OS-specific default output-device substring, or ``None``.
+    """OS-specific default output-device substring, or ``None``.
 
     ``None`` on platforms without an established virtual-mic convention
-    (e.g. macOS); the caller is then responsible for surfacing the
-    "explicit device required" error to the user.
+    (e.g. macOS); callers must surface "explicit device required" then.
     """
     return _DEFAULT_DEVICE_BY_PLATFORM.get(sys.platform)
 
@@ -42,9 +40,7 @@ def default_device_name() -> str | None:
 def resolve_device_name(argument: str | None) -> str:
     """Resolve ``argument > $VRCPILOT_MIC_DEVICE > default_device_name()``.
 
-    Raises:
-        MicDeviceNotFoundError: All three sources yield nothing (the
-            macOS-without-config case).
+    Raises ``MicDeviceNotFoundError`` if all three sources yield nothing.
     """
     if argument is not None:
         return argument
@@ -64,18 +60,16 @@ def lookup_speaker(name: str) -> Any:
     """Return the soundcard ``Speaker`` matching ``name``.
 
     Delegates to :func:`soundcard.get_speaker` (case-insensitive
-    substring + fuzzy id). ``soundcard`` is imported lazily so the
-    package stays importable on hosts without libpulse / WASAPI; the
-    returned value is the duck-typed ``_Speaker`` instance exposing
-    ``id`` / ``name`` / ``channels`` / ``player(...)``.
+    substring + fuzzy id); the id path matters because PipeWire surfaces
+    the virtual sink as ``id="VRCPilotMic"`` /
+    ``name="VRCPilot_Virtual_Mic"``. ``soundcard`` is imported lazily so
+    the package stays importable on hosts without libpulse / WASAPI.
 
     Raises:
         MicDeviceNotFoundError: No match; the message lists every
-            currently-visible output device and points the user at the
-            OS-specific setup step.
+            visible output device and the OS-specific setup hint.
         ImportError: ``soundcard`` is not installed.
-        OSError: ``soundcard`` cannot dlopen its native backend
-            (libpulse on Linux, WASAPI on Windows).
+        OSError: ``soundcard`` cannot dlopen libpulse / WASAPI.
     """
     import soundcard as sc  # pyright: ignore[reportMissingTypeStubs]
 
