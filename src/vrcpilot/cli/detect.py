@@ -1,14 +1,13 @@
 """``vrcpilot detect`` subcommand.
 
 Runs image-query detection against the current VRChat window and emits
-a YAML document on stdout (image-local + desktop-absolute coordinates
-per detection). ``--viz`` additionally writes an annotated PNG.
+a YAML document on stdout (image-local coordinates per detection).
+``--viz`` additionally writes an annotated PNG.
 
 YAML keys are emitted in a fixed order (``sort_keys=False``):
 ``captured_at``, ``window``, ``query``, ``detections``, optional
 ``viz_path``. Each detection carries ``confidence`` / ``scale`` /
-``rotation`` plus ``pos`` (image-local) and ``display_pos``
-(desktop-absolute) ``polygon`` and ``bbox``.
+``rotation`` plus ``pos`` (image-local ``polygon`` and ``bbox``).
 
 Screenshot input sources:
 
@@ -196,10 +195,6 @@ def run(args: argparse.Namespace) -> int:
             "pos": {
                 "polygon": [list(point) for point in det.polygon],
                 "bbox": list(det.bbox),
-            },
-            "display_pos": {
-                "polygon": [list(point) for point in result.display_polygon(det)],
-                "bbox": list(result.display_bbox(det)),
             },
         }
         for det in detections

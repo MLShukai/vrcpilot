@@ -246,28 +246,6 @@ class TestDetectCommandYAML:
         ]
         assert det["pos"]["bbox"] == [10, 20, 50, 18]
 
-    def test_display_pos_arithmetic(
-        self,
-        patched_detect: FakeDetectEngine,
-        capsys: pytest.CaptureFixture[str],
-        query_png: Path,
-    ):
-        del patched_detect
-
-        exit_code = main(["detect", "--query", str(query_png)])
-
-        assert exit_code == 0
-        loaded = yaml.safe_load(capsys.readouterr().out)
-        det = loaded["detections"][0]
-        # Window offset (100, 50) shifts every pos point.
-        assert det["display_pos"]["polygon"] == [
-            [110.0, 70.0],
-            [160.0, 70.0],
-            [160.0, 88.0],
-            [110.0, 88.0],
-        ]
-        assert det["display_pos"]["bbox"] == [110, 70, 50, 18]
-
     def test_captured_at_is_isoformat(
         self,
         patched_detect: FakeDetectEngine,

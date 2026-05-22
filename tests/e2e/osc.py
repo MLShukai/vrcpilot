@@ -93,7 +93,7 @@ def _open_osc_debug_panel() -> None:
         "see saved 01_launchpad artifact"
     )
     gear = config_result.detections[0]
-    gx, gy, gw, gh = config_result.display_bbox(gear)
+    gx, gy, gw, gh = gear.bbox
     gear_cx = gx + gw // 2
     gear_cy = gy + gh // 2
     _helpers.log(f"gear icon -> click ({gear_cx}, {gear_cy})")
@@ -167,11 +167,11 @@ def _open_osc_debug_panel() -> None:
     # highest-confidence detection is wrong -- match the toggle whose
     # row center is closest to the OSC Debug Panel label.
     def _row_distance(det: vrcpilot.Detection) -> int:
-        _tx, ty, _tw, th = toggle_result.display_bbox(det)
+        _tx, ty, _tw, th = det.bbox
         return abs((ty + th // 2) - panel_y)
 
     toggle = min(toggle_result.detections, key=_row_distance)
-    tx, ty, tw, th = toggle_result.display_bbox(toggle)
+    tx, ty, tw, th = toggle.bbox
     toggle_cx = tx + tw // 2
     toggle_cy = ty + th // 2
     _helpers.log(
