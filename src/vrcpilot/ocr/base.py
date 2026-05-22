@@ -1,9 +1,10 @@
 """OCR engine abstract base class and the :class:`OCRWord` value type.
 
 All coordinates handled here are *image-local* — the origin is the
-top-left of the captured image, not the desktop. Conversion to
-desktop-absolute coordinates is the responsibility of higher-level
-helpers (e.g. ``OCRResult.display_polygon``), not the engine.
+top-left of the captured image, not the desktop. Callers that need
+desktop-absolute coordinates compose them from the engine output and
+the originating :class:`~vrcpilot.screenshot.Screenshot`'s
+``x`` / ``y`` offsets.
 """
 
 from __future__ import annotations

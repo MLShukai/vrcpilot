@@ -15,10 +15,9 @@ Steps:
    ``vrcpilot.ocr(shot)`` runs the default ``RapidOCREngine``
    (loads its ONNX models on first call -- downloads ~15 MB to the
    venv on first run) and bundles the words with the screenshot.
-4. Verify each :class:`vrcpilot.OCRWord` has a 4-corner polygon and a
-   confidence in [0, 1], and that ``OCRResult.display_polygon`` /
-   ``display_bbox`` shift to desktop-absolute coordinates by
-   ``screenshot.x`` / ``y``.
+4. Verify each :class:`vrcpilot.OCRWord` has a 4-corner polygon, a
+   confidence in [0, 1], and a window-local bbox that fits inside the
+   captured image.
 5. ``vrcpilot.ocr.render`` overlays the boxes on the screenshot so the
    result can be inspected visually.
 
@@ -115,17 +114,6 @@ def _scenario() -> None:
         assert (
             0 <= bx < shot.width and 0 <= by < shot.height
         ), f"words[{i}] bbox {word.bbox} outside image"
-
-        # display_pos is image bbox shifted by the screenshot origin.
-        dx, dy, dw, dh = result.display_bbox(word)
-        assert dx == bx + shot.x and dy == by + shot.y, (
-            f"words[{i}] display_bbox {(dx, dy)} does not equal "
-            f"image_bbox+origin {(bx + shot.x, by + shot.y)}"
-        )
-        assert dw == bw and dh == bh, (
-            f"words[{i}] display_bbox size {(dw, dh)} differs from "
-            f"image bbox {(bw, bh)}"
-        )
 
     # Log the first few detections so the run output is informative
     # without dumping huge YAML for screens with many labels.

@@ -121,9 +121,9 @@ def _open_osc_debug_panel() -> None:
         "'Search all settings' field not found via OCR; "
         "see saved 02_settings artifact"
     )
-    sx, sy, sw, sh = ocr_result.display_bbox(search_word)
-    search_cx = sx + sw // 2
-    search_cy = sy + sh // 2
+    sbx, sby, sw, sh = search_word.bbox
+    search_cx = shot.x + sbx + sw // 2
+    search_cy = shot.y + sby + sh // 2
     _helpers.log(f"search field -> click ({search_cx}, {search_cy})")
     mouse.move(search_cx, search_cy)
     mouse.click()
@@ -152,8 +152,8 @@ def _open_osc_debug_panel() -> None:
     # tracks the label glyphs and the toggle icon on the same row is
     # vertically aligned to that midline. Top-edge y would bias the
     # row match toward whichever toggle sits highest in its row.
-    px, py, _pw, ph = ocr_result.display_bbox(panel_word)
-    panel_y = py + ph // 2
+    _pbx, pby, _pw, ph = panel_word.bbox
+    panel_y = shot.y + pby + ph // 2
 
     toggle_query = _load_query(_FIXTURE_DIR / "toggle_off.png")
     toggle_result = vrcpilot.detect(shot, toggle_query)

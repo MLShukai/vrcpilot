@@ -16,11 +16,9 @@ YAML schema (stable, ``sort_keys=False`` so the order is fixed):
 - ``words`` - list of detections, each with:
   - ``text`` - recognised string
   - ``confidence`` - 0.0-1.0 float
-  - ``pos`` - image-local coordinates (origin = window top-left)
+  - ``pos`` - window-local coordinates (origin = window top-left)
     - ``polygon`` - 4 ``[x, y]`` corners (TL, TR, BR, BL)
     - ``bbox`` - ``[x, y, width, height]``
-  - ``display_pos`` - desktop-absolute coordinates (``pos`` shifted by
-    ``window.x`` / ``window.y``)
 - ``viz_path`` - absolute path of the annotated PNG (only present when
   ``--viz`` was passed)
 
@@ -144,8 +142,6 @@ def run(args: argparse.Namespace) -> int:
     for word in result.words:
         polygon = [list(point) for point in word.polygon]
         bbox = list(word.bbox)
-        display_polygon = [list(point) for point in result.display_polygon(word)]
-        display_bbox = list(result.display_bbox(word))
         words_payload.append(
             {
                 "text": word.text,
@@ -153,10 +149,6 @@ def run(args: argparse.Namespace) -> int:
                 "pos": {
                     "polygon": polygon,
                     "bbox": bbox,
-                },
-                "display_pos": {
-                    "polygon": display_polygon,
-                    "bbox": display_bbox,
                 },
             }
         )

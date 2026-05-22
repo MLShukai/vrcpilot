@@ -155,9 +155,8 @@ class TestOCRCommandYAML:
         assert exit_code == 0
         loaded = yaml.safe_load(capsys.readouterr().out)
         word = loaded["words"][0]
-        assert list(word.keys()) == ["text", "confidence", "pos", "display_pos"]
+        assert list(word.keys()) == ["text", "confidence", "pos"]
         assert list(word["pos"].keys()) == ["polygon", "bbox"]
-        assert list(word["display_pos"].keys()) == ["polygon", "bbox"]
 
     def test_pos_values(
         self,
@@ -175,26 +174,6 @@ class TestOCRCommandYAML:
         assert word["confidence"] == pytest.approx(0.97)
         assert word["pos"]["polygon"] == [[10, 20], [60, 20], [60, 38], [10, 38]]
         assert word["pos"]["bbox"] == [10, 20, 50, 18]
-
-    def test_display_pos_arithmetic(
-        self,
-        patched_ocr: OCRResult,
-        capsys: pytest.CaptureFixture[str],
-    ):
-        del patched_ocr
-
-        exit_code = main(["ocr"])
-
-        assert exit_code == 0
-        loaded = yaml.safe_load(capsys.readouterr().out)
-        word = loaded["words"][0]
-        assert word["display_pos"]["polygon"] == [
-            [110, 70],
-            [160, 70],
-            [160, 88],
-            [110, 88],
-        ]
-        assert word["display_pos"]["bbox"] == [110, 70, 50, 18]
 
     def test_window_values(
         self,
