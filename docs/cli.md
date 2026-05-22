@@ -6,7 +6,7 @@ This is the flag-by-flag reference for the `vrcpilot` command. For task-oriented
 
 ## Conventions
 
-- Subcommands return exit code `0` on success and `1` on recoverable failure, with a one-line `vrcpilot: <message>` on stderr. A few commands also use `2` for input-shape errors; those cases are called out below.
+- Subcommands return exit code `0` on success and `1` on recoverable failure, with a one-line `vrcpilot: <message>` on stderr. A few commands also use `2` for input-shape errors (for example `record` rejects mismatched `-o` extensions or `--fps` combined with `--audio` with exit `2`); those cases are called out below.
 - `vrcpilot --version` prints the resolved package version (read via `importlib.metadata` so it stays in sync with `pyproject.toml`).
 - The CLI is `argcomplete`-aware (`PYTHON_ARGCOMPLETE_OK` is declared in [`src/vrcpilot/cli/__init__.py`](../src/vrcpilot/cli/__init__.py)). See [`README.md`](../README.md#shell-completion) for setup.
 
@@ -152,52 +152,52 @@ vrcpilot screenshot [-o PATH]
 
 ______________________________________________________________________
 
-## capture
-
-Record the VRChat window as a video stream.
-
-```
-vrcpilot capture [-o PATH] [--fps FLOAT] [--duration SECONDS]
-```
-
-| Option                     | Default      | Description                                                                                                                                                                                         |
-| -------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `-o PATH`, `--output PATH` | stdout (y4m) | If set to an existing directory, files are written as `<dir>/vrcpilot_capture_<UTC>.mp4`. If set to a file path, that path is used as-is (mp4). If unset, a binary y4m stream is written to stdout. |
-| `--fps FLOAT`              | `30.0`       | Target frame rate.                                                                                                                                                                                  |
-| `--duration SECONDS`       | unbounded    | Stop after this many seconds. Without it, the loop runs until interrupted (Ctrl+C).                                                                                                                 |
-
-**Output**:
-
-- File mode: progress is logged to stderr; on completion, the absolute output path is printed once on stdout.
-- Pipe mode: a binary y4m stream is written to stdout; progress is logged to stderr.
-
-**Exit codes**: `0` on success, `1` if no frames were captured or pipe mode is requested while stdout is a TTY.
-
-**Side effects**: writes an mp4 file in file mode.
-
-______________________________________________________________________
-
 ## record
 
-Record VRChat-only audio (via `proc-tap` process loopback — system audio from other applications is not mixed in) to a WAV file or as a raw PCM stream.
+Record VRChat video and/or audio to a file or stream it to stdout. Video is the VRChat window (focus-free, same backends as [`Capture`](python-api.md#vrcpilotcapture)); audio is VRChat-only via `proc-tap` process loopback, so system audio from other applications is not mixed in.
 
 ```
-vrcpilot record [-o PATH] [--duration SECONDS]
+vrcpilot record [-o PATH] [--video] [--audio] [--fps FLOAT] [--duration SECONDS]
 ```
 
-| Option                     | Default        | Description                                                                                                                                                                                                                                                                                               |
-| -------------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `-o PATH`, `--output PATH` | stdout (s16le) | If set to an existing directory, files are written as `<dir>/vrcpilot_record_<YYYYMMDD_HHMMSS>.wav`. If set to any other path, that path is used as-is for the WAV file (no extension forcing). If unset, a raw signed 16-bit little-endian PCM stream (48 kHz, stereo, headerless) is written to stdout. |
-| `--duration SECONDS`       | unbounded      | Stop after this many seconds. Without it, recording continues until interrupted (Ctrl+C).                                                                                                                                                                                                                 |
+| Option                     | Default      | Description                                                                                                                                                                                                                                                                                                                            |
+| -------------------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `-o PATH`, `--output PATH` | stdout (MKV) | File destination. If set to an existing directory, the filename is `<dir>/vrcpilot_record_<YYYYMMDD_HHMMSS>.{mp4,wav}` depending on mode. If set to a file path, the path is used as-is; the extension must match the mode (`.mp4` for video / both, `.wav` for audio-only). If unset, a self-describing MKV stream is sent to stdout. |
+| `--video`                  | off          | Record video. Combined with `--audio`, or with neither flag, records both video and audio.                                                                                                                                                                                                                                             |
+| `--audio`                  | off          | Record audio. Combined with `--video`, or with neither flag, records both video and audio.                                                                                                                                                                                                                                             |
+| `--fps FLOAT`              | `30.0`       | Target video frame rate. Must not be combined with audio-only mode.                                                                                                                                                                                                                                                                    |
+| `--duration SECONDS`       | unbounded    | Stop after this many seconds. Without it, recording continues until interrupted (Ctrl+C).                                                                                                                                                                                                                                              |
 
-**Output**:
+### Mode resolution
 
-- File mode: progress is logged to stderr; on completion, the absolute path of the saved WAV is printed once on stdout.
-- Pipe mode: a binary `s16le` PCM stream is written to stdout; progress is logged to stderr. The stream is **not self-describing** — downstream consumers must specify the format explicitly, e.g. `ffmpeg -f s16le -ar 48000 -ac 2 -i - ...`.
+The `--video` / `--audio` flags map to one of three internal modes:
 
-**Exit codes**: `0` on success, `1` if VRChat is not running, no samples were captured, or pipe mode is requested while stdout is a TTY.
+| `--video` | `--audio` | resulting mode | required file extension |
+| --------- | --------- | -------------- | ----------------------- |
+| absent    | absent    | `both`         | `.mp4`                  |
+| present   | absent    | `video`        | `.mp4`                  |
+| absent    | present   | `audio`        | `.wav`                  |
+| present   | present   | `both`         | `.mp4`                  |
 
-**Side effects**: writes a WAV file in file mode (48 kHz / stereo / 16-bit PCM). Acquires a `proc-tap` process-loopback session against the VRChat PID for the duration of the recording.
+Passing an `-o PATH` whose extension does not match the resolved mode exits `2` with one of `vrcpilot: --video requires .mp4 output (got: ...)`, `vrcpilot: --audio requires .wav output (got: ...)`, or `vrcpilot: video+audio output requires .mp4 (got: ...)`.
+
+`--fps` combined with `--audio` alone exits `2` with `vrcpilot: --fps is not meaningful with --audio (drop --fps or remove --audio)`.
+
+### Output
+
+- **File mode** (`-o PATH` is a file or a directory): progress messages go to stderr; on completion the absolute path of the saved file is printed once on stdout. The file is either H.264 (libx264 / yuv420p) + AAC in an MP4 container, or `pcm_s16le` 48 kHz stereo in a WAV container.
+- **Stdout pipe mode** (`-o` omitted): a self-describing Matroska (MKV) byte stream is written to stdout regardless of mode (`matroska` container, H.264 video and/or AAC audio). Downstream tools can consume it directly, e.g. `vrcpilot record --duration 5 | ffmpeg -i - -c copy /tmp/out.mkv`. Progress messages go to stderr so the stdout byte stream stays pipe-clean. Pipe mode refuses to run if stdout is a TTY (exit `1`).
+
+### Exit codes
+
+- `0` — success.
+- `1` — runtime failure: VRChat is not running, no frames or audio samples were captured, or stdout is a TTY in pipe mode.
+- `2` — input-shape error: `-o` extension does not match the resolved mode, or `--fps` was given with audio-only mode.
+
+### Side effects
+
+- File mode writes an MP4 or WAV to disk; the parent directory must already exist.
+- Acquires a `proc-tap` process-loopback session against the VRChat PID for the audio-bearing portion of the recording.
 
 ______________________________________________________________________
 
