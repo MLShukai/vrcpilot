@@ -1,23 +1,38 @@
-"""E2E scenario: verify Mic loopback via VB-Audio Virtual Cable.
+"""E2E scenario: cross-platform Mic loopback verification.
 
 Drives :class:`vrcpilot.mic.Mic` against the real PortAudio backend and
-confirms that audio written to ``CABLE Input`` re-emerges on
-``CABLE Output``. Unlike every other scenario in this directory, this
-one does **not** launch VRChat: the test is about the mic-modality
-output path (Python -> sounddevice -> VB-Cable -> sounddevice input)
-and VRChat's own audio routing is irrelevant. ``vrcpilot record``
-(proc-tap) is intentionally not used because it captures VRChat output
-audio via process-loopback, which is a different code path from the
-mic output stream this scenario exercises.
+confirms that audio written to the platform's virtual mic device re-emerges
+on the matching loopback recording device. On Windows this resolves to
+VB-Audio Virtual Cable (``CABLE Input`` -> ``CABLE Output``); on Linux it
+resolves to the PipeWire ``VRCPilotMic`` null-sink registered by
+``vrcpilot linux-mic register`` (whose ``Monitor of VRCPilot Virtual Mic``
+source matches the same ``VRCPilotMic`` substring).
+
+Unlike every other scenario in this directory, this one does **not** launch
+VRChat: the test is about the mic-modality output path (Python ->
+sounddevice -> virtual mic -> sounddevice input) and VRChat's own audio
+routing is irrelevant. ``vrcpilot record`` (proc-tap) is intentionally not
+used because it captures VRChat output audio via process-loopback, which is
+a different code path from the mic output stream this scenario exercises.
 
 Strategy:
 
-* Probe :func:`sounddevice.query_devices` for the two halves of
-  VB-Cable. If either is missing the scenario PASSes with a "skipped"
-  note, mirroring how the codebase handles platform-only deps in unit
-  tests via ``pytest.skip``. The same applies if :mod:`sounddevice`
-  itself is not installed (e.g. Linux dev box).
-* A background thread opens ``InputStream`` on ``CABLE Output`` and
+* Resolve the playback and record substrings via the OS default + optional
+  env overrides:
+
+  * Playback substring: ``$VRCPILOT_MIC_DEVICE`` if set, otherwise
+    :func:`vrcpilot.mic.default_device_name`.
+  * Record substring: ``$VRCPILOT_MIC_LOOPBACK_DEVICE`` if set, otherwise
+    derived from the playback substring via a small in-scenario map.
+
+  Both env vars are picked up automatically by ``just e2e-test`` via the
+  ``set dotenv-load := true`` line in the project ``justfile``.
+* Probe :func:`sounddevice.query_devices` for both substrings. If either is
+  missing the scenario PASSes with a "skipped" note, mirroring how the
+  codebase handles platform-only deps in unit tests via ``pytest.skip``.
+  The same applies if :mod:`sounddevice` itself is not installed, or if
+  the Linux setup step (``vrcpilot linux-mic register``) has not been run.
+* A background thread opens ``InputStream`` on the record device and
   appends every callback chunk to a list. The list is converted to a
   contiguous ndarray once the stream is closed, so no synchronisation
   primitive is needed during recording.
@@ -28,7 +43,7 @@ Strategy:
   * RMS of the recorded buffer must clear an "obvious silence" floor.
   * An FFT of the recorded signal must show its strongest bin at the
     played frequency (440 Hz +/- one bin), confirming the signal that
-    transited the cable is the sine we generated rather than noise or
+    transited the loopback is the sine we generated rather than noise or
     a different upstream source. A tight latency / amplitude check
     will be added once real-hardware numbers are observed.
 
@@ -36,18 +51,21 @@ Run with::
 
     just e2e-test mic
 
-Prerequisites:
+Prerequisites (host-dependent):
 
-* Windows host with VB-Audio Virtual Cable installed
-  (https://vb-audio.com/Cable/). Linux/macOS dev boxes do not have a
-  matching virtual loopback convention yet, so the scenario skips
-  cleanly there.
-* ``sounddevice`` (Windows-only project dependency) installed in the
-  active uv environment.
+* Windows: VB-Audio Virtual Cable installed
+  (https://vb-audio.com/Cable/) so ``CABLE Input`` / ``CABLE Output``
+  show up under PortAudio.
+* Linux: ``vrcpilot linux-mic register`` has been run so the
+  ``VRCPilotMic`` PipeWire null-sink (plus its ``Monitor of VRCPilot
+  Virtual Mic`` source) exists.
+* ``sounddevice`` installed in the active uv environment (it is a
+  project-wide dependency now, so ``uv sync`` covers it on every OS).
 """
 
 from __future__ import annotations
 
+import os
 import sys
 import threading
 import time
@@ -61,12 +79,24 @@ from numpy.typing import NDArray
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _helpers  # noqa: E402
 
-#: Cable halves to probe for. Names are matched case-insensitively as
-#: a substring against ``sounddevice``'s device list -- the same rule
-#: :mod:`vrcpilot.mic.devices` uses, so what works here works for
-#: ``Mic("CABLE Input")`` too.
-_PLAYBACK_NAME = "CABLE Input"
-_RECORD_NAME = "CABLE Output"
+#: Env var (e2e-only) overriding the substring used to locate the
+#: recording side of the loopback. The vrcpilot library does **not** read
+#: this variable; it exists solely so a developer with a non-default
+#: virtual-mic setup can still drive this scenario. The playback side is
+#: overridden via ``$VRCPILOT_MIC_DEVICE`` (``vrcpilot.mic.base.DEVICE_ENV_VAR``),
+#: which the library *does* read.
+_LOOPBACK_DEVICE_ENV_VAR = "VRCPILOT_MIC_LOOPBACK_DEVICE"
+
+#: Map from playback substring -> matching recording substring. Keyed by
+#: the canonical playback names produced by
+#: :func:`vrcpilot.mic.default_device_name`. For Linux the same
+#: ``VRCPilotMic`` substring matches both the null-sink itself and its
+#: ``Monitor of VRCPilot Virtual Mic`` source (PortAudio surfaces the
+#: monitor with ``VRCPilotMic`` in its name), so a single entry suffices.
+_DEFAULT_LOOPBACK_RECORD: dict[str, str] = {
+    "CABLE Input": "CABLE Output",
+    "VRCPilotMic": "VRCPilotMic",
+}
 
 #: Sample rate / channel count for the loopback. 48 kHz matches the
 #: project's pinned :data:`vrcpilot.mic.SAMPLE_RATE`. Stereo is passed
@@ -75,8 +105,9 @@ _RECORD_NAME = "CABLE Output"
 _SAMPLE_RATE = 48000
 _CHANNELS = 2
 
-#: Sine tone parameters. 440 Hz (A4) is well within VB-Cable's pass
-#: band and far from DC, so any high-pass on the path leaves it intact.
+#: Sine tone parameters. 440 Hz (A4) is well within both VB-Cable's and
+#: PipeWire's pass band and far from DC, so any high-pass on the path
+#: leaves it intact.
 _FREQUENCY_HZ = 440.0
 _TONE_SECONDS = 1.0
 _CHUNK_SECONDS = 0.1
@@ -92,7 +123,7 @@ _RECORD_LEAD_IN_SECONDS = 0.2
 _RECORD_TAIL_SECONDS = 0.4
 
 #: RMS floor below which we declare the recording "obviously silent".
-#: VB-Cable passes the signal at unity by default, so a 0.7-amplitude
+#: Virtual mics typically pass the signal at unity, so a 0.7-amplitude
 #: sine should land an order of magnitude above this. Picked
 #: conservatively for the first pass; tighten once real-hardware
 #: numbers are in.
@@ -103,12 +134,18 @@ _RMS_SILENCE_FLOOR = 0.01
 #: which would flatten the cross-correlation peak.
 _SINE_AMPLITUDE = 0.7
 
+#: How many FFT bins of slack we allow around the expected 440 Hz peak
+#: when matching the recording's strongest frequency. One bin at
+#: ~1 Hz resolution (FFT of >1 s of audio at 48 kHz) accommodates
+#: rounding without admitting a totally unrelated band.
+_FREQUENCY_BIN_TOLERANCE = 2
+
 
 def _query_devices() -> list[dict[str, Any]] | None:
     """Return PortAudio's device list, or ``None`` if sounddevice missing.
 
     Returning ``None`` (rather than re-raising) lets the caller treat
-    the import failure the same as a missing cable and produce a
+    the import failure the same as a missing virtual mic and produce a
     single "skipped" branch.
     """
     try:
@@ -119,18 +156,19 @@ def _query_devices() -> list[dict[str, Any]] | None:
     return list(sd.query_devices())  # pyright: ignore[reportUnknownMemberType]
 
 
-def _find_device(
+def _resolve_device_index(
     devices: list[dict[str, Any]],
     *,
     name: str,
     direction: str,
 ) -> int | None:
-    """Locate a ``CABLE *`` device, returning its sounddevice index.
+    """Locate a device whose name contains *name*, returning its sounddevice
+    index.
 
     ``direction`` selects ``max_output_channels`` (playback) or
     ``max_input_channels`` (recording) so we never pick the wrong
-    half of the pair -- VB-Cable exposes both names on each side and
-    only one direction is usable per half.
+    half of a pair -- VB-Cable, for instance, exposes both names on
+    each side and only one direction is usable per half.
     """
     field = "max_output_channels" if direction == "output" else "max_input_channels"
     needle = name.lower()
@@ -140,6 +178,50 @@ def _find_device(
         if needle in str(info.get("name", "")).lower():
             return index
     return None
+
+
+def _resolve_device_names() -> tuple[str, str] | str:
+    """Pick the playback / record substrings for this host.
+
+    Returns ``(playback, record)`` on success, or a skip-reason string
+    when the host lacks the prerequisites (unsupported platform, Linux
+    setup not run, etc.). The scenario uses the returned tuple to drive
+    :func:`_resolve_device_index`; substrings come from environment
+    overrides first and OS defaults second.
+    """
+    from vrcpilot.mic import default_device_name
+
+    env_playback = os.environ.get("VRCPILOT_MIC_DEVICE")
+    if env_playback:
+        playback = env_playback
+    else:
+        default = default_device_name()
+        if default is None:
+            return f"no default mic device for platform {sys.platform!r}"
+        playback = default
+
+    # Linux pre-flight: the default substring ("VRCPilotMic") only resolves
+    # after the null-sink has been registered. Import lazily so non-Linux
+    # hosts never touch vrcpilot.mic.linux (its top-level raises off-Linux).
+    if sys.platform == "linux" and playback == "VRCPilotMic":
+        from vrcpilot.mic.linux import is_registered
+
+        if not is_registered():
+            return "VRCPilotMic not registered " "(run 'vrcpilot linux-mic register')"
+
+    env_record = os.environ.get(_LOOPBACK_DEVICE_ENV_VAR)
+    if env_record:
+        record = env_record
+    else:
+        derived = _DEFAULT_LOOPBACK_RECORD.get(playback)
+        if derived is None:
+            return (
+                f"no default loopback record substring for playback "
+                f"{playback!r} (set ${_LOOPBACK_DEVICE_ENV_VAR})"
+            )
+        record = derived
+
+    return (playback, record)
 
 
 def _sine_chunks() -> Iterator[NDArray[np.float32]]:
@@ -160,15 +242,8 @@ def _sine_chunks() -> Iterator[NDArray[np.float32]]:
         yield stereo[start : start + chunk_frames].copy()
 
 
-#: How many FFT bins of slack we allow around the expected 440 Hz peak
-#: when matching the recording's strongest frequency. One bin at
-#: ~1 Hz resolution (FFT of >1 s of audio at 48 kHz) accommodates
-#: rounding without admitting a totally unrelated band.
-_FREQUENCY_BIN_TOLERANCE = 2
-
-
 class _LoopbackRecorder:
-    """Background-thread InputStream pump for ``CABLE Output``.
+    """Background-thread InputStream pump for the loopback record device.
 
     The PortAudio callback runs on its own thread; we only append the
     incoming buffer to a list there and defer concatenation until
@@ -230,16 +305,16 @@ class _LoopbackRecorder:
 def _verify_loopback(recording: NDArray[np.float32]) -> None:
     """Assert the recording carries the played sine, not pure silence.
 
-    Two checks: an RMS floor (rules out the cable being muted / wrong
-    device) and an FFT-peak match against 440 Hz (rules out the signal
-    arriving as noise or as content from an unrelated source). Both
-    are deliberately lenient on this first pass; tighter latency /
+    Two checks: an RMS floor (rules out the virtual mic being muted /
+    wrong device) and an FFT-peak match against 440 Hz (rules out the
+    signal arriving as noise or as content from an unrelated source).
+    Both are deliberately lenient on this first pass; tighter latency /
     amplitude bounds wait for real-hardware calibration.
     """
     n_frames = int(recording.shape[0])
     assert n_frames > 0, "recording buffer is empty (InputStream produced no data)"
 
-    # Mix to mono for the level + spectral checks. Both cable
+    # Mix to mono for the level + spectral checks. Both loopback
     # channels carry the same sine so an unweighted mean is fine.
     mono = recording.mean(axis=1).astype(np.float32)
     rms = float(np.sqrt(np.mean(mono * mono)))
@@ -249,7 +324,7 @@ def _verify_loopback(recording: NDArray[np.float32]) -> None:
     )
     assert rms > _RMS_SILENCE_FLOOR, (
         f"recording RMS {rms:.4f} below silence floor "
-        f"{_RMS_SILENCE_FLOOR:.4f}; VB-Cable likely muted or wrong device"
+        f"{_RMS_SILENCE_FLOOR:.4f}; virtual mic likely muted or wrong device"
     )
 
     # Real-input FFT magnitudes: bin ``k`` corresponds to frequency
@@ -284,19 +359,30 @@ def _scenario() -> str | None:
     if devices is None:
         return "sounddevice not installed"
 
-    playback_idx = _find_device(devices, name=_PLAYBACK_NAME, direction="output")
-    record_idx = _find_device(devices, name=_RECORD_NAME, direction="input")
+    resolved = _resolve_device_names()
+    if isinstance(resolved, str):
+        return resolved
+    playback_name, record_name = resolved
+
+    playback_idx = _resolve_device_index(
+        devices, name=playback_name, direction="output"
+    )
+    record_idx = _resolve_device_index(devices, name=record_name, direction="input")
     if playback_idx is None or record_idx is None:
+        missing = playback_name if playback_idx is None else record_name
         _helpers.log(
-            f"VB-Cable halves not found: "
-            f"{_PLAYBACK_NAME!r} (output) -> {playback_idx}, "
-            f"{_RECORD_NAME!r} (input) -> {record_idx}"
+            f"loopback halves not found: "
+            f"{playback_name!r} (output) -> {playback_idx}, "
+            f"{record_name!r} (input) -> {record_idx}"
         )
-        return "VB-Audio Virtual Cable not installed"
+        return (
+            f"loopback device {missing!r} not found "
+            f"(set $VRCPILOT_MIC_DEVICE / ${_LOOPBACK_DEVICE_ENV_VAR})"
+        )
 
     _helpers.log(
-        f"found VB-Cable: playback={_PLAYBACK_NAME!r} (idx={playback_idx}) "
-        f"record={_RECORD_NAME!r} (idx={record_idx})"
+        f"loopback: playback={playback_name!r} (idx={playback_idx}) "
+        f"record={record_name!r} (idx={record_idx})"
     )
 
     # Import here so the skip branches above can run even on hosts
@@ -312,7 +398,7 @@ def _scenario() -> str | None:
         time.sleep(_RECORD_LEAD_IN_SECONDS)
         _helpers.log(f"playing {_TONE_SECONDS:.2f}s of {_FREQUENCY_HZ:.0f} Hz sine")
         with Mic(
-            _PLAYBACK_NAME,
+            playback_name,
             sample_rate=_SAMPLE_RATE,
             channels=_CHANNELS,
         ) as mic:
