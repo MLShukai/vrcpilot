@@ -52,10 +52,9 @@ _AUDIO_FORMAT_S16 = "s16"
 #: Stereo layout name accepted by :func:`av.AudioFrame.from_ndarray`.
 _AUDIO_LAYOUT_STEREO = "stereo"
 
-#: Symmetric quantisation scale matching
-#: :mod:`vrcpilot.speaker.sinks` so the produced ``.wav`` bytes are
-#: bit-identical to the speaker-only :class:`vrcpilot.WavFileSink` for
-#: the same float32 input.
+#: Symmetric quantisation scale (``+32767``) used when converting
+#: float32 chunks to 16-bit PCM. Clipping is applied after scaling so
+#: out-of-range samples saturate to the int16 extremes.
 _INT16_SCALE: float = float(np.iinfo(np.int16).max)
 
 
@@ -96,10 +95,9 @@ def _float32_to_int16(chunk: NDArray[np.float32]) -> NDArray[np.int16]:
 def _fps_to_fraction(fps: float) -> Fraction:
     """Normalise ``fps`` to a rational with denominator up to 1000.
 
-    PyAV's H.264 encoder expects an integer-friendly rate; we mirror
-    :class:`vrcpilot.capture.sinks.Y4mStdoutFrameSink`'s convention of
-    capping the denominator at 1000 so integer rates stay integers and
-    common rationals (29.97 → 2997/100) survive intact.
+    PyAV's H.264 encoder expects an integer-friendly rate; capping the
+    denominator at 1000 keeps integer rates as integers and lets common
+    rationals (29.97 → 2997/100) survive intact.
     """
     if fps <= 0:
         raise ValueError(f"fps must be positive, got {fps}")
@@ -114,11 +112,11 @@ class BaseMuxer(abc.ABC):
     (validation, properties, context-manager protocol) so subclasses
     only override the three abstract write/close primitives.
 
-    The class is CLI-internal and **not** part of
-    :mod:`vrcpilot.cli.record`'s ``__all__`` — recordings produced by
-    library users should compose the public sinks under
-    :mod:`vrcpilot.capture.sinks` / :mod:`vrcpilot.speaker.sinks`
-    instead.
+    The class is CLI-internal and **not** part of any public
+    ``__all__`` — library users should drive :class:`vrcpilot.Capture`
+    / :class:`vrcpilot.CaptureLoop` and :class:`vrcpilot.Speaker` /
+    :class:`vrcpilot.SpeakerLoop` directly and compose their own sinks
+    on top.
     """
 
     @abc.abstractmethod
@@ -360,11 +358,10 @@ class Mp4FileMuxer(_VideoMixin, _AudioMixin, BaseMuxer):
 class WavFileMuxer(BaseMuxer):
     """Audio-only muxer writing ``pcm_s16le`` 48 kHz stereo to ``.wav``.
 
-    Float32 input is quantised to int16 with the same symmetric scale
-    (``×32767`` with clipping) as :class:`vrcpilot.WavFileSink`, so the
-    payload bytes match for identical input. Calling
-    :meth:`write_video` always raises :class:`RuntimeError` — the WAV
-    container has no video stream.
+    Float32 input is quantised to int16 with symmetric scaling
+    (``×32767`` with clipping). Calling :meth:`write_video` always
+    raises :class:`RuntimeError` — the WAV container has no video
+    stream.
 
     Args:
         output_path: Destination ``.wav`` path. Parent directory must

@@ -271,8 +271,8 @@ class _NonCloseableBytesIO(io.BytesIO):
     """A :class:`BytesIO` that records whether ``close`` was called.
 
     Used to assert that :class:`MkvStdoutMuxer` does **not** close
-    stream we hand it (parity with the ``RawPcmStdoutSink`` /
-    ``Y4mStdoutFrameSink`` policy).
+    a stream we hand it — the caller owns the lifecycle of any
+    stream they passed in via ``stream=``.
     """
 
     closed_by_muxer: bool = False
@@ -355,7 +355,7 @@ class TestMkvStdoutMuxer:
             muxer.write_video(_video_frame())
 
         # The muxer must only flush, never close, a caller-owned stream
-        # (mirrors RawPcmStdoutSink / Y4mStdoutFrameSink behaviour).
+        # (the caller passed it in, so they own the lifecycle).
         assert buf.closed_by_muxer is False
         assert not buf.closed
 

@@ -23,7 +23,6 @@ class TestPackage:
             "AudioCallback",
             "Speaker",
             "SpeakerLoop",
-            "WavFileSink",
         ],
     )
     def test_speaker_modality_re_exported_at_top_level(self, name: str):
