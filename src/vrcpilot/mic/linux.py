@@ -40,10 +40,18 @@ _logger = logging.getLogger(__name__)
 #: PipeWire config fragment that declares the ``VRCPilotMic`` null-sink.
 #: Mirrors the runtime ``module_load`` arguments below so PipeWire
 #: rebuilds the same sink after a restart / re-login.
+#:
+#: Written in PipeWire 1.0+ syntax: the standalone
+#: ``libpipewire-module-null-sink`` module was removed and replaced by
+#: ``module-adapter`` driving the built-in ``support.null-audio-sink``
+#: factory. The older ``context.modules`` form aborts daemon start-up
+#: on 1.0+ (``mandatory module ... No such file or directory`` → exit
+#: 254), so this fragment must not regress.
 _PIPEWIRE_CONF: Final[str] = """\
-context.modules = [
-    {   name = libpipewire-module-null-sink
+context.objects = [
+    {   factory = adapter
         args = {
+            factory.name     = support.null-audio-sink
             node.name        = "VRCPilotMic"
             node.description = "VRCPilot Virtual Mic"
             media.class      = "Audio/Sink"

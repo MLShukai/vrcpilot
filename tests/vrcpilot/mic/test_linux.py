@@ -92,7 +92,12 @@ class TestRegisterVirtualMic:
         )
         contents = result.config_path.read_text()
         assert 'node.name        = "VRCPilotMic"' in contents
-        assert "libpipewire-module-null-sink" in contents
+        # PipeWire 1.0+ removed libpipewire-module-null-sink; the
+        # replacement is module-adapter + support.null-audio-sink.
+        assert "context.objects" in contents
+        assert "factory = adapter" in contents
+        assert "support.null-audio-sink" in contents
+        assert "libpipewire-module-null-sink" not in contents
         assert result.created_config is True
 
     def test_runtime_load_calls_pulse_module_load(
