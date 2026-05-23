@@ -77,6 +77,76 @@ requires_x11_display = pytest.mark.skipif(
     not has_x11_display(), reason="X11 display unavailable"
 )
 
+
+@functools.lru_cache(maxsize=1)
+def has_pipewire() -> bool:
+    """Return ``True`` when a PipeWire daemon is reachable on this host.
+
+    Probes by invoking ``pw-cli info 0`` which queries the running
+    PipeWire core; any non-zero exit or missing binary means the daemon
+    is not available. Cached for the same reason as
+    :func:`has_x11_display` -- the daemon's presence does not change
+    during a pytest run.
+
+    Returns ``False`` on non-Linux platforms unconditionally; PipeWire
+    is a Linux-only resource in this project.
+    """
+    if not sys.platform.startswith("linux"):
+        return False
+    import shutil
+    import subprocess
+
+    if shutil.which("pw-cli") is None:
+        return False
+    try:
+        result = subprocess.run(
+            ["pw-cli", "info", "0"],
+            capture_output=True,
+            timeout=2.0,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+    return result.returncode == 0
+
+
+#: Skip a test when no PipeWire daemon is reachable.
+#:
+#: Use on tests that spawn ``pw-cli`` / ``pw-record`` or load PipeWire
+#: modules (e.g. ``module-null-sink``). When skipped the behaviour
+#: should be covered by a ``tests/e2e/`` scenario instead.
+requires_pipewire = pytest.mark.skipif(
+    not has_pipewire(), reason="PipeWire daemon unavailable"
+)
+
+
+@functools.lru_cache(maxsize=1)
+def has_uinput() -> bool:
+    """Return ``True`` when ``/dev/uinput`` is writable by this process.
+
+    ``inputtino`` requires write access to ``/dev/uinput`` to synthesise
+    input events. On most Linux desktops this needs either the
+    ``input`` group membership or a udev rule; CI without those will
+    fail before reaching the test body.
+
+    Returns ``False`` on non-Linux platforms unconditionally.
+    """
+    if not sys.platform.startswith("linux"):
+        return False
+    import os
+
+    return os.access("/dev/uinput", os.W_OK)
+
+
+#: Skip a test when ``/dev/uinput`` is not writable.
+#:
+#: Use on tests that drive the real ``inputtino`` backend (keyboard
+#: down/up, mouse move/click). When skipped the behaviour should be
+#: covered by a ``tests/e2e/`` scenario instead.
+requires_uinput = pytest.mark.skipif(
+    not has_uinput(), reason="/dev/uinput not writable"
+)
+
 #: Re-exported polling defaults for the e2e ``_helpers`` import surface.
 #: Both constants forward to :mod:`vrcpilot.process` so changing one
 #: place updates the whole project.
