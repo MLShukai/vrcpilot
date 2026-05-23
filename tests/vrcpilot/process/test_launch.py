@@ -32,28 +32,35 @@ from vrcpilot.process import (
 from vrcpilot.process.launch import build_vrchat_launch_args, validate_launch_args
 
 
-@pytest.fixture(autouse=True)
-def _bypass_preflight(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stub Linux preflight for the argv/env shape tests.
+def _bypass_preflight(mocker: MockerFixture) -> None:
+    """Stub Linux preflight so argv/env shape tests don't depend on host
+    DISPLAY / Steam state.
 
-    Real preflight inspects host state (DISPLAY env, running Steam process)
-    which is irrelevant to argv-shape assertions and would otherwise force
-    every test in this module to set up DISPLAY or stub psutil. The dedicated
+    Requires ``vrcpilot.process.linux`` to be importable at the time of
+    call: that is, the runner is Linux *or* the caller has already
+    monkeypatched ``sys.platform`` to ``"linux"``. The dedicated
     ``TestPreflightLinuxEnvironment`` class in
-    :mod:`tests.vrcpilot.process.test_linux` exercises the real implementation
-    in isolation.
-
-    ``launch()`` does a deferred ``from .linux import preflight_linux_environment``
-    only on Linux, so the bypass only needs to attach on Linux. On Windows
-    runs, ``launch()`` never imports the module and this fixture is a no-op.
+    :mod:`tests.vrcpilot.process.test_linux` exercises the real
+    implementation in isolation.
     """
-    if sys.platform != "linux":
-        return
-    import vrcpilot.process.linux as linux_mod
-
-    monkeypatch.setattr(
-        linux_mod, "preflight_linux_environment", lambda *, via_steam: None
+    mocker.patch(
+        "vrcpilot.process.linux.preflight_linux_environment",
+        return_value=None,
     )
+
+
+@pytest.fixture(autouse=True)
+def _autouse_preflight_bypass(mocker: MockerFixture) -> None:
+    """On Linux runners, bypass the real preflight for every test in this
+    module so via_steam / direct-spawn argv tests don't depend on host DISPLAY
+    or Steam state.
+
+    On Windows runners ``vrcpilot.process.linux`` is not importable at
+    autouse time; the :func:`linux_direct_spawn` fixture covers those
+    runs by bypassing after it patches ``sys.platform = "linux"``.
+    """
+    if sys.platform == "linux":
+        _bypass_preflight(mocker)
 
 
 @pytest.fixture
@@ -134,6 +141,7 @@ def linux_direct_spawn(
     the concrete paths (e.g. for argv assertions) can read them back.
     """
     monkeypatch.setattr(sys, "platform", "linux")
+    _bypass_preflight(mocker)
     launcher = tmp_path / "launch.exe"
     launcher.write_bytes(b"")
     umu = tmp_path / "umu-run"
