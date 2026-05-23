@@ -996,15 +996,6 @@ wheels = [
 ]
 
 [[package]]
-name = "umu-launcher"
-version = "1.4.0"
-source = { git = "https://github.com/Open-Wine-Components/umu-launcher.git#7f360de5e7f8d92944dd5ccd75ed6b923644afee" }
-dependencies = [
-    { name = "python-xlib" },
-    { name = "urllib3" },
-]
-
-[[package]]
 name = "urllib3"
 version = "2.6.3"
 source = { registry = "https://pypi.org/simple" }
@@ -1068,7 +1059,6 @@ dev = [
     { name = "types-python-xlib", marker = "sys_platform == 'linux'" },
     { name = "types-pywin32", marker = "sys_platform == 'win32'" },
     { name = "types-pyyaml" },
-    { name = "umu-launcher", marker = "sys_platform == 'linux'" },
 ]
 
 [package.metadata]
@@ -1106,7 +1096,6 @@ dev = [
     { name = "types-python-xlib", marker = "sys_platform == 'linux'", specifier = ">=0.33" },
     { name = "types-pywin32", marker = "sys_platform == 'win32'", specifier = ">=311.0.0.20260408" },
     { name = "types-pyyaml", specifier = ">=6.0.12.20260408" },
-    { name = "umu-launcher", marker = "sys_platform == 'linux'", git = "https://github.com/Open-Wine-Components/umu-launcher.git" },
 ]
 
 [[package]]

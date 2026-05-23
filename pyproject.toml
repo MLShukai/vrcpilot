@@ -82,7 +82,6 @@ dev = [
     "types-python-xlib>=0.33; sys_platform == 'linux'",
     "types-pywin32>=311.0.0.20260408 ; sys_platform == 'win32'",
     "types-pyyaml>=6.0.12.20260408",
-    "umu-launcher ; sys_platform == 'linux'",
 ]
 
 
@@ -202,4 +201,3 @@ exclude_lines = [
 
 [tool.uv.sources]
 inputtino-python = { git = "https://github.com/games-on-whales/inputtino.git", subdirectory = "bindings/python" }
-umu-launcher = { git = "https://github.com/Open-Wine-Components/umu-launcher.git" }
