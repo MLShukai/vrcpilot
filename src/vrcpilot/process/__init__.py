@@ -155,17 +155,30 @@ def resolve_pid(pid: int | None) -> int:
 def wait_for_pid(
     timeout: float = PID_WAIT_TIMEOUT,
     interval: float = PID_WAIT_INTERVAL,
+    *,
+    pid: int | None = None,
 ) -> int | None:
     """Poll for a VRChat PID until one appears or ``timeout`` elapses.
 
-    Uses :func:`find_pid` so the first match wins (enumeration order
-    is OS-defined). Returns ``None`` if the deadline expired before
-    any VRChat process appeared.
+    With ``pid=None`` (default), returns the newest VRChat PID once at
+    least one instance is running. The "newest" comes from
+    :func:`find_pids` (descending ``create_time``), so the most recently
+    started process wins.
+
+    With ``pid=<int>`` specified, polls ``psutil.pid_exists(pid)`` and
+    returns that exact PID once it's alive. Useful for waiting on a
+    specific instance after a multi-instance launch.
+
+    Returns ``None`` if the deadline expired before the condition was
+    met.
     """
     deadline = time.monotonic() + timeout
     while True:
-        pid = find_pid()
-        if pid is not None:
+        if pid is None:
+            pids = find_pids()
+            if pids:
+                return pids[0]
+        elif psutil.pid_exists(pid):
             return pid
         if time.monotonic() >= deadline:
             return None
@@ -175,47 +188,93 @@ def wait_for_pid(
 def wait_for_no_pid(
     timeout: float = PID_WAIT_TIMEOUT,
     interval: float = PID_WAIT_INTERVAL,
+    *,
+    pid: int | None = None,
 ) -> bool:
-    """Poll until no VRChat process is running, or ``timeout`` elapses.
+    """Poll until VRChat is no longer running, or ``timeout`` elapses.
 
-    Mirror of :func:`wait_for_pid` for the teardown path. Useful after
-    :func:`terminate` to confirm the kill actually settled. Returns
-    ``True`` once VRChat is gone; ``False`` on timeout.
+    With ``pid=None`` (default), waits until :func:`find_pids` returns
+    an empty list — i.e. every VRChat instance has exited.
+
+    With ``pid=<int>`` specified, polls ``psutil.pid_exists(pid)`` and
+    returns once that specific PID is gone (other VRChat instances may
+    still be running).
+
+    Returns ``True`` when the condition was met before timeout, ``False``
+    otherwise.
     """
     deadline = time.monotonic() + timeout
     while True:
-        if find_pid() is None:
+        if pid is None:
+            if not find_pids():
+                return True
+        elif not psutil.pid_exists(pid):
             return True
         if time.monotonic() >= deadline:
             return False
         time.sleep(interval)
 
 
-def terminate(*, timeout: float = 5.0) -> list[int]:
-    """Forcefully ``kill`` every running VRChat process.
+def terminate(*pids: int, timeout: float = 5.0) -> list[int]:
+    """Forcefully ``kill`` VRChat processes.
 
-    Returns the PIDs that were issued ``kill()`` (empty when none were
-    running). PIDs are returned even if a process is still listed after
-    ``timeout`` — the kill was issued, only the wait did not observe
-    completion.
+    With no positional arguments, kills every running VRChat process
+    (legacy behavior). With explicit ``pids``, kills only those PIDs.
+    Each explicit PID is validated against
+    ``psutil.Process(pid).name() == VRCHAT_PROCESS_NAME`` before
+    issuing ``kill()`` so an unrelated process is never terminated by
+    mistake.
+
+    Args:
+        *pids: Optional explicit PIDs to kill. When empty, every
+            running VRChat process is targeted.
+        timeout: Seconds to wait for the killed processes to exit
+            after ``kill()`` is issued.
+
+    Returns:
+        The PIDs that received ``kill()``. Empty when nothing matched
+        (no VRChat running and no explicit PIDs given, or every
+        explicit PID was already gone).
+
+    Raises:
+        ValueError: An explicit PID exists but is not a VRChat process
+            (``psutil.Process.name()`` mismatch).
+            ``psutil.NoSuchProcess`` for a missing PID is *not* an
+            error — it is silently skipped so callers can re-run
+            ``terminate`` idempotently.
     """
-    procs = [
-        p
-        for p in psutil.process_iter(["name"])
-        if p.info["name"] == VRCHAT_PROCESS_NAME
-    ]
-    if not procs:
+    targets: list[psutil.Process]
+    if pids:
+        targets = []
+        for pid in pids:
+            try:
+                proc = psutil.Process(pid)
+                name = proc.name()
+            except psutil.NoSuchProcess:
+                # Already gone -- treat as success for idempotent callers.
+                continue
+            if name != VRCHAT_PROCESS_NAME:
+                raise ValueError(f"PID {pid} is not a VRChat process (name={name!r})")
+            targets.append(proc)
+    else:
+        targets = [
+            p
+            for p in psutil.process_iter(["name"])
+            if p.info["name"] == VRCHAT_PROCESS_NAME
+        ]
+
+    if not targets:
         return []
     # Snapshot pids before kill: psutil keeps ``pid`` valid post-kill,
     # but reading it eagerly is the defensive choice.
-    killed_pids = [p.pid for p in procs]
-    for proc in procs:
+    killed_pids = [p.pid for p in targets]
+    for proc in targets:
         try:
             proc.kill()
         except psutil.NoSuchProcess:
             # Process exited between enumeration and kill - treat as success.
             pass
-    psutil.wait_procs(procs, timeout=timeout)
+    psutil.wait_procs(targets, timeout=timeout)
     return killed_pids
 
 

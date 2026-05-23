@@ -49,6 +49,17 @@ class FakeProcess:
             raise self._create_time_raises
         return self._create_time
 
+    def name(self) -> str:
+        """Return the process name as a ``psutil.Process`` callable would.
+
+        ``psutil.Process(pid).name()`` is used by validate paths in
+        :func:`vrcpilot.process.terminate` to ensure an explicit PID belongs
+        to VRChat before issuing ``kill()``. Mirrors ``info["name"]`` so
+        both lookup styles return the same string.
+        """
+        name_value = self.info.get("name")
+        return name_value if isinstance(name_value, str) else ""
+
 
 class FakePopen:
     """Stand-in for ``subprocess.Popen``.
