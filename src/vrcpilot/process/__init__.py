@@ -83,6 +83,23 @@ class UmuLauncherNotFoundError(RuntimeError):
     """
 
 
+class VRChatDisplayNotAvailableError(RuntimeError):
+    """Raised when ``launch()`` (direct-spawn) is invoked on Linux without a
+    graphical display attached.
+
+    The umu-run + Wine subprocess needs a display server to draw into.
+    With neither ``$DISPLAY`` (X11 / XWayland) nor ``$WAYLAND_DISPLAY``
+    (Wayland-native) set, umu-run does not fail fast — it hangs waiting
+    for a server. vrcpilot detects this pre-spawn so callers (notably
+    the e2e harness running over plain SSH) see an immediate, actionable
+    error instead of a stuck process.
+
+    Only the direct-spawn route is gated; ``via_steam=True`` delegates
+    display setup to the already-running Steam desktop client and is
+    instead pre-flighted by a Steam-process-running check.
+    """
+
+
 def find_pid() -> int | None:
     """Return the newest VRChat PID, or ``None`` if absent. **Deprecated.**
 
@@ -309,6 +326,7 @@ __all__ = [
     "VRCHAT_PROCESS_NAME",
     "VRCHAT_STEAM_APP_ID",
     "VRChatAlreadyRunningError",
+    "VRChatDisplayNotAvailableError",
     "VRChatLauncherNotFoundError",
     "VRChatMultipleInstancesError",
     "VRChatNotRunningError",

@@ -128,6 +128,47 @@ def _validate_launch_args(
             raise ValueError("wineprefix/proton_path/profile are Linux-only")
 
 
+def _preflight_linux_environment(*, via_steam: bool) -> None:
+    """Linux 限定の runtime 環境チェック。direct-spawn は $DISPLAY / $WAYLAND_DISPLAY
+    を、via_steam は Steam クライアントの起動を要求する。
+
+    direct-spawn: ``umu-run`` + Wine は GUI セッションへ attach できないと
+    block して進まない (SSH 経由などで $DISPLAY が無い環境で発生)。事前検出
+    して :class:`VRChatDisplayNotAvailableError` を投げる方が、subprocess
+    が永久に hang するより早く失敗できる。X11 / Wayland どちらでも実用上は
+    動くので、$DISPLAY と $WAYLAND_DISPLAY のいずれかが立っていれば OK と
+    する。
+
+    via_steam: ``steam.exe -applaunch`` は Steam クライアントが既に起動して
+    いることを前提とした call (Steam は自分の display attachment を持って
+    いる)。vrcpilot からは Steam UI を立ち上げられないので、未起動なら
+    :class:`SteamNotRunningError` を投げてユーザーに通知する。Windows 上では
+    Steam が裏で常駐していなくても ``-applaunch`` が UI を立ち上げてくれる
+    ので、このチェックは Linux 限定。
+    """
+    if sys.platform != "linux":
+        return
+    if via_steam:
+        from vrcpilot.steam import SteamNotRunningError, is_steam_running
+
+        if not is_steam_running():
+            raise SteamNotRunningError(
+                "Steam client is not running on this Linux host. "
+                "Start the Steam desktop client in a graphical session "
+                "before retrying launch(via_steam=True)."
+            )
+        return
+    if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        from . import VRChatDisplayNotAvailableError
+
+        raise VRChatDisplayNotAvailableError(
+            "Neither DISPLAY nor WAYLAND_DISPLAY is set; "
+            "vrcpilot launch (direct-spawn) requires a graphical session. "
+            "Run from a desktop session, or set DISPLAY=:0 (or WAYLAND_DISPLAY) "
+            "before invoking launch()."
+        )
+
+
 def _wait_for_new_pid(
     pre_pids: set[int],
     *,
@@ -218,11 +259,16 @@ def launch(
 
     Raises:
         SteamNotFoundError: ``via_steam=True`` but Steam not found.
+        SteamNotRunningError: Linux + ``via_steam=True`` but the Steam
+            desktop client is not running on the host.
         VRChatLauncherNotFoundError: ``launch.exe`` cannot be located.
         UmuLauncherNotFoundError: Linux but ``umu-run`` is missing from
             PATH.
         VRChatAlreadyRunningError: ``via_steam=True`` but VRChat is
             already running.
+        VRChatDisplayNotAvailableError: Linux + direct-spawn but neither
+            ``$DISPLAY`` nor ``$WAYLAND_DISPLAY`` is set (no graphical
+            session attached).
         ValueError: Invalid argument combination (see
             :func:`_validate_launch_args`).
     """
@@ -250,6 +296,7 @@ def launch(
         proton_path=proton_path,
         profile=profile,
     )
+    _preflight_linux_environment(via_steam=via_steam)
 
     vrchat_args = build_vrchat_launch_args(
         no_vr=no_vr,

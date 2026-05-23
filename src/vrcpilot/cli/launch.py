@@ -14,10 +14,11 @@ from vrcpilot.process import (
     OscConfig,
     UmuLauncherNotFoundError,
     VRChatAlreadyRunningError,
+    VRChatDisplayNotAvailableError,
     VRChatLauncherNotFoundError,
     launch,
 )
-from vrcpilot.steam import SteamNotFoundError
+from vrcpilot.steam import SteamNotFoundError, SteamNotRunningError
 
 from ._common import SubParsersAction, attach_completer
 
@@ -173,7 +174,9 @@ def run(args: argparse.Namespace) -> int:
 
     * 0: success (PID printed) or wait was skipped
     * 1: wait timed out without observing a new PID
-    * 2: Steam/launch.exe/umu-run not found, or invalid flag combination
+    * 2: Steam/launch.exe/umu-run not found, invalid flag combination, or
+      Linux pre-flight failed (no DISPLAY/WAYLAND_DISPLAY for direct-spawn,
+      Steam client not running for ``--via-steam``)
     * 3: :class:`VRChatAlreadyRunningError` was raised (currently only
       reachable via the ``--via-steam`` route)
     """
@@ -205,7 +208,9 @@ def run(args: argparse.Namespace) -> int:
     except (
         ValueError,
         SteamNotFoundError,
+        SteamNotRunningError,
         UmuLauncherNotFoundError,
+        VRChatDisplayNotAvailableError,
         VRChatLauncherNotFoundError,
     ) as exc:
         print(f"vrcpilot: {exc}", file=sys.stderr)

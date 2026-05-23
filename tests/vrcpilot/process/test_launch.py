@@ -21,16 +21,41 @@ import pytest
 from pytest_mock import MockerFixture
 
 from tests.fakes import FakePopen, FakeProcess
+from tests.helpers import only_linux
 from vrcpilot.process import (
     VRCHAT_PROCESS_NAME,
     OscConfig,
     VRChatAlreadyRunningError,
+    VRChatDisplayNotAvailableError,
     launch,
 )
 from vrcpilot.process.launch import (
+    _preflight_linux_environment,
     _profile_wineprefix,
     _validate_launch_args,
 )
+from vrcpilot.steam import SteamNotRunningError
+
+
+@pytest.fixture(autouse=True)
+def _bypass_preflight(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub :func:`_preflight_linux_environment` for the argv/env shape tests.
+
+    Real preflight inspects host state (DISPLAY env, running Steam process)
+    which is irrelevant to argv-shape assertions and would otherwise force
+    every test in this module to set up DISPLAY or stub psutil. The dedicated
+    :class:`TestPreflightLinuxEnvironment` class exercises the real
+    implementation in isolation.
+
+    ``vrcpilot.process.launch`` resolves to the re-exported :func:`launch`
+    *function* (the package shadows the submodule attribute), so go through
+    ``sys.modules`` to reach the real module object — same dance as
+    :func:`fake_popen`.
+    """
+    launch_mod = sys.modules["vrcpilot.process.launch"]
+    monkeypatch.setattr(
+        launch_mod, "_preflight_linux_environment", lambda *, via_steam: None
+    )
 
 
 @pytest.fixture
@@ -162,6 +187,83 @@ class TestValidateLaunchArgs:
             _validate_launch_args(
                 via_steam=False, wineprefix=None, proton_path=None, profile=0
             )
+
+
+class TestPreflightLinuxEnvironment:
+    """Linux runtime preflight (DISPLAY for direct-spawn, Steam for via_steam).
+
+    The autouse ``_bypass_preflight`` fixture rewires the module-level
+    binding inside :mod:`vrcpilot.process.launch` so :func:`launch` itself
+    sees a no-op. These tests call the original function directly via its
+    test-module-local import, so the autouse stub does not interfere.
+    """
+
+    def test_no_op_on_windows_direct_spawn(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setattr(sys, "platform", "win32")
+        # Should be a no-op regardless of env / Steam state.
+        monkeypatch.delenv("DISPLAY", raising=False)
+        monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+        _preflight_linux_environment(via_steam=False)
+
+    def test_no_op_on_windows_via_steam(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setattr(sys, "platform", "win32")
+        _preflight_linux_environment(via_steam=True)
+
+    @only_linux
+    def test_direct_spawn_raises_without_display(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.delenv("DISPLAY", raising=False)
+        monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+
+        with pytest.raises(VRChatDisplayNotAvailableError, match="DISPLAY"):
+            _preflight_linux_environment(via_steam=False)
+
+    @only_linux
+    def test_direct_spawn_accepts_x11_display(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("DISPLAY", ":0")
+        monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+
+        _preflight_linux_environment(via_steam=False)
+
+    @only_linux
+    def test_direct_spawn_accepts_wayland_only(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.delenv("DISPLAY", raising=False)
+        monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
+
+        _preflight_linux_environment(via_steam=False)
+
+    @only_linux
+    def test_direct_spawn_rejects_empty_display(self, monkeypatch: pytest.MonkeyPatch):
+        # An empty string should be treated the same as "unset" so the
+        # check is not satisfied by ``DISPLAY=`` left over from a stripped
+        # systemd unit env.
+        monkeypatch.setenv("DISPLAY", "")
+        monkeypatch.setenv("WAYLAND_DISPLAY", "")
+
+        with pytest.raises(VRChatDisplayNotAvailableError):
+            _preflight_linux_environment(via_steam=False)
+
+    @only_linux
+    def test_via_steam_raises_when_steam_not_running(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        monkeypatch.setattr("vrcpilot.steam.is_steam_running", lambda: False)
+        # No DISPLAY required for via_steam — verify the check skips it
+        # entirely.
+        monkeypatch.delenv("DISPLAY", raising=False)
+        monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+
+        with pytest.raises(SteamNotRunningError, match="Steam"):
+            _preflight_linux_environment(via_steam=True)
+
+    @only_linux
+    def test_via_steam_passes_when_steam_running(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setattr("vrcpilot.steam.is_steam_running", lambda: True)
+        # DISPLAY-less environment must not fail the via_steam path: Steam
+        # owns the display attachment in that case.
+        monkeypatch.delenv("DISPLAY", raising=False)
+        monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+
+        _preflight_linux_environment(via_steam=True)
 
 
 class TestProfileWineprefix:

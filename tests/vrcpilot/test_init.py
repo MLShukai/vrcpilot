@@ -105,7 +105,9 @@ class TestNewProcessExceptions:
             "VRChatMultipleInstancesError",
             "VRChatLauncherNotFoundError",
             "VRChatAlreadyRunningError",
+            "VRChatDisplayNotAvailableError",
             "UmuLauncherNotFoundError",
+            "SteamNotRunningError",
         ],
     )
     def test_exposed_at_top_level(self, name: str) -> None:

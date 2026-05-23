@@ -45,6 +45,7 @@ from vrcpilot.process import (
     OscConfig,
     UmuLauncherNotFoundError,
     VRChatAlreadyRunningError,
+    VRChatDisplayNotAvailableError,
     VRChatLauncherNotFoundError,
     VRChatMultipleInstancesError,
     VRChatNotRunningError,
@@ -68,7 +69,7 @@ from vrcpilot.process._executable import (  # noqa: PLC2701
 )
 from vrcpilot.screenshot import Screenshot, take_screenshot
 from vrcpilot.speaker import AudioCallback, Speaker, SpeakerLoop
-from vrcpilot.steam import SteamNotFoundError
+from vrcpilot.steam import SteamNotFoundError, SteamNotRunningError
 from vrcpilot.window import focus, is_foreground, unfocus
 
 #: Resolved from distribution metadata so it stays in sync with
@@ -113,12 +114,14 @@ __all__ = [
     "Speaker",
     "SpeakerLoop",
     "SteamNotFoundError",
+    "SteamNotRunningError",
     "take_screenshot",
     "TemplateDetectEngine",
     "terminate",
     "UmuLauncherNotFoundError",
     "unfocus",
     "VRChatAlreadyRunningError",
+    "VRChatDisplayNotAvailableError",
     "VRChatLauncherNotFoundError",
     "VRChatMultipleInstancesError",
     "VRChatNotFocusedError",

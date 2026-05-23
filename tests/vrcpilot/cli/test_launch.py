@@ -19,9 +19,10 @@ from vrcpilot.cli import main
 from vrcpilot.process import (
     UmuLauncherNotFoundError,
     VRChatAlreadyRunningError,
+    VRChatDisplayNotAvailableError,
     VRChatLauncherNotFoundError,
 )
-from vrcpilot.steam import SteamNotFoundError
+from vrcpilot.steam import SteamNotFoundError, SteamNotRunningError
 
 
 @pytest.fixture
@@ -188,6 +189,22 @@ class TestLaunchExitCodes:
         fake_launch.side_effect = ValueError("bad flag combo")
         assert main(["launch", "--via-steam", "--profile", "1"]) == 2
         assert "bad flag combo" in capsys.readouterr().err
+
+    def test_exit_2_on_display_not_available(
+        self, fake_launch: MagicMock, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        fake_launch.side_effect = VRChatDisplayNotAvailableError(
+            "No DISPLAY/WAYLAND_DISPLAY"
+        )
+        assert main(["launch"]) == 2
+        assert "DISPLAY" in capsys.readouterr().err
+
+    def test_exit_2_on_steam_not_running(
+        self, fake_launch: MagicMock, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        fake_launch.side_effect = SteamNotRunningError("Steam client not running")
+        assert main(["launch", "--via-steam"]) == 2
+        assert "Steam client not running" in capsys.readouterr().err
 
     def test_exit_3_on_already_running(
         self, fake_launch: MagicMock, capsys: pytest.CaptureFixture[str]
