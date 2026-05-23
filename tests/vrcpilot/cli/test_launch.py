@@ -153,14 +153,13 @@ class TestLaunchExitCodes:
         assert main(["launch"]) == 1
         assert "did not start" in capsys.readouterr().err
 
-    def test_exit_0_when_wait_skipped(self, fake_launch: MagicMock) -> None:
+    @pytest.mark.parametrize("timeout", ["0", "-1"])
+    def test_exit_0_when_wait_skipped(
+        self, fake_launch: MagicMock, timeout: str
+    ) -> None:
+        # Any <=0 value short-circuits the wait and exits 0.
         fake_launch.return_value = None
-        assert main(["launch", "--wait-timeout", "0"]) == 0
-
-    def test_exit_0_when_wait_skipped_negative(self, fake_launch: MagicMock) -> None:
-        # Lock the boundary: any <=0 value skips the wait.
-        fake_launch.return_value = None
-        assert main(["launch", "--wait-timeout", "-1"]) == 0
+        assert main(["launch", "--wait-timeout", timeout]) == 0
 
     def test_exit_2_on_steam_not_found(
         self, fake_launch: MagicMock, capsys: pytest.CaptureFixture[str]
