@@ -29,12 +29,12 @@ def _scenario() -> None:
 
     _helpers.warmup()
 
-    pid_after = vrcpilot.find_pid()
-    assert pid_after == pid, (
+    pids_after = vrcpilot.find_pids()
+    assert pids_after == [pid], (
         f"VRChat PID changed or disappeared after warmup "
-        f"(before={pid}, after={pid_after})"
+        f"(before={pid}, after={pids_after})"
     )
-    _helpers.log(f"VRChat still alive after warmup (pid={pid_after})")
+    _helpers.log(f"VRChat still alive after warmup (pid={pid})")
 
     _helpers.log("terminating VRChat")
     assert vrcpilot.terminate(), "vrcpilot.terminate() returned False"
