@@ -55,18 +55,7 @@ from vrcpilot.process import (
     resolve_pid,
     terminate,
 )
-
-# ``find_vrchat_launcher`` / ``find_umu_launcher`` live in the private
-# ``vrcpilot.process._executable`` module but the functions themselves
-# are part of the public API. Importing them directly avoids touching
-# ``process/__init__.py`` while parallel work (C8) is modifying it.
-# Future cleanup: once C8 lands, re-route through
-# ``vrcpilot.process.find_vrchat_launcher`` for symmetry with the
-# other process helpers.
-from vrcpilot.process._executable import (  # noqa: PLC2701
-    find_umu_launcher,
-    find_vrchat_launcher,
-)
+from vrcpilot.process.executable import find_umu_launcher, find_vrchat_launcher
 from vrcpilot.screenshot import Screenshot, take_screenshot
 from vrcpilot.speaker import AudioCallback, Speaker, SpeakerLoop
 from vrcpilot.steam import SteamNotFoundError, SteamNotRunningError

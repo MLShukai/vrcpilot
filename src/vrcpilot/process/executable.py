@@ -25,7 +25,7 @@ _LAUNCHER_RELATIVE: Path = Path("steamapps/common/VRChat/launch.exe")
 _LAUNCHER_ENV_VAR: str = "VRCHAT_LAUNCHER"
 
 
-def _parse_steam_library_paths(vdf_path: Path) -> list[Path]:
+def parse_steam_library_paths(vdf_path: Path) -> list[Path]:
     """``libraryfolders.vdf`` から各 library の root path を抽出。
 
     フル VDF パーサは過剰なので、``"path" "<value>"`` の正規表現抽出だけ行う。
@@ -40,7 +40,7 @@ def _parse_steam_library_paths(vdf_path: Path) -> list[Path]:
     return [Path(p) for p in re.findall(r'"path"\s+"([^"]+)"', text)]
 
 
-def _windows_steam_paths() -> list[Path]:
+def windows_steam_paths() -> list[Path]:
     """Return candidate Steam install **roots** on Windows.
 
     Responsibility is limited to enumerating Steam install roots from
@@ -76,10 +76,10 @@ def _windows_steam_paths() -> list[Path]:
     return candidates
 
 
-def _linux_steam_paths() -> list[Path]:
+def linux_steam_paths() -> list[Path]:
     """Return candidate Steam install **roots** on Linux.
 
-    Mirrors :func:`_windows_steam_paths`: only enumerate install roots and
+    Mirrors :func:`windows_steam_paths`: only enumerate install roots and
     leave ``libraryfolders.vdf`` expansion to the caller.
     """
     return [
@@ -125,9 +125,9 @@ def find_vrchat_launcher(override: Path | None = None) -> Path:
             return result
 
     if sys.platform == "win32":
-        roots = _windows_steam_paths()
+        roots = windows_steam_paths()
     elif sys.platform == "linux":
-        roots = _linux_steam_paths()
+        roots = linux_steam_paths()
     else:
         roots = []
 
@@ -151,7 +151,7 @@ def find_vrchat_launcher(override: Path | None = None) -> Path:
     for root in roots:
         vdf = root / "steamapps" / "libraryfolders.vdf"
         if vdf.is_file():
-            for library in _parse_steam_library_paths(vdf):
+            for library in parse_steam_library_paths(vdf):
                 _add_library(library)
         else:
             _add_library(root)

@@ -1,4 +1,4 @@
-"""Tests for ``vrcpilot.process._executable``."""
+"""Tests for ``vrcpilot.process.executable``."""
 
 from __future__ import annotations
 
@@ -11,11 +11,11 @@ from vrcpilot.process import (
     UmuLauncherNotFoundError,
     VRChatLauncherNotFoundError,
 )
-from vrcpilot.process._executable import (
-    _linux_steam_paths,
-    _parse_steam_library_paths,
+from vrcpilot.process.executable import (
     find_umu_launcher,
     find_vrchat_launcher,
+    linux_steam_paths,
+    parse_steam_library_paths,
 )
 
 _DUMMY_VDF = """"libraryfolders"
@@ -38,11 +38,11 @@ class TestParseSteamLibraryPaths:
     def test_extracts_paths_from_vdf(self, tmp_path: Path) -> None:
         vdf = tmp_path / "libraryfolders.vdf"
         vdf.write_text(_DUMMY_VDF, encoding="utf-8")
-        result = _parse_steam_library_paths(vdf)
+        result = parse_steam_library_paths(vdf)
         assert len(result) == 2
 
     def test_returns_empty_when_file_missing(self, tmp_path: Path) -> None:
-        assert _parse_steam_library_paths(tmp_path / "nope.vdf") == []
+        assert parse_steam_library_paths(tmp_path / "nope.vdf") == []
 
 
 class TestSteamPathsHelpersReturnRootsOnly:
@@ -71,7 +71,7 @@ class TestSteamPathsHelpersReturnRootsOnly:
             encoding="utf-8",
         )
 
-        result = _linux_steam_paths()
+        result = linux_steam_paths()
 
         # Roots only — no external library leak from vdf expansion.
         assert library not in result
@@ -106,11 +106,9 @@ class TestFindVrchatLauncher:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("VRCHAT_LAUNCHER", str(tmp_path / "nope.exe"))
+        monkeypatch.setattr("vrcpilot.process.executable.linux_steam_paths", lambda: [])
         monkeypatch.setattr(
-            "vrcpilot.process._executable._linux_steam_paths", lambda: []
-        )
-        monkeypatch.setattr(
-            "vrcpilot.process._executable._windows_steam_paths", lambda: []
+            "vrcpilot.process.executable.windows_steam_paths", lambda: []
         )
         with pytest.raises(VRChatLauncherNotFoundError):
             find_vrchat_launcher()
@@ -143,12 +141,12 @@ class TestFindVrchatLauncher:
 
         if sys.platform == "linux":
             monkeypatch.setattr(
-                "vrcpilot.process._executable._linux_steam_paths",
+                "vrcpilot.process.executable.linux_steam_paths",
                 lambda: [steam_root],
             )
         else:
             monkeypatch.setattr(
-                "vrcpilot.process._executable._windows_steam_paths",
+                "vrcpilot.process.executable.windows_steam_paths",
                 lambda: [steam_root],
             )
         monkeypatch.delenv("VRCHAT_LAUNCHER", raising=False)
@@ -174,12 +172,12 @@ class TestFindVrchatLauncher:
 
         if sys.platform == "linux":
             monkeypatch.setattr(
-                "vrcpilot.process._executable._linux_steam_paths",
+                "vrcpilot.process.executable.linux_steam_paths",
                 lambda: [steam_root],
             )
         else:
             monkeypatch.setattr(
-                "vrcpilot.process._executable._windows_steam_paths",
+                "vrcpilot.process.executable.windows_steam_paths",
                 lambda: [steam_root],
             )
         monkeypatch.delenv("VRCHAT_LAUNCHER", raising=False)
@@ -190,11 +188,9 @@ class TestFindVrchatLauncher:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv("VRCHAT_LAUNCHER", raising=False)
+        monkeypatch.setattr("vrcpilot.process.executable.linux_steam_paths", lambda: [])
         monkeypatch.setattr(
-            "vrcpilot.process._executable._linux_steam_paths", lambda: []
-        )
-        monkeypatch.setattr(
-            "vrcpilot.process._executable._windows_steam_paths", lambda: []
+            "vrcpilot.process.executable.windows_steam_paths", lambda: []
         )
         with pytest.raises(VRChatLauncherNotFoundError, match="Tried"):
             find_vrchat_launcher()
@@ -217,12 +213,12 @@ class TestFindUmuLauncher:
         umu = tmp_path / "umu-run"
         umu.write_bytes(b"")
         monkeypatch.setattr(
-            "vrcpilot.process._executable.shutil.which", lambda _: str(umu)
+            "vrcpilot.process.executable.shutil.which", lambda _: str(umu)
         )
         result = find_umu_launcher()
         assert result == umu
 
     def test_raises_when_not_on_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("vrcpilot.process._executable.shutil.which", lambda _: None)
+        monkeypatch.setattr("vrcpilot.process.executable.shutil.which", lambda _: None)
         with pytest.raises(UmuLauncherNotFoundError, match="PATH"):
             find_umu_launcher()

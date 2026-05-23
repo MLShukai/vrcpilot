@@ -101,7 +101,7 @@ def _patch_steam_path(mocker: MockerFixture, steam: Path) -> None:
 def _patch_launcher(mocker: MockerFixture, launcher: Path) -> None:
     """Stub ``launch.exe`` discovery for the direct-spawn paths."""
     mocker.patch(
-        "vrcpilot.process._executable.find_vrchat_launcher",
+        "vrcpilot.process.executable.find_vrchat_launcher",
         return_value=launcher,
     )
 
@@ -109,7 +109,7 @@ def _patch_launcher(mocker: MockerFixture, launcher: Path) -> None:
 def _patch_umu(mocker: MockerFixture, umu: Path) -> None:
     """Stub ``umu-run`` discovery for Linux direct-spawn."""
     mocker.patch(
-        "vrcpilot.process._executable.find_umu_launcher",
+        "vrcpilot.process.executable.find_umu_launcher",
         return_value=umu,
     )
 

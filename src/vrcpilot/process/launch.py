@@ -238,7 +238,7 @@ def launch(
             when ``via_steam=True``.
         vrchat_launcher: Override the ``launch.exe`` path. When ``None``,
             auto-discovered via Steam ``libraryfolders.vdf``
-            (see :func:`vrcpilot.process._executable.find_vrchat_launcher`).
+            (see :func:`vrcpilot.process.executable.find_vrchat_launcher`).
         wineprefix: Linux + direct-spawn only. Sets ``$WINEPREFIX`` for
             the ``umu-run`` subprocess.
         proton_path: Linux + direct-spawn only. Sets ``$PROTON_PATH``.
@@ -288,7 +288,7 @@ def launch(
     from vrcpilot.steam import find_steam_executable
 
     from . import VRChatAlreadyRunningError, find_pids
-    from ._executable import find_vrchat_launcher
+    from .executable import find_vrchat_launcher
 
     _validate_launch_args(
         via_steam=via_steam,
@@ -323,7 +323,7 @@ def launch(
         if sys.platform == "win32":
             argv = [str(launcher), *vrchat_args]
         elif sys.platform == "linux":
-            from ._executable import find_umu_launcher
+            from .executable import find_umu_launcher
 
             umu_run = find_umu_launcher()
             argv = [str(umu_run), str(launcher), *vrchat_args]
