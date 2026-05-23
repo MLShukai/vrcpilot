@@ -35,6 +35,7 @@ from tests.fakes import FakeInputtinoKeyboard, FakePyDirectInput
 from tests.helpers import ImplKeyboard, only_linux, only_windows
 from vrcpilot.controls import keyboard as keyboard_mod
 from vrcpilot.controls.keyboard import Key, Keyboard
+from vrcpilot.process import VRChatMultipleInstancesError
 
 
 @pytest.fixture(autouse=True)
@@ -188,6 +189,8 @@ class TestKeyboardGuardWiring:
         assert guard.call_count == 3
 
     def test_focus_false_skips_ensure_target(self, mocker: MockerFixture):
+        # focus=False is the hot-loop fast path: it must skip
+        # ensure_target entirely.
         guard = mocker.patch("vrcpilot.controls.keyboard.base.ensure_target")
         mocker.patch("vrcpilot.controls.keyboard.base.time.sleep")
         impl = ImplKeyboard()
@@ -197,6 +200,23 @@ class TestKeyboardGuardWiring:
         impl.up(Key.SHIFT_LEFT, focus=False)
 
         guard.assert_not_called()
+
+    def test_focus_false_does_not_call_resolve_pid_in_hot_loop(
+        self, mocker: MockerFixture
+    ):
+        # Hot-loop guarantee: with focus=False, press / down / up
+        # must not trigger any psutil.process_iter scan. Patch
+        # process.resolve_pid at its canonical path so an indirect call
+        # would surface.
+        resolve_spy = mocker.patch("vrcpilot.process.resolve_pid")
+        mocker.patch("vrcpilot.controls.keyboard.base.time.sleep")
+        impl = ImplKeyboard()
+
+        impl.press(Key.A, focus=False)
+        impl.down(Key.SHIFT_LEFT, focus=False)
+        impl.up(Key.SHIFT_LEFT, focus=False)
+
+        resolve_spy.assert_not_called()
 
     def test_press_single_key_decomposes_to_down_sleep_up(self, mocker: MockerFixture):
         mocker.patch("vrcpilot.controls.keyboard.base.ensure_target")
@@ -309,6 +329,51 @@ class TestKeyboardGuardWiring:
         impl.press(Key.A, Key.B, Key.C)
 
         assert guard.call_count == 1
+
+
+# --- pid keyword routing tests --------------------------------------------
+
+
+class TestKeyboardPidRouting:
+    """Verify ``pid`` flows correctly through every public method.
+
+    * ``focus=True`` -> ``ensure_target`` receives the same ``pid``.
+    * ``focus=False`` -> ``ensure_target`` is NOT called (hot-loop
+      fast path), and no other PID lookup is triggered.
+    * Multi-instance state with ``pid=None`` surfaces from
+      ``ensure_target`` (not silently first-matched).
+    """
+
+    def test_passes_pid_to_ensure_target_for_every_method(self, mocker: MockerFixture):
+        guard = mocker.patch("vrcpilot.controls.keyboard.base.ensure_target")
+        mocker.patch("vrcpilot.controls.keyboard.base.time.sleep")
+        impl = ImplKeyboard()
+
+        impl.press(Key.A, pid=12345)
+        impl.down(Key.SHIFT_LEFT, pid=12345)
+        impl.up(Key.SHIFT_LEFT, pid=12345)
+
+        assert guard.call_count == 3
+        for call in guard.call_args_list:
+            assert call.kwargs == {"pid": 12345}
+
+    def test_raises_multiple_instances_when_no_pid_and_focus_true(
+        self, mocker: MockerFixture
+    ):
+        mocker.patch(
+            "vrcpilot.controls.keyboard.base.ensure_target",
+            side_effect=VRChatMultipleInstancesError([4242, 5151]),
+        )
+        mocker.patch("vrcpilot.controls.keyboard.base.time.sleep")
+        impl = ImplKeyboard()
+
+        for action in (
+            lambda: impl.press(Key.A),
+            lambda: impl.down(Key.SHIFT_LEFT),
+            lambda: impl.up(Key.SHIFT_LEFT),
+        ):
+            with pytest.raises(VRChatMultipleInstancesError):
+                action()
 
 
 # --- LinuxKeyboard tests (Linux-only) -------------------------------------
@@ -512,21 +577,27 @@ class _SpyKeyboard(Keyboard):
         self.calls: list[tuple[str, dict[str, object]]] = []
 
     @override
-    def press(self, *keys: Key, duration: float = 0.1, focus: bool = True) -> None:
+    def press(
+        self,
+        *keys: Key,
+        duration: float = 0.1,
+        focus: bool = True,
+        pid: int | None = None,
+    ) -> None:
         self.calls.append(
             (
                 "press",
-                {"keys": keys, "duration": duration, "focus": focus},
+                {"keys": keys, "duration": duration, "focus": focus, "pid": pid},
             )
         )
 
     @override
-    def down(self, *keys: Key, focus: bool = True) -> None:
-        self.calls.append(("down", {"keys": keys, "focus": focus}))
+    def down(self, *keys: Key, focus: bool = True, pid: int | None = None) -> None:
+        self.calls.append(("down", {"keys": keys, "focus": focus, "pid": pid}))
 
     @override
-    def up(self, *keys: Key, focus: bool = True) -> None:
-        self.calls.append(("up", {"keys": keys, "focus": focus}))
+    def up(self, *keys: Key, focus: bool = True, pid: int | None = None) -> None:
+        self.calls.append(("up", {"keys": keys, "focus": focus, "pid": pid}))
 
     @override
     def _do_down(self, key: Key) -> None: ...
@@ -542,10 +613,18 @@ class TestModuleFunctions:
         spy = _SpyKeyboard()
         keyboard_mod._instance = spy
 
-        keyboard_mod.press(Key.A, duration=0.05, focus=False)
+        keyboard_mod.press(Key.A, duration=0.05, focus=False, pid=9999)
 
         assert spy.calls == [
-            ("press", {"keys": (Key.A,), "duration": 0.05, "focus": False})
+            (
+                "press",
+                {
+                    "keys": (Key.A,),
+                    "duration": 0.05,
+                    "focus": False,
+                    "pid": 9999,
+                },
+            )
         ]
 
     def test_press_forwards_combo(self):
@@ -561,6 +640,7 @@ class TestModuleFunctions:
                     "keys": (Key.CTRL_LEFT, Key.C),
                     "duration": 0.2,
                     "focus": True,
+                    "pid": None,
                 },
             )
         ]
@@ -571,13 +651,15 @@ class TestModuleFunctions:
 
         keyboard_mod.down(Key.CTRL_LEFT)
 
-        assert spy.calls == [("down", {"keys": (Key.CTRL_LEFT,), "focus": True})]
+        assert spy.calls == [
+            ("down", {"keys": (Key.CTRL_LEFT,), "focus": True, "pid": None})
+        ]
 
     def test_down_forwards_combo(self):
         spy = _SpyKeyboard()
         keyboard_mod._instance = spy
 
-        keyboard_mod.down(Key.CTRL_LEFT, Key.SHIFT_LEFT, Key.A)
+        keyboard_mod.down(Key.CTRL_LEFT, Key.SHIFT_LEFT, Key.A, pid=9999)
 
         assert spy.calls == [
             (
@@ -585,6 +667,7 @@ class TestModuleFunctions:
                 {
                     "keys": (Key.CTRL_LEFT, Key.SHIFT_LEFT, Key.A),
                     "focus": True,
+                    "pid": 9999,
                 },
             )
         ]
@@ -595,7 +678,9 @@ class TestModuleFunctions:
 
         keyboard_mod.up(Key.CTRL_LEFT, focus=False)
 
-        assert spy.calls == [("up", {"keys": (Key.CTRL_LEFT,), "focus": False})]
+        assert spy.calls == [
+            ("up", {"keys": (Key.CTRL_LEFT,), "focus": False, "pid": None})
+        ]
 
     def test_up_forwards_combo(self):
         spy = _SpyKeyboard()
@@ -606,6 +691,10 @@ class TestModuleFunctions:
         assert spy.calls == [
             (
                 "up",
-                {"keys": (Key.CTRL_LEFT, Key.SHIFT_LEFT), "focus": True},
+                {
+                    "keys": (Key.CTRL_LEFT, Key.SHIFT_LEFT),
+                    "focus": True,
+                    "pid": None,
+                },
             )
         ]

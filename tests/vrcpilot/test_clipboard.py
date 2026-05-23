@@ -1,10 +1,13 @@
 """Tests for :mod:`vrcpilot.clipboard`.
 
-`paste` is a 3-step pipeline: ``pyperclip.copy`` ->
+`paste` is a 4-step pipeline: ``ensure_target(pid=pid)`` (only when
+``focus=True``) -> ``pyperclip.copy`` ->
 ``time.sleep(_CLIPBOARD_SETTLE)`` -> ``keyboard.press(Key.CTRL, Key.V,
-focus=...)``. The tests below verify each step, the call ordering, and
-that the ``focus`` parameter is forwarded all the way through to
-``keyboard.press``'s internal ``ensure_target`` invocation.
+focus=False, pid=pid)``. The tests below verify each step, the call
+ordering, and that the ``focus`` / ``pid`` parameters are forwarded
+correctly. ``focus=False`` is the hot-loop fast path and intentionally
+skips every PID lookup (no ``ensure_target``, no internal
+``resolve_pid``).
 
 The keyboard backend is swapped via :class:`tests.helpers.ImplKeyboard`
 through the lazy-singleton ``vrcpilot.controls.keyboard._get`` so the
@@ -55,7 +58,7 @@ class TestPasteCopiesText:
         text: str,
     ):
         del fake_keyboard
-        mocker.patch("vrcpilot.controls.keyboard.base.ensure_target")
+        mocker.patch("vrcpilot.clipboard.ensure_target")
         copy_spy = mocker.patch("vrcpilot.clipboard.pyperclip.copy")
 
         clipboard.paste(text)
@@ -64,18 +67,21 @@ class TestPasteCopiesText:
 
 
 class TestPasteCallOrder:
-    def test_copy_then_sleep_then_press(
+    def test_ensure_target_then_copy_then_sleep_then_press(
         self, fake_keyboard: ImplKeyboard, mocker: MockerFixture
     ):
         # Record the global call order across every side-effecting API
         # by funnelling each into a single MagicMock via `attach_mock` --
-        # mock_calls then preserves chronological order. ``time.sleep``
-        # is called twice (once by ``paste`` for ``_CLIPBOARD_SETTLE``,
-        # once inside ``keyboard.press`` for the key-down hold), and the
-        # ``time`` module is shared between both call sites, so a single
-        # patch captures both invocations.
-        mocker.patch("vrcpilot.controls.keyboard.base.ensure_target")
+        # mock_calls then preserves chronological order. ``ensure_target``
+        # runs first (focus=True default), then copy, then the
+        # _CLIPBOARD_SETTLE sleep, then the Ctrl+V keystroke (which is
+        # dispatched with focus=False so the keyboard backend does NOT
+        # run ensure_target a second time). The keyboard.press's own
+        # hold-sleep follows.
         recorder = mocker.MagicMock()
+        recorder.attach_mock(
+            mocker.patch("vrcpilot.clipboard.ensure_target"), "ensure_target"
+        )
         recorder.attach_mock(mocker.patch("vrcpilot.clipboard.pyperclip.copy"), "copy")
         recorder.attach_mock(mocker.patch("vrcpilot.clipboard.time.sleep"), "sleep")
         # Wrap the ImplKeyboard methods so they show up in the same
@@ -95,13 +101,15 @@ class TestPasteCallOrder:
         clipboard.paste("hi")
 
         # Expected order:
-        #   copy("hi")
-        #   sleep(_CLIPBOARD_SETTLE)        <- step 2, paste's settle
+        #   ensure_target(pid=None)         <- step 1, focus guard
+        #   copy("hi")                      <- step 2
+        #   sleep(_CLIPBOARD_SETTLE)        <- step 3, paste's settle
         #   _do_down(CTRL), _do_down(V)
         #   sleep(0.1)                      <- keyboard.press hold
         #   _do_up(V), _do_up(CTRL)
         names = [c[0] for c in recorder.mock_calls]
         assert names == [
+            "ensure_target",
             "copy",
             "sleep",
             "do_down",
@@ -110,8 +118,7 @@ class TestPasteCallOrder:
             "do_up",
             "do_up",
         ]
-        # First sleep is the clipboard settle; second is the key hold.
-        copy_call, settle_sleep, _, _, hold_sleep, _, _ = recorder.mock_calls
+        _, copy_call, settle_sleep, _, _, hold_sleep, _, _ = recorder.mock_calls
         assert copy_call.args == ("hi",)
         assert settle_sleep.args == (clipboard._CLIPBOARD_SETTLE,)
         assert hold_sleep.args == (0.1,)
@@ -128,14 +135,19 @@ class TestPasteFocusForwarding:
     def test_focus_true_invokes_ensure_target_once(
         self, fake_keyboard: ImplKeyboard, mocker: MockerFixture
     ):
+        # Focus guard runs once at the top of paste; the internal
+        # keyboard.press uses focus=False, so the keyboard ABC must
+        # NOT invoke ensure_target again.
         del fake_keyboard
         mocker.patch("vrcpilot.clipboard.pyperclip.copy")
         mocker.patch("vrcpilot.clipboard.time.sleep")
-        guard = mocker.patch("vrcpilot.controls.keyboard.base.ensure_target")
+        clipboard_guard = mocker.patch("vrcpilot.clipboard.ensure_target")
+        keyboard_guard = mocker.patch("vrcpilot.controls.keyboard.base.ensure_target")
 
         clipboard.paste("hi")  # default focus=True
 
-        guard.assert_called_once_with()
+        clipboard_guard.assert_called_once_with(pid=None)
+        keyboard_guard.assert_not_called()
 
     def test_focus_false_skips_ensure_target(
         self, fake_keyboard: ImplKeyboard, mocker: MockerFixture
@@ -143,11 +155,43 @@ class TestPasteFocusForwarding:
         del fake_keyboard
         mocker.patch("vrcpilot.clipboard.pyperclip.copy")
         mocker.patch("vrcpilot.clipboard.time.sleep")
-        guard = mocker.patch("vrcpilot.controls.keyboard.base.ensure_target")
+        clipboard_guard = mocker.patch("vrcpilot.clipboard.ensure_target")
+        keyboard_guard = mocker.patch("vrcpilot.controls.keyboard.base.ensure_target")
 
         clipboard.paste("hi", focus=False)
 
-        guard.assert_not_called()
+        clipboard_guard.assert_not_called()
+        keyboard_guard.assert_not_called()
+
+    def test_focus_false_does_not_call_resolve_pid(
+        self, fake_keyboard: ImplKeyboard, mocker: MockerFixture
+    ):
+        # Hot-loop guarantee: paste(focus=False) must not trigger a
+        # psutil.process_iter scan. Patch process.resolve_pid at the
+        # canonical path so any indirect call would surface.
+        del fake_keyboard
+        mocker.patch("vrcpilot.clipboard.pyperclip.copy")
+        mocker.patch("vrcpilot.clipboard.time.sleep")
+        resolve_spy = mocker.patch("vrcpilot.process.resolve_pid")
+
+        clipboard.paste("hi", focus=False)
+
+        resolve_spy.assert_not_called()
+
+
+class TestPastePidForwarding:
+    def test_pid_passed_to_ensure_target(
+        self, fake_keyboard: ImplKeyboard, mocker: MockerFixture
+    ):
+        del fake_keyboard
+        mocker.patch("vrcpilot.clipboard.pyperclip.copy")
+        mocker.patch("vrcpilot.clipboard.time.sleep")
+        clipboard_guard = mocker.patch("vrcpilot.clipboard.ensure_target")
+        mocker.patch("vrcpilot.controls.keyboard.base.ensure_target")
+
+        clipboard.paste("hi", pid=12345)
+
+        clipboard_guard.assert_called_once_with(pid=12345)
 
 
 class TestPasteErrorPropagation:
@@ -156,7 +200,7 @@ class TestPasteErrorPropagation:
     ):
         # When pyperclip itself fails (e.g. no xclip / xsel installed),
         # paste must NOT swallow the error -- CLI callers wrap it.
-        mocker.patch("vrcpilot.controls.keyboard.base.ensure_target")
+        mocker.patch("vrcpilot.clipboard.ensure_target")
         sleep_spy = mocker.patch("vrcpilot.clipboard.time.sleep")
         mocker.patch(
             "vrcpilot.clipboard.pyperclip.copy",
@@ -166,6 +210,7 @@ class TestPasteErrorPropagation:
         with pytest.raises(pyperclip.PyperclipException, match="no clipboard backend"):
             clipboard.paste("hi")
 
-        # Failure happened in step 1: sleep / keyboard must not have run.
+        # Failure happened in step 2 (copy): sleep / keyboard must not
+        # have run.
         sleep_spy.assert_not_called()
         assert fake_keyboard.calls == []
