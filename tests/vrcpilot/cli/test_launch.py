@@ -17,7 +17,7 @@ from vrcpilot.process import VRCHAT_STEAM_APP_ID
 def fake_popen(mocker: MockerFixture, tmp_path: Path) -> type[FakePopen]:
     """Patch ``subprocess.Popen`` so launch tests can record argv.
 
-    Also stubs :func:`vrcpilot.process.find_steam_executable` to honour
+    Also stubs :func:`vrcpilot.steam.find_steam_executable` to honour
     any ``--steam-path`` override, falling back to a real file under
     ``tmp_path``. That single mock is unavoidable - the real lookup
     would touch the Windows registry or ``$PATH`` - but every other
@@ -35,7 +35,7 @@ def fake_popen(mocker: MockerFixture, tmp_path: Path) -> type[FakePopen]:
     def _find(override: Path | None = None) -> Path:
         return override if override is not None else steam_stub
 
-    mocker.patch("vrcpilot.process.find_steam_executable", side_effect=_find)
+    mocker.patch("vrcpilot.steam.find_steam_executable", side_effect=_find)
     return FakePopen
 
 

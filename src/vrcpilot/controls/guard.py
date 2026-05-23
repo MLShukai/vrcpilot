@@ -5,10 +5,10 @@ from __future__ import annotations
 import time
 
 from vrcpilot import window
-from vrcpilot.process import find_pid
+from vrcpilot.process import VRChatNotRunningError, find_pid
 from vrcpilot.session import is_wayland_native
 
-from .errors import VRChatNotFocusedError, VRChatNotRunningError
+from .errors import VRChatNotFocusedError
 
 # Some WMs (notably GNOME Mutter) silently ignore the first
 # ``_NET_ACTIVE_WINDOW`` request as focus-stealing prevention but honor

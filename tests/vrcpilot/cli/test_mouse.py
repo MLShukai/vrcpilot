@@ -21,8 +21,9 @@ from pytest_mock import MockerFixture
 
 from tests.helpers import ImplMouse
 from vrcpilot.cli import main
-from vrcpilot.controls import VRChatNotFocusedError, VRChatNotRunningError
+from vrcpilot.controls import VRChatNotFocusedError
 from vrcpilot.controls.mouse import MouseButton
+from vrcpilot.process import VRChatNotRunningError
 
 
 @pytest.fixture

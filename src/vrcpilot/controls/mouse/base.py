@@ -10,9 +10,9 @@ import time
 from abc import ABC, abstractmethod
 from enum import StrEnum
 
-from vrcpilot.controls.errors import VRChatNotRunningError
 from vrcpilot.controls.guard import ensure_target
 from vrcpilot.geometry import get_vrchat_window_rect
+from vrcpilot.process import VRChatNotRunningError
 
 
 class MouseButton(StrEnum):

@@ -41,7 +41,7 @@ def fake_popen(monkeypatch: pytest.MonkeyPatch) -> type[FakePopen]:
 
 def _patch_steam_path(mocker: MockerFixture, steam: Path) -> None:
     """Stub out the Steam binary discovery so ``launch()`` can be exercised."""
-    mocker.patch("vrcpilot.process.find_steam_executable", return_value=steam)
+    mocker.patch("vrcpilot.steam.find_steam_executable", return_value=steam)
 
 
 def _process_iter_returning(mocker: MockerFixture, *procs: FakeProcess) -> None:

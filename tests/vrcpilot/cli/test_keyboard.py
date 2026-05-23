@@ -20,8 +20,9 @@ from pytest_mock import MockerFixture
 
 from tests.helpers import ImplKeyboard
 from vrcpilot.cli import main
-from vrcpilot.controls import VRChatNotFocusedError, VRChatNotRunningError
+from vrcpilot.controls import VRChatNotFocusedError
 from vrcpilot.controls.keyboard import Key
+from vrcpilot.process import VRChatNotRunningError
 
 
 @pytest.fixture

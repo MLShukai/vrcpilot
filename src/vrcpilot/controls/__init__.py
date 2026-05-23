@@ -16,7 +16,7 @@ Usage::
 """
 
 from . import keyboard, mouse
-from .errors import VRChatNotFocusedError, VRChatNotRunningError
+from .errors import VRChatNotFocusedError
 from .guard import ensure_target
 from .keyboard import Key
 from .mouse import MouseButton
@@ -28,5 +28,4 @@ __all__ = [
     "mouse",
     "MouseButton",
     "VRChatNotFocusedError",
-    "VRChatNotRunningError",
 ]

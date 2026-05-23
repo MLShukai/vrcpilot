@@ -13,10 +13,10 @@ import sys
 
 from vrcpilot.controls import (
     VRChatNotFocusedError,
-    VRChatNotRunningError,
     keyboard as keyboard_api,
 )
 from vrcpilot.controls.keyboard import Key
+from vrcpilot.process import VRChatNotRunningError
 
 from ._common import SubParsersAction
 

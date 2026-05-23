@@ -18,8 +18,9 @@ from __future__ import annotations
 import pytest
 from pytest_mock import MockerFixture
 
-from vrcpilot.controls.errors import VRChatNotFocusedError, VRChatNotRunningError
+from vrcpilot.controls.errors import VRChatNotFocusedError
 from vrcpilot.controls.guard import ensure_target
+from vrcpilot.process import VRChatNotRunningError
 
 
 class TestEnsureTarget:

@@ -23,7 +23,6 @@ from vrcpilot.controls import (
     Key,
     MouseButton,
     VRChatNotFocusedError,
-    VRChatNotRunningError,
     ensure_target,
     keyboard,
     mouse,
@@ -44,6 +43,7 @@ from vrcpilot.ocr import OCREngine, OCRResult, OCRWord, RapidOCREngine, ocr
 from vrcpilot.osc import AvatarParameters, InputController, OscSender
 from vrcpilot.process import (
     OscConfig,
+    VRChatNotRunningError,
     find_pid,
     launch,
     terminate,

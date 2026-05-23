@@ -16,7 +16,8 @@ import pytest
 from pytest_mock import MockerFixture
 
 from vrcpilot.cli import main
-from vrcpilot.controls import VRChatNotFocusedError, VRChatNotRunningError
+from vrcpilot.controls import VRChatNotFocusedError
+from vrcpilot.process import VRChatNotRunningError
 
 
 @pytest.fixture

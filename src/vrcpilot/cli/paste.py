@@ -14,7 +14,8 @@ import sys
 import pyperclip
 
 from vrcpilot import clipboard
-from vrcpilot.controls import VRChatNotFocusedError, VRChatNotRunningError
+from vrcpilot.controls import VRChatNotFocusedError
+from vrcpilot.process import VRChatNotRunningError
 
 from ._common import SubParsersAction
 

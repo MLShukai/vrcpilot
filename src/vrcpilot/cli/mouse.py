@@ -13,10 +13,10 @@ import sys
 
 from vrcpilot.controls import (
     VRChatNotFocusedError,
-    VRChatNotRunningError,
     mouse as mouse_api,
 )
 from vrcpilot.controls.mouse import MouseButton
+from vrcpilot.process import VRChatNotRunningError
 
 from ._common import SubParsersAction
 

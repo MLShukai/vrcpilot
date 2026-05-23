@@ -33,8 +33,8 @@ from pytest_mock import MockerFixture
 from tests.fakes import FakeInputtinoMouse, FakePyDirectInput
 from tests.helpers import ImplMouse, only_linux, only_windows
 from vrcpilot.controls import mouse as mouse_mod
-from vrcpilot.controls.errors import VRChatNotRunningError
 from vrcpilot.controls.mouse import Mouse, MouseButton
+from vrcpilot.process import VRChatNotRunningError
 
 
 @pytest.fixture(autouse=True)
