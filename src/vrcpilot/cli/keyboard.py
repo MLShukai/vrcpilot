@@ -16,9 +16,9 @@ from vrcpilot.controls import (
     keyboard as keyboard_api,
 )
 from vrcpilot.controls.keyboard import Key
-from vrcpilot.process import VRChatNotRunningError
+from vrcpilot.process import VRChatMultipleInstancesError, VRChatNotRunningError
 
-from ._common import SubParsersAction
+from ._common import SubParsersAction, add_pid_arg, handle_multi_instance_error
 
 
 def register(subparsers: SubParsersAction) -> None:
@@ -47,6 +47,7 @@ def register(subparsers: SubParsersAction) -> None:
         default=0.1,
         help="Down-to-up hold per key, in seconds. Default: 0.1.",
     )
+    add_pid_arg(press_parser)
 
 
 def run(args: argparse.Namespace) -> int:
@@ -58,7 +59,12 @@ def run(args: argparse.Namespace) -> int:
     keys: list[Key] = args.keys
     duration: float = args.duration
     try:
-        keyboard_api.press(*keys, duration=duration)
+        keyboard_api.press(*keys, duration=duration, pid=args.pid)
+    except VRChatMultipleInstancesError as exc:
+        # Subclass of VRChatNotRunningError -- handle the multi-instance
+        # case explicitly so the user is pointed at ``--pid``.
+        handle_multi_instance_error(exc)
+        return 1
     except (VRChatNotRunningError, VRChatNotFocusedError) as exc:
         print(f"vrcpilot: {exc}", file=sys.stderr)
         return 1

@@ -656,12 +656,14 @@ class FakeSpeakerLoop:
         *,
         chunk_seconds: float = 0.05,
         read_timeout: float = 2.0,
+        pid: int | None = None,
     ) -> None:
         if FakeSpeakerLoop.init_side_effect is not None:
             raise FakeSpeakerLoop.init_side_effect
         self.callback = callback
         self.chunk_seconds = chunk_seconds
         self.read_timeout = read_timeout
+        self.pid = pid
         self.start_calls = 0
         FakeSpeakerLoop.instances.append(self)
 

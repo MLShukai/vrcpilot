@@ -14,9 +14,15 @@ from pathlib import Path
 
 from argcomplete.completers import FilesCompleter
 
+from vrcpilot.process import VRChatMultipleInstancesError
 from vrcpilot.screenshot import take_screenshot
 
-from ._common import SubParsersAction, attach_completer
+from ._common import (
+    SubParsersAction,
+    add_pid_arg,
+    attach_completer,
+    handle_multi_instance_error,
+)
 
 
 def register(subparsers: SubParsersAction) -> None:
@@ -40,12 +46,17 @@ def register(subparsers: SubParsersAction) -> None:
     attach_completer(
         output_action, FilesCompleter(allowednames=("png",), directories=True)
     )
+    add_pid_arg(screenshot_parser)
 
 
 def run(args: argparse.Namespace) -> int:
     """Run ``screenshot``; exit 1 (empty stdout) when capture fails."""
     output: Path | None = args.output
-    shot = take_screenshot()
+    try:
+        shot = take_screenshot(pid=args.pid)
+    except VRChatMultipleInstancesError as exc:
+        handle_multi_instance_error(exc)
+        return 1
     if shot is None:
         print("vrcpilot: could not capture VRChat screenshot", file=sys.stderr)
         return 1

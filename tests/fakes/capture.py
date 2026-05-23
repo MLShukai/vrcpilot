@@ -100,12 +100,14 @@ class FakeCaptureLoop:
         *,
         fps: float,
         frame_timeout: float = 2.0,
+        pid: int | None = None,
     ) -> None:
         if FakeCaptureLoop.init_side_effect is not None:
             raise FakeCaptureLoop.init_side_effect
         self.callback = callback
         self.fps = fps
         self.frame_timeout = frame_timeout
+        self.pid = pid
         self.start_calls = 0
         FakeCaptureLoop.instances.append(self)
 

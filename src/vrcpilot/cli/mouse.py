@@ -16,9 +16,9 @@ from vrcpilot.controls import (
     mouse as mouse_api,
 )
 from vrcpilot.controls.mouse import MouseButton
-from vrcpilot.process import VRChatNotRunningError
+from vrcpilot.process import VRChatMultipleInstancesError, VRChatNotRunningError
 
-from ._common import SubParsersAction
+from ._common import SubParsersAction, add_pid_arg, handle_multi_instance_error
 
 
 def register(subparsers: SubParsersAction) -> None:
@@ -44,6 +44,7 @@ def register(subparsers: SubParsersAction) -> None:
         action="store_true",
         help="Treat X and Y as relative deltas instead of VRChat window-local pixels.",
     )
+    add_pid_arg(move_parser)
 
     click_parser = actions.add_parser(
         "click",
@@ -71,12 +72,14 @@ def register(subparsers: SubParsersAction) -> None:
         default=0.0,
         help="Down-to-up hold per click cycle, in seconds. Default: 0.0.",
     )
+    add_pid_arg(click_parser)
 
     scroll_parser = actions.add_parser(
         "scroll",
         help="Scroll vertically by AMOUNT notches (positive = down).",
     )
     scroll_parser.add_argument("amount", type=int)
+    add_pid_arg(scroll_parser)
 
 
 def run(args: argparse.Namespace) -> int:
@@ -84,13 +87,23 @@ def run(args: argparse.Namespace) -> int:
     try:
         match args.mouse_action:
             case "move":
-                mouse_api.move(args.x, args.y, relative=args.rel)
+                mouse_api.move(args.x, args.y, relative=args.rel, pid=args.pid)
             case "click":
-                mouse_api.click(*args.button, count=args.count, duration=args.duration)
+                mouse_api.click(
+                    *args.button,
+                    count=args.count,
+                    duration=args.duration,
+                    pid=args.pid,
+                )
             case "scroll":
-                mouse_api.scroll(args.amount)
+                mouse_api.scroll(args.amount, pid=args.pid)
             case _:  # pragma: no cover - argparse required=True prevents this
                 raise AssertionError(f"Unknown mouse action: {args.mouse_action!r}")
+    except VRChatMultipleInstancesError as exc:
+        # Subclass of VRChatNotRunningError -- match it first so the
+        # tailored multi-instance diagnostic wins.
+        handle_multi_instance_error(exc)
+        return 1
     except (VRChatNotRunningError, VRChatNotFocusedError) as exc:
         print(f"vrcpilot: {exc}", file=sys.stderr)
         return 1

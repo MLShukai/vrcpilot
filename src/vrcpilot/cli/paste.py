@@ -15,9 +15,9 @@ import pyperclip
 
 from vrcpilot import clipboard
 from vrcpilot.controls import VRChatNotFocusedError
-from vrcpilot.process import VRChatNotRunningError
+from vrcpilot.process import VRChatMultipleInstancesError, VRChatNotRunningError
 
-from ._common import SubParsersAction
+from ._common import SubParsersAction, add_pid_arg, handle_multi_instance_error
 
 
 def register(subparsers: SubParsersAction) -> None:
@@ -39,6 +39,7 @@ def register(subparsers: SubParsersAction) -> None:
             "piped; on a tty this exits with code 2)."
         ),
     )
+    add_pid_arg(parser)
 
 
 def run(args: argparse.Namespace) -> int:
@@ -52,7 +53,12 @@ def run(args: argparse.Namespace) -> int:
     else:
         text = raw
     try:
-        clipboard.paste(text)
+        clipboard.paste(text, pid=args.pid)
+    except VRChatMultipleInstancesError as exc:
+        # Subclass of VRChatNotRunningError -- handle the multi-instance
+        # case explicitly so the user is pointed at ``--pid``.
+        handle_multi_instance_error(exc)
+        return 1
     except (VRChatNotRunningError, VRChatNotFocusedError) as exc:
         print(f"vrcpilot: {exc}", file=sys.stderr)
         return 1

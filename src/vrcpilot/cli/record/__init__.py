@@ -19,9 +19,15 @@ from typing import Literal
 from argcomplete.completers import FilesCompleter
 
 from vrcpilot.capture import CaptureLoop
+from vrcpilot.process import VRChatMultipleInstancesError
 from vrcpilot.speaker import SpeakerLoop
 
-from .._common import SubParsersAction, attach_completer
+from .._common import (
+    SubParsersAction,
+    add_pid_arg,
+    attach_completer,
+    handle_multi_instance_error,
+)
 from .muxer import BaseMuxer, MkvStdoutMuxer, Mp4FileMuxer, WavFileMuxer
 
 #: Default playback rate used when ``--fps`` is not given. Mirrors the
@@ -93,6 +99,7 @@ def register(subparsers: SubParsersAction) -> None:
             "continues until Ctrl+C."
         ),
     )
+    add_pid_arg(record_parser)
 
 
 def _resolve_mode(*, video: bool, audio: bool) -> _Mode:
@@ -185,6 +192,7 @@ def run(args: argparse.Namespace) -> int:
         return 2
 
     duration: float | None = args.duration
+    pid: int | None = args.pid
 
     if target is None:
         if sys.stdout.isatty():
@@ -208,10 +216,12 @@ def run(args: argparse.Namespace) -> int:
             speaker_loop: SpeakerLoop | None = None
             if mode in ("both", "video"):
                 capture_loop = stack.enter_context(
-                    CaptureLoop(muxer.write_video, fps=fps)
+                    CaptureLoop(muxer.write_video, fps=fps, pid=pid)
                 )
             if mode in ("both", "audio"):
-                speaker_loop = stack.enter_context(SpeakerLoop(muxer.write_audio))
+                speaker_loop = stack.enter_context(
+                    SpeakerLoop(muxer.write_audio, pid=pid)
+                )
 
             if capture_loop is not None:
                 capture_loop.start()
@@ -236,6 +246,11 @@ def run(args: argparse.Namespace) -> int:
 
             saved_frames = muxer.frame_count
             saved_samples = muxer.sample_count
+    except VRChatMultipleInstancesError as exc:
+        # Subclass of RuntimeError, but we want the canonical multi-
+        # instance diagnostic, so handle it before the generic branch.
+        handle_multi_instance_error(exc)
+        return 1
     except RuntimeError as exc:
         print(f"vrcpilot: {exc}", file=sys.stderr)
         return 1

@@ -6,6 +6,7 @@ import pytest
 from pytest_mock import MockerFixture
 
 from vrcpilot.cli import main
+from vrcpilot.process import VRChatMultipleInstancesError
 
 
 class TestFocusCommand:
@@ -35,3 +36,40 @@ class TestFocusCommand:
         captured = capsys.readouterr()
         assert captured.out == ""
         assert captured.err == "vrcpilot: could not focus VRChat\n"
+
+    def test_passes_pid_to_api(self, mocker: MockerFixture):
+        # ``--pid`` should be forwarded verbatim to ``focus()``.
+        focus_stub = mocker.patch("vrcpilot.cli.focus.focus", return_value=True)
+
+        exit_code = main(["focus", "--pid", "12345"])
+
+        assert exit_code == 0
+        focus_stub.assert_called_once_with(pid=12345)
+
+    def test_no_pid_passes_none(self, mocker: MockerFixture):
+        # When ``--pid`` is omitted, the API receives ``pid=None`` so
+        # ``resolve_pid`` does the lookup.
+        focus_stub = mocker.patch("vrcpilot.cli.focus.focus", return_value=True)
+
+        exit_code = main(["focus"])
+
+        assert exit_code == 0
+        focus_stub.assert_called_once_with(pid=None)
+
+    def test_multiple_instances_exits_with_diagnostic(
+        self, mocker: MockerFixture, capsys: pytest.CaptureFixture[str]
+    ):
+        mocker.patch(
+            "vrcpilot.cli.focus.focus",
+            side_effect=VRChatMultipleInstancesError([1111, 2222]),
+        )
+
+        exit_code = main(["focus"])
+
+        assert exit_code == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert (
+            captured.err == "vrcpilot: multiple VRChat instances detected "
+            "(PIDs: 1111 2222); pass --pid\n"
+        )

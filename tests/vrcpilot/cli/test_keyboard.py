@@ -22,7 +22,7 @@ from tests.helpers import ImplKeyboard
 from vrcpilot.cli import main
 from vrcpilot.controls import VRChatNotFocusedError
 from vrcpilot.controls.keyboard import Key
-from vrcpilot.process import VRChatNotRunningError
+from vrcpilot.process import VRChatMultipleInstancesError, VRChatNotRunningError
 
 
 @pytest.fixture
@@ -235,3 +235,54 @@ class TestKeyboardDispatch:
         assert excinfo.value.code != 0
         captured = capsys.readouterr()
         assert captured.err != ""
+
+
+class TestKeyboardPidArg:
+    """``--pid`` is wired on ``keyboard press``."""
+
+    def test_passes_pid_to_api(
+        self, fake_keyboard: ImplKeyboard, mocker: MockerFixture
+    ):
+        del fake_keyboard
+        spy = mocker.patch("vrcpilot.cli.keyboard.keyboard_api.press")
+
+        exit_code = main(["keyboard", "press", "a", "--pid", "424242"])
+
+        assert exit_code == 0
+        spy.assert_called_once_with(Key.A, duration=0.1, pid=424242)
+
+    def test_no_pid_passes_none(
+        self, fake_keyboard: ImplKeyboard, mocker: MockerFixture
+    ):
+        del fake_keyboard
+        spy = mocker.patch("vrcpilot.cli.keyboard.keyboard_api.press")
+
+        exit_code = main(["keyboard", "press", "a"])
+
+        assert exit_code == 0
+        spy.assert_called_once_with(Key.A, duration=0.1, pid=None)
+
+    def test_multiple_instances_exits_with_diagnostic(
+        self,
+        fake_keyboard: ImplKeyboard,
+        mocker: MockerFixture,
+        capsys: pytest.CaptureFixture[str],
+    ):
+        del fake_keyboard
+        # ``VRChatMultipleInstancesError`` is a subclass of
+        # ``VRChatNotRunningError`` -- the CLI must catch it first or
+        # the multi-instance branch never runs.
+        mocker.patch(
+            "vrcpilot.controls.keyboard.base.ensure_target",
+            side_effect=VRChatMultipleInstancesError([501, 502]),
+        )
+
+        exit_code = main(["keyboard", "press", "a"])
+
+        assert exit_code == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert (
+            captured.err == "vrcpilot: multiple VRChat instances detected "
+            "(PIDs: 501 502); pass --pid\n"
+        )

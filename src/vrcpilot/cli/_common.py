@@ -8,6 +8,7 @@ from pathlib import Path
 
 from argcomplete.completers import FilesCompleter
 
+from vrcpilot.process import VRChatMultipleInstancesError
 from vrcpilot.screenshot import Screenshot
 
 # argparse does not export the subparsers-action class publicly but it
@@ -15,6 +16,46 @@ from vrcpilot.screenshot import Screenshot
 # ``register()`` hooks against it keeps the API self-documenting at the
 # cost of a single private-usage suppression.
 type SubParsersAction = argparse._SubParsersAction[argparse.ArgumentParser]  # pyright: ignore[reportPrivateUsage]
+
+
+def add_pid_arg(parser: argparse.ArgumentParser) -> None:
+    """Register the shared ``--pid`` flag on a PID-dependent subcommand.
+
+    Multi-instance VRChat targeting flows through one consistent contract:
+    callers either pass ``--pid <int>`` explicitly, or omit it and rely on
+    :func:`vrcpilot.process.resolve_pid` to pick the sole running instance.
+    When two or more VRChat processes are alive and ``--pid`` is omitted,
+    the API layer raises :class:`VRChatMultipleInstancesError` and each
+    subcommand maps that to :func:`handle_multi_instance_error` (stderr
+    diagnostic + exit 1).
+    """
+    parser.add_argument(
+        "--pid",
+        type=int,
+        default=None,
+        metavar="PID",
+        help=(
+            "Target a specific VRChat PID. When omitted, vrcpilot picks "
+            "the single running instance automatically; if multiple "
+            "VRChat processes are running, the command exits 1 with a "
+            "diagnostic listing the candidate PIDs."
+        ),
+    )
+
+
+def handle_multi_instance_error(exc: VRChatMultipleInstancesError) -> None:
+    """Print the canonical multi-instance diagnostic to stderr.
+
+    Shared so every PID-dependent subcommand produces the same stderr
+    line when a user forgets ``--pid`` on a multi-instance system:
+    ``vrcpilot: multiple VRChat instances detected (PIDs: <p1> <p2> ...);
+    pass --pid``. Callers follow this with ``return 1``.
+    """
+    pids_str = " ".join(str(p) for p in exc.pids)
+    print(
+        f"vrcpilot: multiple VRChat instances detected (PIDs: {pids_str}); pass --pid",
+        file=sys.stderr,
+    )
 
 
 def attach_completer(action: argparse.Action, completer: object) -> None:

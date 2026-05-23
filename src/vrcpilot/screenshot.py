@@ -190,12 +190,18 @@ def _resolve_monitor_index(
     return 0
 
 
-def take_screenshot(*, settle_seconds: float = 0.05) -> Screenshot | None:
+def take_screenshot(
+    *, settle_seconds: float = 0.05, pid: int | None = None
+) -> Screenshot | None:
     """Focus VRChat, wait, then grab one window-only screenshot.
 
     ``settle_seconds`` is the post-focus sleep that lets the compositor
     finish raising the window (must be ``>= 0``; the 50 ms default is a
-    generous margin for typical desktops).
+    generous margin for typical desktops). ``pid`` selects the target
+    VRChat instance when multiple are running; when ``None`` (default)
+    :func:`vrcpilot.process.resolve_pid` resolves the sole running PID
+    (or raises :class:`VRChatMultipleInstancesError` on ambiguity, which
+    is propagated to the caller — unlike the recoverable ``None`` paths).
 
     Returns ``None`` on recoverable failure (Wayland native, focus
     refused, window unmapped, ``mss`` error). Wayland native also emits
@@ -223,14 +229,14 @@ def take_screenshot(*, settle_seconds: float = 0.05) -> Screenshot | None:
         )
 
     # 2. Focus
-    if not focus():
+    if not focus(pid=pid):
         return None
 
     # 3. Settle
     time.sleep(settle_seconds)
 
     # 4. Window rectangle
-    rect = get_vrchat_window_rect()
+    rect = get_vrchat_window_rect(pid=pid)
     if rect is None:
         return None
     x, y, width, height = rect
