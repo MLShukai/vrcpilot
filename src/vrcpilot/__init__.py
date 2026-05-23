@@ -55,7 +55,6 @@ from vrcpilot.process import (
     resolve_pid,
     terminate,
 )
-from vrcpilot.process.executable import find_umu_launcher, find_vrchat_launcher
 from vrcpilot.screenshot import Screenshot, take_screenshot
 from vrcpilot.speaker import AudioCallback, Speaker, SpeakerLoop
 from vrcpilot.steam import SteamNotFoundError, SteamNotRunningError
@@ -79,8 +78,6 @@ __all__ = [
     "ensure_target",
     "find_pid",
     "find_pids",
-    "find_umu_launcher",
-    "find_vrchat_launcher",
     "focus",
     "InputController",
     "is_foreground",

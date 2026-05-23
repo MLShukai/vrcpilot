@@ -1,22 +1,20 @@
-"""VRChat launch.exe と umu-launcher の auto-discovery。
+"""VRChat ``launch.exe`` の auto-discovery。
 
 VRChat の起動は EAC ラッパー ``launch.exe`` を経由する必要がある (VRChat.exe を
 直接叩くと offline mode になる)。Steam library にインストールされた
 ``steamapps/common/VRChat/launch.exe`` をプラットフォーム別に探す。
 
-Linux で umu-launcher 経由起動を行うケースのため、``umu-run`` 実行ファイルの
-PATH 探索ヘルパもここに同居させる。
+Linux 限定の umu-launcher 探索は :mod:`vrcpilot.process.linux` に分離。
 """
 
 from __future__ import annotations
 
 import os
 import re
-import shutil
 import sys
 from pathlib import Path
 
-from vrcpilot.process import UmuLauncherNotFoundError, VRChatLauncherNotFoundError
+from vrcpilot.process import VRChatLauncherNotFoundError
 
 #: launch.exe の Steam 配下相対パス。
 _LAUNCHER_RELATIVE: Path = Path("steamapps/common/VRChat/launch.exe")
@@ -171,37 +169,3 @@ def find_vrchat_launcher(override: Path | None = None) -> Path:
         f"Tried: {[str(p) for p in tried]}. "
         "Pass --vrchat-launcher <path> or set $VRCHAT_LAUNCHER."
     )
-
-
-def find_umu_launcher(override: Path | None = None) -> Path:
-    """Return the ``umu-run`` executable path.
-
-    Resolution order:
-
-    1. ``override`` argument.
-    2. ``shutil.which('umu-run')`` against PATH.
-
-    Raises:
-        UmuLauncherNotFoundError: No ``umu-run`` found. The message links to
-            the umu-launcher project so the user can install it.
-    """
-    if override is not None:
-        if override.is_file():
-            return override
-        raise UmuLauncherNotFoundError(
-            f"umu-run not found at override path: {override}"
-        )
-
-    located = shutil.which("umu-run")
-    if located is None:
-        raise UmuLauncherNotFoundError(
-            "umu-run not found on PATH. Install umu-launcher: "
-            "Ubuntu/Debian users should download the .deb from "
-            "https://github.com/Open-Wine-Components/umu-launcher/releases/latest "
-            "and run 'sudo apt install ./umu-launcher_*.deb'. "
-            "Other distributions: see "
-            "https://github.com/Open-Wine-Components/umu-launcher "
-            "for build/install instructions. "
-            "Alternatively, pass --via-steam to use steam.exe -applaunch."
-        )
-    return Path(located)

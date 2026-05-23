@@ -115,16 +115,23 @@ class TestNewProcessExceptions:
         assert name in vrcpilot.__all__
 
 
-class TestLauncherDiscovery:
-    """Launcher discovery helpers must be reachable from the top-level."""
+class TestLauncherDiscoveryNotTopLevel:
+    """Launcher discovery helpers are intentionally **not** top-level.
+
+    They live in :mod:`vrcpilot.process.executable` (cross-platform
+    ``find_vrchat_launcher``) and :mod:`vrcpilot.process.linux`
+    (``find_umu_launcher``). The top-level namespace is reserved for
+    user-facing APIs; ``launch()`` is the entry point that internally
+    consults the launcher helpers.
+    """
 
     @pytest.mark.parametrize(
         "name",
         ["find_vrchat_launcher", "find_umu_launcher"],
     )
-    def test_exposed_at_top_level(self, name: str) -> None:
-        assert hasattr(vrcpilot, name)
-        assert name in vrcpilot.__all__
+    def test_not_exposed_at_top_level(self, name: str) -> None:
+        assert not hasattr(vrcpilot, name)
+        assert name not in vrcpilot.__all__
 
 
 class TestOcrAttributeAndSubmoduleCoexist:

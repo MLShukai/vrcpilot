@@ -323,7 +323,7 @@ def launch(
         if sys.platform == "win32":
             argv = [str(launcher), *vrchat_args]
         elif sys.platform == "linux":
-            from .executable import find_umu_launcher
+            from .linux import find_umu_launcher
 
             umu_run = find_umu_launcher()
             argv = [str(umu_run), str(launcher), *vrchat_args]

@@ -109,7 +109,7 @@ def _patch_launcher(mocker: MockerFixture, launcher: Path) -> None:
 def _patch_umu(mocker: MockerFixture, umu: Path) -> None:
     """Stub ``umu-run`` discovery for Linux direct-spawn."""
     mocker.patch(
-        "vrcpilot.process.executable.find_umu_launcher",
+        "vrcpilot.process.linux.find_umu_launcher",
         return_value=umu,
     )
 

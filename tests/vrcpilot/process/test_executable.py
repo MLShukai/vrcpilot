@@ -7,12 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from vrcpilot.process import (
-    UmuLauncherNotFoundError,
-    VRChatLauncherNotFoundError,
-)
+from vrcpilot.process import VRChatLauncherNotFoundError
 from vrcpilot.process.executable import (
-    find_umu_launcher,
     find_vrchat_launcher,
     linux_steam_paths,
     parse_steam_library_paths,
@@ -194,31 +190,3 @@ class TestFindVrchatLauncher:
         )
         with pytest.raises(VRChatLauncherNotFoundError, match="Tried"):
             find_vrchat_launcher()
-
-
-class TestFindUmuLauncher:
-    def test_uses_override_when_given(self, tmp_path: Path) -> None:
-        umu = tmp_path / "umu-run"
-        umu.write_bytes(b"")
-        result = find_umu_launcher(umu)
-        assert result == umu
-
-    def test_raises_when_override_missing(self, tmp_path: Path) -> None:
-        with pytest.raises(UmuLauncherNotFoundError, match="override"):
-            find_umu_launcher(tmp_path / "missing")
-
-    def test_uses_shutil_which_when_no_override(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        umu = tmp_path / "umu-run"
-        umu.write_bytes(b"")
-        monkeypatch.setattr(
-            "vrcpilot.process.executable.shutil.which", lambda _: str(umu)
-        )
-        result = find_umu_launcher()
-        assert result == umu
-
-    def test_raises_when_not_on_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("vrcpilot.process.executable.shutil.which", lambda _: None)
-        with pytest.raises(UmuLauncherNotFoundError, match="PATH"):
-            find_umu_launcher()
