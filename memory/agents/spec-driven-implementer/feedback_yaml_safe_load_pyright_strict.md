@@ -1,7 +1,8 @@
 ---
 name: yaml.safe_load returns Unknown under pyright strict
 description: Coercing yaml.safe_load values via int()/str() trips reportUnknownArgumentType; cast the dict after isinstance narrow
-type: feedback
+metadata:
+  type: feedback
 ---
 
 After `payload = yaml.safe_load(text)` and `if not isinstance(payload, dict):`, pyright strict still narrows the dict to `dict[Unknown, Unknown]`. Subsequent `int(payload["x"])` / `str(payload["path"])` calls then fail with `reportUnknownArgumentType` even though they are intended runtime coercions.

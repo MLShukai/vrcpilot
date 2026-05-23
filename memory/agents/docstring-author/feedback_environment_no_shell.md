@@ -1,7 +1,8 @@
 ---
 name: This agent has no shell tool — cannot run just / git directly
 description: The docstring-author agent is invoked without Bash/PowerShell access; verification and commits must be handed back to the user.
-type: feedback
+metadata:
+  type: feedback
 ---
 
 When invoked as the `docstring-author` agent in this project, no Bash or PowerShell tool is exposed (only Read/Edit/Glob/Grep/Write + a few deferred non-shell tools).

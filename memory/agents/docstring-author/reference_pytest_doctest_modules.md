@@ -1,7 +1,8 @@
 ---
 name: pytest --doctest-modules is enabled
 description: vrcpilot's pyproject sets `--doctest-modules`, so every `>>>` in src docstrings runs during `just test`.
-type: reference
+metadata:
+  type: reference
 ---
 
 `pyproject.toml` configures `addopts = ["--strict-markers", "--doctest-modules", ...]`, and `--doctest-modules` traverses both `tests/` and any imported source modules. Every `>>>` in a public-symbol docstring under `src/vrcpilot/` will be executed.

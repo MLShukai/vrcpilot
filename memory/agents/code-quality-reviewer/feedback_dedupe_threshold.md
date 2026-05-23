@@ -1,7 +1,8 @@
 ---
 name: 重複は本当に動く 2 つ目を見てから抽出する
 description: feature-based detect engine の重複を 1 引数 + 1 helper だけで済ませた判断 — 抽出のタイミングを早すぎず遅すぎず取る話
-type: feedback
+metadata:
+  type: feedback
 ---
 
 このプロジェクトでは「先回りで helper を切り出すより、2 つ目の実装が出て同じ形が固まってから抽出する」のが好まれる傾向がある。

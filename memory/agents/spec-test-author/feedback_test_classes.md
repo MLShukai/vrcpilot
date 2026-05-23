@@ -1,7 +1,8 @@
 ---
 name: Test class organization in vrcpilot
 description: Tests use `class Test<Target>:` grouping with no return-type annotations, mocker from pytest_mock
-type: feedback
+metadata:
+  type: feedback
 ---
 
 Tests in `tests/` are organized as `class Test<Target>:` (e.g. `TestFocus`, `TestUnfocus`, `TestPlatformGuard`, `TestLaunch`, `TestFindPid`). Test methods take no return-type annotation. Mocking uses the `mocker: MockerFixture` fixture from `pytest_mock`.

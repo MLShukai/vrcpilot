@@ -1,7 +1,8 @@
 ---
 name: User role and collaboration style
 description: User is a Japanese-speaking developer building vrcpilot; communicates in Japanese but expects English code/docstrings.
-type: user
+metadata:
+  type: user
 ---
 
 The user develops vrcpilot and addresses Claude in Japanese. They expect:

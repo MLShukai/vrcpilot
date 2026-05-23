@@ -1,7 +1,8 @@
 ---
 name: Factory-method seam for COM/native test substitution
 description: When a module wraps COM (WGC) or a native extension (proc-tap), encapsulate native init in an overridable factory method and route all native calls through a session struct with lowercase methods so duck-typed fakes can stand in.
-type: feedback
+metadata:
+  type: feedback
 ---
 
 When wrapping COM (WGC) or other native APIs / extensions in vrcpilot, encapsulate the real native initialisation in a single overridable instance method (e.g. `_open_session(self, ...)` / `_open_capture(self, ...)`) that returns a thin struct/dataclass. The struct exposes lowercase methods (`start`, `stop`, `wait_event`, `close_handle`) which the production path uses uniformly.

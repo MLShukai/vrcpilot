@@ -1,7 +1,8 @@
 ---
 name: submodule attribute collision in cli/ocr packages
 description: When a package re-exports a function with the same name as one of its submodules, attribute lookup is ambiguous; the variant winning depends on import order, and tests need different access strategies for module vs function
-type: feedback
+metadata:
+  type: feedback
 ---
 
 When `vrcpilot/cli/__init__.py` re-exports a symbol whose name matches a submodule (e.g. window's `focus`/`unfocus` functions vs `cli/focus.py` / `cli/unfocus.py` subcommand modules), CPython's import machinery silently overwrites the parent's attribute with the submodule object during `import vrcpilot.cli.focus`. After `_main.py` loads (which imports every subcommand submodule), `vrcpilot.cli.focus` will be the submodule, not the function — even if `__init__.py` did `from vrcpilot.window import focus` first.

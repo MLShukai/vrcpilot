@@ -1,7 +1,8 @@
 ---
 name: private モジュール規約
 description: src/vrcpilot/ における `_` prefix 命名規約 — モジュールでも関数でも、テスト有無で prefix を決める
-type: feedback
+metadata:
+  type: feedback
 ---
 
 `src/vrcpilot/` 配下では **モジュールでも module-level 関数でも**、テストから参照されるかどうかで `_` prefix の有無を決める:

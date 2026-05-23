@@ -1,7 +1,8 @@
 ---
 name: argcomplete reference facts
 description: Verified facts about argcomplete as of 2026-04-27 (v3.6.3) — PowerShell support, FilesCompleter, marker placement
-type: reference
+metadata:
+  type: reference
 ---
 
 Verified via PyPI + upstream source on 2026-04-27.

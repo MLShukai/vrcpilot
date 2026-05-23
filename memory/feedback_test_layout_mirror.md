@@ -1,7 +1,8 @@
 ---
 name: tests は src をミラーリング
 description: tests/ ディレクトリは src/vrcpilot/ の構造を 1 対 1 で映す
-type: feedback
+metadata:
+  type: feedback
 ---
 
 `tests/` のレイアウトは `src/vrcpilot/` をそのままミラーリングする:

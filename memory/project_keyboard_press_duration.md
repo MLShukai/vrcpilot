@@ -1,7 +1,8 @@
 ---
 name: keyboard.press の duration デフォルトは 0.1 秒
 description: VRChat / Unity が短すぎる keypress をドロップするので keyboard.press の duration デフォルトを 0.0 にしない
-type: project
+metadata:
+  type: project
 ---
 
 `vrcpilot.controls.keyboard.press(key, *, duration=0.1)` のデフォルト値は **0.1 秒**。0.0 にすると VRChat (Proton/Wine 配下の Unity) がイベントを取りこぼす。

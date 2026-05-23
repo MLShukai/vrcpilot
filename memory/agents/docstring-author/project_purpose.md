@@ -1,7 +1,8 @@
 ---
 name: vrcpilot project purpose
 description: vrcpilot is a Python library that automates VRChat — both Steam-level launch/UI and in-game OSC-driven actions.
-type: project
+metadata:
+  type: project
 ---
 
 vrcpilot is a Python library for automating VRChat. Scope spans:

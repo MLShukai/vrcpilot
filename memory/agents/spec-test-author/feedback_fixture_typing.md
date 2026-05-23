@@ -1,7 +1,8 @@
 ---
 name: Avoid object-typed fixture parameters in tests
 description: Don't annotate fixture-injected mock parameters as `: object`; leave unannotated to avoid pyright-ignore noise
-type: feedback
+metadata:
+  type: feedback
 ---
 
 When a test method receives a fixture that returns a `MagicMock`/`Mock` (e.g. from `mocker.patch.object`), do NOT annotate the parameter as `: object`. That annotation forces every mock attribute access (`return_value`, `call_count`, `call_args_list`, `mock_calls`) to need a `# pyright: ignore[reportAttributeAccessIssue]` comment, which is noise.

@@ -1,7 +1,8 @@
 ---
 name: 許可済みコマンドを優先する
 description: .claude/settings.json の permissions.allow に載っている形でツール呼び出しを組み立てる。リスト外のコマンドや絶対パスは毎回確認プロンプトが出て自走を止める。
-type: feedback
+metadata:
+  type: feedback
 ---
 
 `.claude/settings.json` の `permissions.allow` を毎セッション参照し、Bash・Read・Edit などのツール呼び出しはそのリストに収まる形に揃える。

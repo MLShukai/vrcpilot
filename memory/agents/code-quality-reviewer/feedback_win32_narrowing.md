@@ -1,7 +1,8 @@
 ---
 name: Win32 platform narrowing pattern
 description: Why defensive sys.platform checks inside Windows-only helpers are required (pyright narrowing), not dead code
-type: feedback
+metadata:
+  type: feedback
 ---
 
 In `src/vrcpilot/`, modules that import Windows-only libraries (`win32gui`, `win32api`, `winreg`, `pywintypes`, etc.) gate the imports under `if sys.platform == "win32":` at module top. Helper functions inside the module that reference those names then need a second `if sys.platform != "win32": raise RuntimeError("unreachable")` near the top of the function body.

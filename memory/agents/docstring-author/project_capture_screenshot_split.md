@@ -1,7 +1,8 @@
 ---
 name: vrcpilot capture vs screenshot API split
 description: Two-pronged pixel-grab public surface — Capture (streaming) vs Screenshot (one-shot) — and the design rationale that docstrings should reinforce
-type: project
+metadata:
+  type: project
 ---
 
 vrcpilot's pixel-grab public surface is intentionally split into two

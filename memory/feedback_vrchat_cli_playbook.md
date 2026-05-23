@@ -1,7 +1,8 @@
 ---
 name: vrcpilot CLI で VRChat を操作する playbook
 description: SSH/.env 環境で `uv run vrcpilot ...` を組み合わせて VRChat を起動し、メニュー操作・OCR・クリック・移動・後片付けまで行うための運用手順
-type: feedback
+metadata:
+  type: feedback
 ---
 
 `vrcpilot` の CLI を組み合わせて VRChat を end-to-end で動かすための運用手順。SSH 越しに自分のデスクトップへ VRChat を出して観察・操作する用途を想定する。

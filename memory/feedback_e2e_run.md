@@ -1,7 +1,8 @@
 ---
 name: 実装は e2e まで Claude が回す
 description: 実装タスクはユニット/型/lint だけでなく e2e (`just e2e-test`) まで Claude 自身が実行・検証して初めて完了とみなす
-type: feedback
+metadata:
+  type: feedback
 ---
 
 `tests/e2e/` 配下の e2e シナリオは「実機 VRChat が必要だから人手検証」と扱わず、Claude セッション内で実行して動作確認・スクリーンショット確認まで行う。さらに、**実装タスクの完了条件として `just run` 通過だけでなく対応する e2e シナリオの実行 (`just e2e-test <NAME>`) まで Claude 側で回す**。

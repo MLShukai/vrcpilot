@@ -1,7 +1,8 @@
 ---
 name: producer/consumer exception planted under same lock as notify
 description: when a background producer queues an exception for the consumer to surface, the planting write MUST happen inside the same condition the consumer waits on
-type: feedback
+metadata:
+  type: feedback
 ---
 
 When a background thread (drain / listener) stashes an exception that

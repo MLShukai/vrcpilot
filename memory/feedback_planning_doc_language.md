@@ -1,7 +1,8 @@
 ---
 name: 計画ドキュメントは日本語で書く
 description: plan mode の plan ファイルや設計提案ドキュメントは日本語で記述する。コード本体・コミットメッセージ・コード内識別子は対象外
-type: feedback
+metadata:
+  type: feedback
 ---
 
 plan mode で `/home/gop/.claude/plans/*.md` 等に書く計画ファイル、および設計提案・仕様提示のための user-facing なドキュメントは日本語で書く。

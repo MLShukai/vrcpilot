@@ -1,7 +1,8 @@
 ---
 name: vrcpilot CLI subcommand docstring conventions
 description: Docstring shape shared by src/vrcpilot/cli/*.py modules — module-level patch-target note, register/run signatures, exit-code prose
-type: project
+metadata:
+  type: project
 ---
 
 `src/vrcpilot/cli/*.py` modules follow a consistent docstring shape. When

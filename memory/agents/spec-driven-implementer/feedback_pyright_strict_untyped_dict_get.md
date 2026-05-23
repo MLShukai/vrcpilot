@@ -1,7 +1,8 @@
 ---
 name: pyright strict — dict.get on Any-typed dict returns Unknown
 description: When narrowing nested untyped JSON via isinstance(x, dict), rebind through dict[Any, Any] before calling .get() to keep return types Any rather than Unknown
-type: feedback
+metadata:
+  type: feedback
 ---
 
 Under `pyright` strict, calling `.get()` on a dict that was narrowed from `Any` via `isinstance(x, dict)` produces a `reportUnknownMemberType` / `reportUnknownVariableType` error: the narrowed type is `dict[Unknown, Unknown]`, so the return type of the get is also Unknown. This shows up when walking nested JSON like `pw-dump` / OCR config output.

@@ -1,7 +1,8 @@
 ---
 name: pyright ignore の集約・最小化
 description: src 配下で `# pyright: ignore` を集約・削減する際に有効だったテクニックと既知の落とし穴
-type: feedback
+metadata:
+  type: feedback
 ---
 
 stub のない C 拡張・PyO3 モジュール（`windows_capture`、`win32api` の一部、python-xlib 等）は使用箇所ごとに `reportUnknown*` / `reportAttributeAccessIssue` 等を撒き散らす。1 箇所ずつ ignore する代わりに、一度だけ `Any` に widen することで連鎖を止められる。

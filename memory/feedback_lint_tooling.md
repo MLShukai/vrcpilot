@@ -1,7 +1,8 @@
 ---
 name: lint / format ツーリングは pre-commit で一括
 description: ruff / docformatter / mdformat / codespell 等は pre-commit に統合済みなので個別に列挙しない
-type: feedback
+metadata:
+  type: feedback
 ---
 
 `just format` は `pre-commit run -a` を呼ぶラッパで、ruff (lint + format)・pyupgrade・docformatter・mdformat・codespell・uv-lock など全 hook を実行する。`just run` は `format → test → type` の連結。

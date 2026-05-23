@@ -4,6 +4,18 @@
 
 各セッション開始時、または規約が関係するタスク着手前にここを確認する。新しい規約・知見が見つかったらファイルを足し、ここから 1 行リンクを張る。
 
+エージェント固有メモリは [agents/](agents/) 配下に整理する:
+
+- [agents/spec-planner/](agents/spec-planner/MEMORY.md) — 仕様設計時の参照
+- [agents/spec-driven-implementer/](agents/spec-driven-implementer/MEMORY.md) — `src/` 実装時の罠とパターン
+- [agents/spec-test-author/](agents/spec-test-author/MEMORY.md) — `tests/` を書くときの規約
+- [agents/code-quality-reviewer/](agents/code-quality-reviewer/MEMORY.md) — public API を保ったリファクタ時の判断材料
+- [agents/docstring-author/](agents/docstring-author/MEMORY.md) — docstring / コメント記述時の規約
+
+## user（ユーザー像）
+
+- [User role and collaboration style](user_role.md) — Japanese-speaking developer; replies in Japanese, code/docstrings in English, terse high-autonomy collaboration
+
 ## feedback（規約・ガイドライン）
 
 - [private モジュール規約](feedback_private_module_convention.md) — `_` prefix はテスト無しの真 private 限定。テストするなら prefix を外す

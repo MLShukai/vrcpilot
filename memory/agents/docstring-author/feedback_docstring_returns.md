@@ -1,7 +1,8 @@
 ---
 name: Don't restate Returns in the docstring summary paragraph
 description: Google-style docstrings should keep return-value contract in the Returns block only
-type: feedback
+metadata:
+  type: feedback
 ---
 
 In `src/vrcpilot/` Google-style docstrings, the leading paragraph describes *what the function does* and notable behavior; the `Returns:` block describes the return-value contract (success/failure conditions, edge cases). Do not duplicate the success/failure description in both places.

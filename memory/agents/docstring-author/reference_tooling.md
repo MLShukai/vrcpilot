@@ -1,7 +1,8 @@
 ---
 name: docformatter and pyright caveats for docstring work
 description: docstring 作業者が踏まえるべき docformatter のリフロー挙動と pyright strict の制約。`just` レシピや pre-commit 集約の一般論は memory/feedback_lint_tooling.md を参照
-type: reference
+metadata:
+  type: reference
 ---
 
 共有メモリ [`memory/feedback_lint_tooling.md`](../../feedback_lint_tooling.md) が

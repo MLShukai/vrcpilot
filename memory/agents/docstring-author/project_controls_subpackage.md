@@ -1,7 +1,8 @@
 ---
 name: vrcpilot.controls subpackage shape
 description: ABC template-method + lazy backend singleton; ensure_target guard is the headline contract
-type: project
+metadata:
+  type: project
 ---
 
 `vrcpilot.controls` (introduced 2026-05-02 on `feature/20260502/controls-linux`)

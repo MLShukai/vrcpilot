@@ -1,7 +1,8 @@
 ---
 name: ExitStack for partial-init resource unwind in long __init__
 description: Use contextlib.ExitStack to register rollback callbacks after each acquisition step; pop_all() on success — replaces nested try/except in multi-step backend constructors
-type: feedback
+metadata:
+  type: feedback
 ---
 
 When a backend constructor acquires N resources in sequence (e.g. `PipeWireSpeakerBackend` opens a pulsectl session, loads a null-sink, writes a state file, spawns a subprocess, starts two threads), express the partial-init unwind with `contextlib.ExitStack` rather than nested `try/except` pyramids.

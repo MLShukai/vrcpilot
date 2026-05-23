@@ -1,7 +1,8 @@
 ---
 name: OSC view modules - importing SupportsBool eagerly causes a real circular import
 description: In src/vrcpilot/osc, sender.py imports avatar/controller eagerly, so view modules cannot do `from .sender import SupportsBool` at module top - use TYPE_CHECKING.
-type: feedback
+metadata:
+  type: feedback
 ---
 
 `src/vrcpilot/osc/avatar.py` (and `controller.py` by analogy) sit on the
