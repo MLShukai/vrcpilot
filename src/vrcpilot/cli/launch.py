@@ -22,12 +22,13 @@ from vrcpilot.steam import SteamNotFoundError
 from ._common import SubParsersAction, attach_completer
 
 
-def _non_negative_int(value: str) -> int:
-    """Argparse ``type`` validator that rejects negative integers.
+def _profile_value(value: str) -> int:
+    """Argparse ``type`` validator for ``--profile``.
 
-    Used by ``--profile`` so the vrcpilot-managed prefix index is always
-    ``>= 0``. Raises :class:`argparse.ArgumentTypeError` with a clear
-    message so argparse can surface it as an exit-2 usage error.
+    Parses ``value`` as an integer and rejects negatives so the
+    vrcpilot-managed prefix index is always ``>= 0``. Raises
+    :class:`argparse.ArgumentTypeError` with a clear message so argparse
+    can surface it as an exit-2 usage error.
     """
     parsed = int(value)
     if parsed < 0:
@@ -101,7 +102,7 @@ def register(subparsers: SubParsersAction) -> None:
     attach_completer(proton_path_action, FilesCompleter(directories=True))
     launch_parser.add_argument(
         "--profile",
-        type=_non_negative_int,
+        type=_profile_value,
         default=None,
         metavar="N",
         help=(
