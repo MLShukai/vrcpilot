@@ -188,8 +188,11 @@ def launch(
         via_steam: Use ``steam.exe -applaunch`` instead of direct spawn.
             Mutually exclusive with ``wineprefix`` / ``proton_path`` /
             ``profile``.
-        app_id: Steam app id used by ``-applaunch`` (``via_steam=True``)
-            and ``$GAMEID`` for ``umu-run`` on Linux.
+        app_id: Steam app id used by ``-applaunch`` (``via_steam=True`` route
+            only). The direct-spawn route does **not** forward this as
+            ``$GAMEID`` to ``umu-run``; see the in-function comment for the
+            reason (umu-launcher's "global defaults" protonfix collides with
+            VRChat's DLL surface, 2026-05-23).
         steam_path: Override Steam executable auto-detection. Only used
             when ``via_steam=True``.
         vrchat_launcher: Override the ``launch.exe`` path. When ``None``,
@@ -239,7 +242,7 @@ def launch(
     from vrcpilot.steam import find_steam_executable
 
     from . import VRChatAlreadyRunningError, find_pids
-    from ._executable import find_umu_launcher, find_vrchat_launcher
+    from ._executable import find_vrchat_launcher
 
     _validate_launch_args(
         via_steam=via_steam,
@@ -273,9 +276,17 @@ def launch(
         if sys.platform == "win32":
             argv = [str(launcher), *vrchat_args]
         elif sys.platform == "linux":
+            from ._executable import find_umu_launcher
+
             umu_run = find_umu_launcher()
             argv = [str(umu_run), str(launcher), *vrchat_args]
-            env_overrides["GAMEID"] = str(app_id)
+            # GAMEID は意図的に渡さない。GAMEID=438100 を渡すと umu-launcher が
+            # ProtonFixes の "global defaults" (VRChat 専用 fix は未登録) を当て、
+            # その global defaults が UMU-Proton-latest では未実装の
+            # coremessaging.dll.DllGetActivationFactory を呼んで wine が即死する
+            # (2026-05-23 実機で観測)。GAMEID 未指定なら umu の素の default で
+            # 起動して安定する。ProtonFixes に VRChat (438100) の正規 fix が
+            # upstream に追加されたら戻す価値がある。
             if wineprefix is not None:
                 env_overrides["WINEPREFIX"] = str(wineprefix)
             elif profile is not None:

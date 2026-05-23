@@ -366,13 +366,17 @@ class TestLaunchDirectSpawnLinux:
 
         assert fake_popen.last_argv == [str(umu), str(launcher), "--no-vr"]
 
-    def test_sets_gameid_env(
+    def test_does_not_set_gameid_env(
         self,
         monkeypatch: pytest.MonkeyPatch,
         mocker: MockerFixture,
         fake_popen: type[FakePopen],
         tmp_path: Path,
     ):
+        # GAMEID=438100 を umu-run に渡すと ProtonFixes が VRChat 用 fix を
+        # 持たないために "global defaults" を当て、UMU-Proton-latest では未実装の
+        # coremessaging.dll.DllGetActivationFactory を呼んで wine が即死する
+        # (2026-05-23 実機観測)。direct-spawn 経路では GAMEID を渡さない。
         monkeypatch.setattr(sys, "platform", "linux")
         launcher = tmp_path / "launch.exe"
         launcher.write_bytes(b"")
@@ -384,16 +388,19 @@ class TestLaunchDirectSpawnLinux:
         launch(wait_timeout=0)
 
         env = fake_popen.last_kwargs.get("env")
-        assert isinstance(env, dict)
-        assert env["GAMEID"] == "438100"
+        # env_overrides が空なら popen_env=None になり、Popen は親環境を継承する
+        if env is not None:
+            assert "GAMEID" not in env
 
-    def test_sets_gameid_from_custom_app_id(
+    def test_does_not_set_gameid_for_custom_app_id(
         self,
         monkeypatch: pytest.MonkeyPatch,
         mocker: MockerFixture,
         fake_popen: type[FakePopen],
         tmp_path: Path,
     ):
+        # app_id を変えても direct-spawn では env に乗らない (via_steam=True の
+        # ``steam.exe -applaunch <app_id>`` 経路でのみ意味を持つ)。
         monkeypatch.setattr(sys, "platform", "linux")
         launcher = tmp_path / "launch.exe"
         launcher.write_bytes(b"")
@@ -405,8 +412,8 @@ class TestLaunchDirectSpawnLinux:
         launch(app_id=440, wait_timeout=0)
 
         env = fake_popen.last_kwargs.get("env")
-        assert isinstance(env, dict)
-        assert env["GAMEID"] == "440"
+        if env is not None:
+            assert "GAMEID" not in env
 
     def test_sets_wineprefix_when_provided(
         self,
