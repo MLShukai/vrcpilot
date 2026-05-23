@@ -89,18 +89,14 @@ class TestRealProcTapBackend:
     """Live proc-tap backend against the real VRChat process."""
 
     def test_constructs_against_live_vrchat(self, real_vrchat: int):
-        backend = ProcTapSpeakerBackend()
+        backend = ProcTapSpeakerBackend(pid=real_vrchat)
         try:
             assert backend is not None
         finally:
             backend.close()
-        # The PID is informational; failing to look it up earlier in
-        # the fixture is what actually skips the test.
-        del real_vrchat
 
     def test_read_returns_float32_stereo(self, real_vrchat: int):
-        del real_vrchat
-        backend = ProcTapSpeakerBackend(read_timeout=1.0)
+        backend = ProcTapSpeakerBackend(read_timeout=1.0, pid=real_vrchat)
         try:
             chunk = _drain_until_signal(backend, max_seconds=2.0)
         finally:
@@ -119,8 +115,7 @@ class TestRealProcTapBackend:
         well-formed and the cumulative count never exceeds the device
         clock - is what the contract actually promises.
         """
-        del real_vrchat
-        backend = ProcTapSpeakerBackend(read_timeout=0.2)
+        backend = ProcTapSpeakerBackend(read_timeout=0.2, pid=real_vrchat)
         total_samples = 0
         try:
             deadline = time.monotonic() + 1.0
@@ -146,8 +141,7 @@ class TestRealProcTapBackend:
             assert total_samples <= SAMPLE_RATE * 2
 
     def test_close_is_idempotent(self, real_vrchat: int):
-        del real_vrchat
-        backend = ProcTapSpeakerBackend()
+        backend = ProcTapSpeakerBackend(pid=real_vrchat)
         backend.close()
         # A second close must not raise; the wrapper and proc-tap
         # session both guard against it but only a live session

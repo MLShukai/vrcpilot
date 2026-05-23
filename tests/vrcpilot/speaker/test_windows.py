@@ -5,9 +5,9 @@ factory; tests patch that factory with a duck-typed
 :class:`tests.fakes.FakeProcessAudioCapture` so we never need a real
 WASAPI device to exercise the read / close plumbing.
 
-The autouse ``_no_real_vrchat`` fixture in :mod:`tests.conftest` pins
-:func:`vrcpilot.process.find_pid` to ``None``. Tests that need a real
-PID branch override that via :func:`patch_pid` below.
+The backend now takes ``pid`` as a required keyword (PID resolution
+lives in :class:`vrcpilot.speaker.Speaker`); the helper :func:`patch_pid`
+provides the canonical deterministic PID for tests.
 """
 
 from __future__ import annotations
@@ -36,11 +36,14 @@ from vrcpilot.speaker.windows import ProcTapSpeakerBackend
 
 
 @pytest.fixture
-def patch_pid(mocker: MockerFixture) -> int:
-    """Override the autouse ``find_pid`` patch with a deterministic PID."""
-    pid = 4242
-    mocker.patch("vrcpilot.speaker.windows.process.find_pid", return_value=pid)
-    return pid
+def patch_pid() -> int:
+    """Return the deterministic PID used by the rest of the test fixtures.
+
+    PID resolution moved out of the backend and into
+    :class:`vrcpilot.speaker.Speaker`; the backend now takes ``pid`` as
+    a required keyword, so this fixture is just a constant.
+    """
+    return 4242
 
 
 @pytest.fixture
@@ -55,7 +58,7 @@ def backend_and_capture(
     """
     fake = FakeProcessAudioCapture(pid=patch_pid)
     mocker.patch.object(ProcTapSpeakerBackend, "_open_capture", return_value=fake)
-    return ProcTapSpeakerBackend(), fake
+    return ProcTapSpeakerBackend(pid=patch_pid), fake
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +72,7 @@ class TestConstruction:
         self,
         mocker: MockerFixture,
         bad: float,
-        patch_pid: int,  # noqa: ARG002 - guards against accidental real I/O
+        patch_pid: int,
     ):
         # Validation must fire before the capture is constructed so a
         # misuse never reaches proc-tap.
@@ -79,19 +82,7 @@ class TestConstruction:
             return_value=FakeProcessAudioCapture(pid=patch_pid),
         )
         with pytest.raises(ValueError, match="read_timeout must be > 0"):
-            ProcTapSpeakerBackend(read_timeout=bad)
-        spy.assert_not_called()
-
-    def test_raises_when_vrchat_not_running(self, mocker: MockerFixture):
-        # The autouse fixture pins find_pid -> None; we still patch
-        # _open_capture so that, if the check ever regressed, we would
-        # observe the failure as "wrong error" rather than a real
-        # capture attempt against a sleeping device.
-        spy = mocker.patch.object(
-            ProcTapSpeakerBackend, "_open_capture", return_value=None
-        )
-        with pytest.raises(RuntimeError, match="VRChat is not running"):
-            ProcTapSpeakerBackend()
+            ProcTapSpeakerBackend(read_timeout=bad, pid=patch_pid)
         spy.assert_not_called()
 
     def test_starts_capture_on_construction(
@@ -118,10 +109,29 @@ class TestConstruction:
             "_open_capture",
             return_value=FakeProcessAudioCapture(pid=patch_pid),
         )
-        backend = ProcTapSpeakerBackend()
+        backend = ProcTapSpeakerBackend(pid=patch_pid)
         try:
             spy.assert_called_once()
             assert spy.call_args.kwargs == {"pid": patch_pid}
+        finally:
+            backend.close()
+
+    def test_uses_explicit_pid(
+        self,
+        mocker: MockerFixture,
+    ):
+        # The backend's whole purpose under the C6 refactor is to take
+        # the caller's pid verbatim — no resolve_pid / find_pid lookups.
+        # Confirm a non-default PID flows through unmodified.
+        explicit = 9999
+        spy = mocker.patch.object(
+            ProcTapSpeakerBackend,
+            "_open_capture",
+            return_value=FakeProcessAudioCapture(pid=explicit),
+        )
+        backend = ProcTapSpeakerBackend(pid=explicit)
+        try:
+            assert spy.call_args.kwargs == {"pid": explicit}
         finally:
             backend.close()
 
