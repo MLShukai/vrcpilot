@@ -40,6 +40,12 @@ Targeting `0.3.0`. Adds first-class multi-instance VRChat support: every PID-dep
 - `vrcpilot/process.py` split into a package: `vrcpilot/process/__init__.py` (`find_pids`, `resolve_pid`, `terminate`, `wait_for_pid`, `wait_for_no_pid`, exception hierarchy, constants), `vrcpilot/process/launch.py` (`launch`, `OscConfig`, `build_*`), `vrcpilot/process/_executable.py` (private `find_vrchat_launcher` / `find_umu_launcher` implementation). All public symbols remain importable from `vrcpilot.process`.
 - Linux speaker (`vrcpilot.speaker.linux.PipeWireSpeakerBackend`): node enumeration now filters by `application.process.id` matching the resolved VRChat PID, falling back to the previous name-based heuristic only when `process.id` is unavailable. The `tap.json` state file now records `vrchat_pid` so external janitors can tell which VRChat instance a tap belongs to.
 
+## [0.2.1] - 2026-05-23
+
+### Fixed
+
+- **`vrcpilot linux-mic register` no longer kills PipeWire on 1.0+**. The persistent config fragment at `~/.config/pipewire/pipewire.conf.d/vrcpilot-mic.conf` previously declared the `VRCPilotMic` null-sink via `context.modules` with `name = libpipewire-module-null-sink`. That standalone module was removed in PipeWire 0.3 late / 1.0 (replaced by `module-adapter` driving the built-in `support.null-audio-sink` factory). On 1.0.x hosts (Ubuntu 24.04 ships pipewire 1.0.5) the PipeWire daemon aborted at start-up with `could not load mandatory module "libpipewire-module-null-sink"` → `failed to create context` → exit 254, hit the systemd auto-restart rate-limit (`Start request repeated too quickly`), and stayed dead across reboots — the persistent config kept reintroducing the failure. `pipewire-pulse` survived as a separate unit and answered every client connection (including `pulsectl.Pulse` and Steam) with `Host is down`, so the surface symptom was "PulseAudio is dead and won't come back". `0.2.1` rewrites the fragment in 1.0+ syntax (`context.objects` + `factory = adapter` + `factory.name = support.null-audio-sink`); existing installations need to delete the stale `vrcpilot-mic.conf` (or re-run `vrcpilot linux-mic register`) and `systemctl --user reset-failed pipewire.service pipewire-pulse.service wireplumber.service` to clear the rate-limit before PipeWire will start again.
+
 ## [0.2.0] - 2026-05-22
 
 Stable release of the 0.2.x series. The release pipeline rehearsed in `0.2.0rc1` is now promoted to stable; the Python and CLI surfaces are unchanged from the release candidate.
@@ -141,4 +147,5 @@ First public release candidate. Validates the end-to-end publish pipeline before
 [0.1.0rc1]: https://github.com/MLShukai/vrcpilot/releases/tag/v0.1.0rc1
 [0.2.0]: https://github.com/MLShukai/vrcpilot/compare/v0.2.0rc1...v0.2.0
 [0.2.0rc1]: https://github.com/MLShukai/vrcpilot/compare/v0.1.0...v0.2.0rc1
-[unreleased]: https://github.com/MLShukai/vrcpilot/compare/v0.2.0...HEAD
+[0.2.1]: https://github.com/MLShukai/vrcpilot/compare/v0.2.0...v0.2.1
+[unreleased]: https://github.com/MLShukai/vrcpilot/compare/v0.2.1...HEAD

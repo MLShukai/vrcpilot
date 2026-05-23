@@ -18,6 +18,7 @@
 ## project（実装上の固有事情）
 
 - [keyboard.press の duration デフォルト 0.1](project_keyboard_press_duration.md) — VRChat/Unity が短すぎる keypress を取りこぼすので 0.0 に戻さない
+- [pipewire null-sink module 廃止問題](project_pipewire_null_sink_module_removed.md) — `mic enable` が書き出す古い conf で PipeWire 1.0+ が起動不能になる。退避 + reset-failed で復旧、テンプレ自体は要修正
 
 ## reference（外部ツール・パス）
 
