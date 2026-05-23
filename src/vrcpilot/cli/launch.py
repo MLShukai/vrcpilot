@@ -42,9 +42,9 @@ def register(subparsers: SubParsersAction) -> None:
 
     The default launch route spawns VRChat's ``launch.exe`` directly
     (via ``umu-run`` on Linux). Pass ``--via-steam`` to fall back to the
-    legacy ``steam.exe -applaunch`` path. ``--wineprefix`` / ``--proton-path``
-    / ``--profile`` are Linux + direct-spawn only and conflict with
-    ``--via-steam``.
+    legacy ``steam.exe -applaunch`` path. ``--wineprefix`` /
+    ``--proton-path`` are Linux + direct-spawn only; ``--profile`` works
+    on both Windows and Linux but conflicts with ``--via-steam``.
     """
     launch_parser = subparsers.add_parser(
         "launch",
@@ -107,9 +107,12 @@ def register(subparsers: SubParsersAction) -> None:
         default=None,
         metavar="N",
         help=(
-            "Linux + direct-spawn only. Use a vrcpilot-managed wineprefix at "
-            "``$XDG_DATA_HOME/vrcpilot/profiles/<N>/wineprefix``. Must be a "
-            "non-negative integer. Overridden by an explicit --wineprefix."
+            "Pass --profile=N to VRChat (separates SaveData / cache folders). "
+            "Non-negative integer. On Linux, additionally maps to a "
+            "vrcpilot-managed WINEPREFIX at "
+            "$XDG_DATA_HOME/vrcpilot/profiles/<N>/wineprefix (falls back to "
+            "~/.local/share/...). Overridden by an explicit --wineprefix on "
+            "Linux. Not compatible with --via-steam."
         ),
     )
     launch_parser.add_argument(

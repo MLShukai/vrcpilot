@@ -28,7 +28,7 @@ from vrcpilot.process import (
     VRChatAlreadyRunningError,
     launch,
 )
-from vrcpilot.process.launch import validate_launch_args
+from vrcpilot.process.launch import build_vrchat_launch_args, validate_launch_args
 
 
 @pytest.fixture(autouse=True)
@@ -119,6 +119,19 @@ def _process_iter_returning(mocker: MockerFixture, *procs: FakeProcess) -> None:
     )
 
 
+class TestBuildVrchatLaunchArgs:
+    def test_profile_emits_single_equals_token(self):
+        # VRChat's --profile is a single =-delimited token, not a pair of
+        # tokens. The exact spelling matters: "--profile=3", not
+        # ["--profile", "3"].
+        args = build_vrchat_launch_args(profile=3)
+        assert "--profile=3" in args
+
+    def test_profile_none_does_not_emit_flag(self):
+        args = build_vrchat_launch_args(profile=None)
+        assert not any(a.startswith("--profile") for a in args)
+
+
 class TestValidateLaunchArgs:
     def test_accepts_defaults(self):
         # Should not raise.
@@ -178,11 +191,24 @@ class TestValidateLaunchArgs:
                 profile=None,
             )
 
-    def test_windows_with_profile_raises(self, monkeypatch: pytest.MonkeyPatch):
+    def test_windows_with_profile_accepted(self, monkeypatch: pytest.MonkeyPatch):
+        # profile is platform-agnostic — Windows must accept it so VRChat's
+        # --profile=N argv (separates SaveData/cache) can be forwarded.
+        monkeypatch.setattr(sys, "platform", "win32")
+        validate_launch_args(
+            via_steam=False, wineprefix=None, proton_path=None, profile=2
+        )
+
+    def test_windows_with_proton_path_raises(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ):
         monkeypatch.setattr(sys, "platform", "win32")
         with pytest.raises(ValueError, match="Linux-only"):
             validate_launch_args(
-                via_steam=False, wineprefix=None, proton_path=None, profile=0
+                via_steam=False,
+                wineprefix=None,
+                proton_path=tmp_path,
+                profile=None,
             )
 
 
@@ -329,6 +355,27 @@ class TestLaunchDirectSpawnWindows:
         assert "creationflags" in fake_popen.last_kwargs
         assert "start_new_session" not in fake_popen.last_kwargs
 
+    def test_profile_forwards_to_argv(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        mocker: MockerFixture,
+        fake_popen: type[FakePopen],
+        tmp_path: Path,
+    ):
+        # On Windows, profile only affects argv — no WINEPREFIX side effect.
+        monkeypatch.setattr(sys, "platform", "win32")
+        launcher = tmp_path / "launch.exe"
+        launcher.write_bytes(b"")
+        _patch_launcher(mocker, launcher)
+
+        launch(profile=2, wait_timeout=0)
+
+        assert fake_popen.last_argv == [str(launcher), "--profile=2"]
+        env = fake_popen.last_kwargs.get("env")
+        # No WINEPREFIX path on Windows.
+        if env is not None:
+            assert "WINEPREFIX" not in env
+
 
 class TestLaunchDirectSpawnLinux:
     """Linux direct-spawn path wraps ``launch.exe`` with ``umu-run``."""
@@ -466,6 +513,34 @@ class TestLaunchDirectSpawnLinux:
         assert env["WINEPREFIX"] == str(expected_prefix)
         # Side effect: directory was created so umu-run can use it.
         assert expected_prefix.is_dir()
+
+    def test_profile_forwards_to_argv_and_sets_wineprefix(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        mocker: MockerFixture,
+        fake_popen: type[FakePopen],
+        tmp_path: Path,
+    ):
+        # Linux profile: both argv (--profile=N) and WINEPREFIX must be set.
+        monkeypatch.setattr(sys, "platform", "linux")
+        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+        launcher = tmp_path / "launch.exe"
+        launcher.write_bytes(b"")
+        umu = tmp_path / "umu-run"
+        umu.write_bytes(b"")
+        _patch_launcher(mocker, launcher)
+        _patch_umu(mocker, umu)
+
+        launch(profile=2, wait_timeout=0)
+
+        assert fake_popen.last_argv == [
+            str(umu),
+            str(launcher),
+            "--profile=2",
+        ]
+        env = fake_popen.last_kwargs.get("env")
+        assert isinstance(env, dict)
+        assert "WINEPREFIX" in env
 
     def test_wineprefix_overrides_profile(
         self,

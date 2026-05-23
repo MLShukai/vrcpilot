@@ -54,13 +54,16 @@ def build_vrchat_launch_args(
     screen_width: int | None = None,
     screen_height: int | None = None,
     osc: OscConfig | None = None,
+    profile: int | None = None,
     extra_args: list[str] | None = None,
 ) -> list[str]:
     """Assemble the VRChat-side argv that follows ``-applaunch <app_id>``.
 
     Output order is fixed (``no_vr`` -> screen size -> ``osc`` ->
-    ``extra_args``) so the argv is byte-stable across runs. ``extra_args``
-    is the escape hatch for flags this helper does not model.
+    ``--profile`` -> ``extra_args``) so the argv is byte-stable across
+    runs. ``extra_args`` is the escape hatch for flags this helper does
+    not model. ``profile`` is rendered as the single ``--profile=N``
+    token (the format VRChat accepts).
     """
     args: list[str] = []
     if no_vr:
@@ -71,6 +74,8 @@ def build_vrchat_launch_args(
         args.extend(["-screen-height", str(screen_height)])
     if osc is not None:
         args.append(osc.to_launch_arg())
+    if profile is not None:
+        args.append(f"--profile={profile}")
     if extra_args:
         args.extend(extra_args)
     return args
@@ -101,21 +106,28 @@ def validate_launch_args(
     proton_path: Path | None,
     profile: int | None,
 ) -> None:
-    """``launch()`` 引数の fail-fast バリデーション."""
+    """``launch()`` 引数の fail-fast バリデーション.
+
+    ``profile`` は両 platform で許容する (Windows でも VRChat の
+    ``--profile=N`` argv を直接渡せる)。``wineprefix`` / ``proton_path``
+    は Linux + direct-spawn 専用。``via_steam`` との同時指定は ``profile``
+    を含めて禁止 — Steam 経由は ``--profile`` の伝達経路が異なる
+    (Steam の launch options 側で持つべき) ため、ここで argv に注入する
+    と二重指定や見落としを招く。
+    """
     if profile is not None and profile < 0:
         raise ValueError(f"profile must be non-negative (got {profile})")
 
     direct_spawn_only = (
         wineprefix is not None or proton_path is not None or profile is not None
     )
-    if direct_spawn_only:
-        if via_steam:
-            raise ValueError(
-                "wineprefix/proton_path/profile are only meaningful with "
-                "direct-spawn (not --via-steam)"
-            )
-        if sys.platform == "win32":
-            raise ValueError("wineprefix/proton_path/profile are Linux-only")
+    if direct_spawn_only and via_steam:
+        raise ValueError(
+            "wineprefix/proton_path/profile are only meaningful with "
+            "direct-spawn (not --via-steam)"
+        )
+    if sys.platform == "win32" and (wineprefix is not None or proton_path is not None):
+        raise ValueError("wineprefix/proton_path are Linux-only")
 
 
 def _wait_for_new_pid(
@@ -191,11 +203,14 @@ def launch(
         wineprefix: Linux + direct-spawn only. Sets ``$WINEPREFIX`` for
             the ``umu-run`` subprocess.
         proton_path: Linux + direct-spawn only. Sets ``$PROTON_PATH``.
-        profile: Linux + direct-spawn only. When set, auto-generates a
+        profile: Pass ``--profile=N`` to VRChat (separates SaveData /
+            cache folders). Must be a non-negative int. Accepted on both
+            Windows and Linux. On Linux, additionally auto-generates a
             prefix at ``$XDG_DATA_HOME/vrcpilot/profiles/<profile>/wineprefix``
             (falls back to ``~/.local/share/...``) and uses that for
-            ``$WINEPREFIX``. Must be a non-negative int. Overridden by an
-            explicit ``wineprefix``.
+            ``$WINEPREFIX``; an explicit ``wineprefix`` overrides this.
+            Not compatible with ``via_steam`` (the Steam route should
+            carry ``--profile`` via Steam launch options instead).
         no_vr / screen_width / screen_height / osc / extra_args: Forwarded
             to VRChat's argv via :func:`build_vrchat_launch_args`.
         wait_timeout: Seconds to wait for the new VRChat PID to appear
@@ -255,6 +270,7 @@ def launch(
         screen_width=screen_width,
         screen_height=screen_height,
         osc=osc,
+        profile=profile,
         extra_args=extra_args,
     )
 
