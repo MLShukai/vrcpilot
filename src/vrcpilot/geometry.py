@@ -26,8 +26,9 @@ if sys.platform == "win32":
 
 if sys.platform == "linux":
 
-    def _get_vrchat_rect_x11(*, pid: int) -> tuple[int, int, int, int] | None:
-        """X11 path: open display, locate the VRChat window, query geometry."""
+    def _get_vrchat_rect_linux(*, pid: int) -> tuple[int, int, int, int] | None:
+        """Linux path: open the X11 display, locate the VRChat window, query
+        geometry."""
         from vrcpilot.linux import find_vrchat_window, get_window_rect, open_x11_display
 
         display = open_x11_display()
@@ -68,7 +69,7 @@ def get_vrchat_window_rect(
     if sys.platform == "win32":
         return _get_vrchat_rect_win32(pid=resolved)
     if sys.platform == "linux":
-        return _get_vrchat_rect_x11(pid=resolved)
+        return _get_vrchat_rect_linux(pid=resolved)
     raise NotImplementedError(
         f"get_vrchat_window_rect() is not supported on {sys.platform}"
     )

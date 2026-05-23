@@ -57,7 +57,7 @@ class TestGetVrchatWindowRect:
         if sys.platform == "win32":
             backend_spy = mocker.spy(geometry, "_get_vrchat_rect_win32")
         elif sys.platform == "linux":
-            backend_spy = mocker.spy(geometry, "_get_vrchat_rect_x11")
+            backend_spy = mocker.spy(geometry, "_get_vrchat_rect_linux")
         else:
             backend_spy = None
 
@@ -92,7 +92,7 @@ class TestGetVrchatWindowRect:
             )
         elif sys.platform == "linux":
             backend_mock = mocker.patch(
-                "vrcpilot.geometry._get_vrchat_rect_x11",
+                "vrcpilot.geometry._get_vrchat_rect_linux",
                 return_value=(0, 0, 1280, 720),
             )
         else:
@@ -117,7 +117,7 @@ class TestGetVrchatWindowRect:
             )
         elif sys.platform == "linux":
             backend_mock = mocker.patch(
-                "vrcpilot.geometry._get_vrchat_rect_x11",
+                "vrcpilot.geometry._get_vrchat_rect_linux",
                 return_value=(10, 20, 1920, 1080),
             )
         else:
@@ -168,7 +168,7 @@ class TestPlatformBackends:
         from vrcpilot import geometry as geometry_mod
 
         mocker.patch("vrcpilot.linux.open_x11_display", return_value=None)
-        assert geometry_mod._get_vrchat_rect_x11(pid=12345) is None  # pyright: ignore[reportPrivateUsage]
+        assert geometry_mod._get_vrchat_rect_linux(pid=12345) is None  # pyright: ignore[reportPrivateUsage]
 
     @only_linux
     def test_x11_backend_passes_pid_to_find_vrchat_window(
@@ -182,7 +182,7 @@ class TestPlatformBackends:
             "vrcpilot.linux.find_vrchat_window", return_value=None
         )
 
-        result = geometry_mod._get_vrchat_rect_x11(pid=12345)  # pyright: ignore[reportPrivateUsage]
+        result = geometry_mod._get_vrchat_rect_linux(pid=12345)  # pyright: ignore[reportPrivateUsage]
 
         assert result is None
         find_window_mock.assert_called_once_with(fake_display, 12345)
