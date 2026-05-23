@@ -2,13 +2,6 @@
 
 from __future__ import annotations
 
-# ``subprocess`` is re-exported as ``subprocess as subprocess`` (PEP 484
-# explicit re-export idiom) so existing tests that monkeypatch
-# ``vrcpilot.process.subprocess.Popen`` keep resolving. The real call
-# site is :mod:`vrcpilot.process.launch`; because ``subprocess`` is a
-# singleton in ``sys.modules``, patching ``Popen`` on this attribute
-# reaches the call site identically.
-import subprocess as subprocess
 import time
 import warnings
 from typing import Final
@@ -46,8 +39,6 @@ class VRChatMultipleInstancesError(VRChatNotRunningError):
     still catch it. The candidate PIDs are exposed via :attr:`pids` (newest first,
     matching :func:`find_pids`'s ordering).
     """
-
-    pids: list[int]
 
     def __init__(self, pids: list[int]) -> None:
         super().__init__(
@@ -300,10 +291,8 @@ def terminate(*pids: int, timeout: float = 5.0) -> list[int]:
     return killed_pids
 
 
-# Re-export launch helpers so ``from vrcpilot.process import launch`` etc.
-# keeps working. Imported at the bottom to avoid a circular import:
-# :mod:`vrcpilot.process.launch` needs the constants and ``wait_for_pid``
-# defined above.
+# Re-export launch helpers at the bottom to break the import cycle with
+# :mod:`vrcpilot.process.launch`.
 from .launch import (  # noqa: E402
     OscConfig,
     build_launch_command,
