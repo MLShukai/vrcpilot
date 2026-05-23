@@ -6,3 +6,4 @@
 - [soundcard library quirks](reference_soundcard_quirks.md) — argv probe crashes on empty argv, no public Speaker type, player()/recorder() are context managers, fakes carry `FakeSoundCard*` prefix
 - [e2e PyAV-recorder pattern](feedback_e2e_pyav_recorder_pattern.md) — write small PyAV helpers under `tests/e2e/_pyav_recorder.py` instead of importing CLI-internal muxers; class names should not start with `_`
 - [Subclass exception except-order](feedback_exception_subclass_except_order.md) — VRChatMultipleInstancesError must be caught before VRChatNotRunningError / RuntimeError, otherwise the multi-instance diagnostic is absorbed silently
+- [docformatter は Japanese 全角句点を . に置換](feedback_docformatter_japanese_summary.md) — summary を `。"""` で終わらせると `。."""` に書き換えられ wrapping が走って 2 行に折れる; ASCII `.` で締める
