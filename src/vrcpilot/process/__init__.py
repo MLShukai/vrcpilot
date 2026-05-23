@@ -94,7 +94,7 @@ def find_pid() -> int | None:
     newest-started VRChat by ``create_time`` ordering.
     """
     warnings.warn(
-        "vrcpilot.process.find_pid is deprecated and will be removed in 0.4.0; "
+        "find_pid() is deprecated and will be removed in 0.4.0; "
         "use find_pids() or pass pid= to specific APIs",
         DeprecationWarning,
         stacklevel=2,
@@ -111,8 +111,13 @@ def find_pids() -> list[int]:
     run and the caller wants the freshly launched one.
 
     Processes whose ``create_time()`` raises ``psutil.NoSuchProcess`` or
-    ``psutil.AccessDenied`` are silently skipped. Returns an empty list when
-    no VRChat instance is running.
+    ``psutil.AccessDenied`` are silently skipped. ``AccessDenied`` is the
+    common failure mode for cross-session VRChat instances on Windows (e.g.
+    one started by another user), so a skipped process is not a hard error
+    here. The downstream consequence is that if the *only* running VRChat is
+    in that state, :func:`resolve_pid` (called with ``pid=None``) will report
+    it as not running and raise :class:`VRChatNotRunningError`. Returns an
+    empty list when no VRChat instance is running.
     """
     pairs: list[tuple[float, int]] = []
     for proc in psutil.process_iter(["name"]):

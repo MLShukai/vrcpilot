@@ -194,7 +194,7 @@ class TestFindPid:
             assert find_pid() == 222
 
     def test_emits_deprecation_warning(self):
-        with pytest.warns(DeprecationWarning, match="find_pid is deprecated"):
+        with pytest.warns(DeprecationWarning, match=r"find_pid\(\) is deprecated"):
             find_pid()
 
 
