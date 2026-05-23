@@ -7,20 +7,19 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.skipif(
-    sys.platform != "linux", reason="vrcpilot.process.linux is Linux-only"
-)
+if sys.platform != "linux":
+    pytest.skip("vrcpilot.process.linux is Linux-only", allow_module_level=True)
 
-from vrcpilot.process import (  # noqa: E402
+from vrcpilot.process import (
     UmuLauncherNotFoundError,
     VRChatDisplayNotAvailableError,
 )
-from vrcpilot.process.linux import (  # noqa: E402
+from vrcpilot.process.linux import (
     find_umu_launcher,
     preflight_linux_environment,
     profile_wineprefix,
 )
-from vrcpilot.steam import SteamNotRunningError  # noqa: E402
+from vrcpilot.steam import SteamNotRunningError
 
 
 class TestFindUmuLauncher:
