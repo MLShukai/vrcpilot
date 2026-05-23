@@ -14,11 +14,10 @@ import Xlib.protocol.event
 from Xlib import X
 
 from vrcpilot.linux import find_vrchat_window, x11_display
-from vrcpilot.process import find_pid
 from vrcpilot.session import is_wayland_native
 
 
-def focus_window() -> bool:
+def focus_window(*, pid: int) -> bool:
     """X11/XWayland implementation of :func:`vrcpilot.window.focus`."""
     if is_wayland_native():
         warnings.warn(
@@ -27,10 +26,6 @@ def focus_window() -> bool:
             RuntimeWarning,
             stacklevel=2,
         )
-        return False
-
-    pid = find_pid()
-    if pid is None:
         return False
 
     with x11_display() as display:
@@ -58,7 +53,7 @@ def focus_window() -> bool:
         return True
 
 
-def is_window_foreground() -> bool:
+def is_window_foreground(*, pid: int) -> bool:
     """X11/XWayland implementation of :func:`vrcpilot.window.is_foreground`."""
     if is_wayland_native():
         warnings.warn(
@@ -67,10 +62,6 @@ def is_window_foreground() -> bool:
             RuntimeWarning,
             stacklevel=2,
         )
-        return False
-
-    pid = find_pid()
-    if pid is None:
         return False
 
     with x11_display() as display:
@@ -93,7 +84,7 @@ def is_window_foreground() -> bool:
         return int(values[0]) == int(window.id)
 
 
-def unfocus_window() -> bool:
+def unfocus_window(*, pid: int) -> bool:
     """X11/XWayland implementation of :func:`vrcpilot.window.unfocus`."""
     if is_wayland_native():
         warnings.warn(
@@ -102,10 +93,6 @@ def unfocus_window() -> bool:
             RuntimeWarning,
             stacklevel=2,
         )
-        return False
-
-    pid = find_pid()
-    if pid is None:
         return False
 
     with x11_display() as display:

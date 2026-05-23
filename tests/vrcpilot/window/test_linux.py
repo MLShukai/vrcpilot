@@ -3,11 +3,9 @@
 The module under test raises ``ImportError`` on non-Linux platforms,
 and the real connection paths require a reachable X server. Two
 module-level skips up front gate the rest of the file: platform first,
-then display reachability. Below the gate, the autouse
-``_no_real_vrchat`` fixture (see :mod:`tests.conftest`) pins
-``find_pid()`` to ``None`` so both helpers short-circuit to ``False``
-before any X protocol traffic is sent — that single shared fixture
-covers the dominant happy-VRChat-not-running branch with zero mocks.
+then display reachability. Below the gate, backend helpers receive an
+explicit ``pid=`` argument now that the public dispatch layer
+(:mod:`vrcpilot.window`) resolves it via :func:`vrcpilot.process.resolve_pid`.
 The shared ``except Xlib.error.XError`` contract (any X protocol
 failure surfaces as ``False``) is exercised once via
 :class:`tests.fakes.FakeXWindow` on the simpler ``unfocus_window``
@@ -49,12 +47,23 @@ class TestFocusWindow:
         monkeypatch.delenv("DISPLAY", raising=False)
 
         with pytest.warns(RuntimeWarning, match="Wayland native"):
-            assert focus_window() is False
+            assert focus_window(pid=4242) is False
 
-    def test_returns_false_when_vrchat_not_running(self):
-        # Autouse fixture pins ``find_pid()`` to ``None``; the helper
-        # short-circuits before opening a real X11 display.
-        assert focus_window() is False
+    def test_returns_false_when_window_not_found(self, mocker: MockerFixture):
+        # PID is supplied directly now; backend no longer consults
+        # ``find_pid``. With the X11 window lookup short-circuited to
+        # ``None`` the helper must report ``False`` without sending any
+        # ClientMessage.
+        mocker.patch(
+            "vrcpilot.window.linux.x11_display",
+            return_value=fake_x11_display_cm(FakeXDisplay()),
+        )
+        mocker.patch(
+            "vrcpilot.window.linux.find_vrchat_window",
+            return_value=None,
+        )
+
+        assert focus_window(pid=4242) is False
 
 
 class TestUnfocusWindow:
@@ -63,23 +72,29 @@ class TestUnfocusWindow:
         monkeypatch.delenv("DISPLAY", raising=False)
 
         with pytest.warns(RuntimeWarning, match="Wayland native"):
-            assert unfocus_window() is False
+            assert unfocus_window(pid=4242) is False
 
-    def test_returns_false_when_vrchat_not_running(self):
-        # Autouse fixture pins ``find_pid()`` to ``None``.
-        assert unfocus_window() is False
+    def test_returns_false_when_window_not_found(self, mocker: MockerFixture):
+        mocker.patch(
+            "vrcpilot.window.linux.x11_display",
+            return_value=fake_x11_display_cm(FakeXDisplay()),
+        )
+        mocker.patch(
+            "vrcpilot.window.linux.find_vrchat_window",
+            return_value=None,
+        )
+
+        assert unfocus_window(pid=4242) is False
 
     def test_returns_false_on_xerror(self, mocker: MockerFixture):
         # Inject XError on ``window.configure``: FakeXWindow with
         # ``raises`` set throws on the first recorded call, exercising
         # the ``except Xlib.error.XError`` branch shared by both
-        # ``focus_window`` and ``unfocus_window``. ``find_pid`` returns
-        # non-None so we reach the X path; ``x11_display`` is replaced
-        # with a fake context manager yielding a benign FakeXDisplay
-        # (the lookup is short-circuited by patching
+        # ``focus_window`` and ``unfocus_window``. ``x11_display`` is
+        # replaced with a fake context manager yielding a benign
+        # FakeXDisplay (the lookup is short-circuited by patching
         # ``find_vrchat_window``).
         xerror_cls = make_xerror_subclass()
-        mocker.patch("vrcpilot.window.linux.find_pid", return_value=4242)
         mocker.patch(
             "vrcpilot.window.linux.x11_display",
             return_value=fake_x11_display_cm(FakeXDisplay()),
@@ -89,7 +104,7 @@ class TestUnfocusWindow:
             return_value=FakeXWindow(raises=xerror_cls()),
         )
 
-        assert unfocus_window() is False
+        assert unfocus_window(pid=4242) is False
 
 
 class TestIsWindowForeground:
@@ -100,11 +115,19 @@ class TestIsWindowForeground:
         monkeypatch.delenv("DISPLAY", raising=False)
 
         with pytest.warns(RuntimeWarning, match="Wayland native"):
-            assert is_window_foreground() is False
+            assert is_window_foreground(pid=4242) is False
 
-    def test_returns_false_when_vrchat_not_running(self):
-        # Autouse fixture pins ``find_pid()`` to ``None``.
-        assert is_window_foreground() is False
+    def test_returns_false_when_window_not_found(self, mocker: MockerFixture):
+        mocker.patch(
+            "vrcpilot.window.linux.x11_display",
+            return_value=fake_x11_display_cm(FakeXDisplay()),
+        )
+        mocker.patch(
+            "vrcpilot.window.linux.find_vrchat_window",
+            return_value=None,
+        )
+
+        assert is_window_foreground(pid=4242) is False
 
     def test_returns_false_on_xerror(self, mocker: MockerFixture):
         # When the root window's ``get_full_property`` raises XError on
@@ -117,7 +140,6 @@ class TestIsWindowForeground:
         root_window = FakeXWindow(wid=1, raises=xerror_cls())
         display = FakeXDisplay(root=root_window)
 
-        mocker.patch("vrcpilot.window.linux.find_pid", return_value=4242)
         mocker.patch(
             "vrcpilot.window.linux.x11_display",
             return_value=fake_x11_display_cm(display),
@@ -127,7 +149,7 @@ class TestIsWindowForeground:
             return_value=vrchat_window,
         )
 
-        assert is_window_foreground() is False
+        assert is_window_foreground(pid=4242) is False
 
     def test_returns_true_when_active_matches_vrchat(self, mocker: MockerFixture):
         # Drive the happy path: root advertises ``_NET_ACTIVE_WINDOW``
@@ -140,7 +162,6 @@ class TestIsWindowForeground:
         )
         display = FakeXDisplay(root=root_window)
 
-        mocker.patch("vrcpilot.window.linux.find_pid", return_value=4242)
         mocker.patch(
             "vrcpilot.window.linux.x11_display",
             return_value=fake_x11_display_cm(display),
@@ -150,7 +171,7 @@ class TestIsWindowForeground:
             return_value=vrchat_window,
         )
 
-        assert is_window_foreground() is True
+        assert is_window_foreground(pid=4242) is True
 
     def test_returns_false_when_active_is_other_window(self, mocker: MockerFixture):
         # Active window id differs from the VRChat window's id - the
@@ -162,7 +183,6 @@ class TestIsWindowForeground:
         )
         display = FakeXDisplay(root=root_window)
 
-        mocker.patch("vrcpilot.window.linux.find_pid", return_value=4242)
         mocker.patch(
             "vrcpilot.window.linux.x11_display",
             return_value=fake_x11_display_cm(display),
@@ -172,7 +192,7 @@ class TestIsWindowForeground:
             return_value=vrchat_window,
         )
 
-        assert is_window_foreground() is False
+        assert is_window_foreground(pid=4242) is False
 
     def test_returns_false_when_active_property_missing(self, mocker: MockerFixture):
         # WM that doesn't advertise ``_NET_ACTIVE_WINDOW`` (or the atom
@@ -182,7 +202,6 @@ class TestIsWindowForeground:
         root_window = FakeXWindow(wid=1, properties={})
         display = FakeXDisplay(root=root_window)
 
-        mocker.patch("vrcpilot.window.linux.find_pid", return_value=4242)
         mocker.patch(
             "vrcpilot.window.linux.x11_display",
             return_value=fake_x11_display_cm(display),
@@ -192,4 +211,4 @@ class TestIsWindowForeground:
             return_value=vrchat_window,
         )
 
-        assert is_window_foreground() is False
+        assert is_window_foreground(pid=4242) is False
