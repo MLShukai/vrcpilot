@@ -174,7 +174,8 @@ def run(args: argparse.Namespace) -> int:
     * 0: success (PID printed) or wait was skipped
     * 1: wait timed out without observing a new PID
     * 2: Steam/launch.exe/umu-run not found, or invalid flag combination
-    * 3: ``--via-steam`` was requested while VRChat is already running
+    * 3: :class:`VRChatAlreadyRunningError` was raised (currently only
+      reachable via the ``--via-steam`` route)
     """
     osc = (
         OscConfig(
