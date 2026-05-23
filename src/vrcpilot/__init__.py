@@ -43,10 +43,28 @@ from vrcpilot.ocr import OCREngine, OCRResult, OCRWord, RapidOCREngine, ocr
 from vrcpilot.osc import AvatarParameters, InputController, OscSender
 from vrcpilot.process import (
     OscConfig,
+    UmuLauncherNotFoundError,
+    VRChatAlreadyRunningError,
+    VRChatLauncherNotFoundError,
+    VRChatMultipleInstancesError,
     VRChatNotRunningError,
     find_pid,
+    find_pids,
     launch,
+    resolve_pid,
     terminate,
+)
+
+# ``find_vrchat_launcher`` / ``find_umu_launcher`` live in the private
+# ``vrcpilot.process._executable`` module but the functions themselves
+# are part of the public API. Importing them directly avoids touching
+# ``process/__init__.py`` while parallel work (C8) is modifying it.
+# Future cleanup: once C8 lands, re-route through
+# ``vrcpilot.process.find_vrchat_launcher`` for symmetry with the
+# other process helpers.
+from vrcpilot.process._executable import (  # noqa: PLC2701
+    find_umu_launcher,
+    find_vrchat_launcher,
 )
 from vrcpilot.screenshot import Screenshot, take_screenshot
 from vrcpilot.speaker import AudioCallback, Speaker, SpeakerLoop
@@ -70,6 +88,9 @@ __all__ = [
     "Detection",
     "ensure_target",
     "find_pid",
+    "find_pids",
+    "find_umu_launcher",
+    "find_vrchat_launcher",
     "focus",
     "InputController",
     "is_foreground",
@@ -87,6 +108,7 @@ __all__ = [
     "OscConfig",
     "OscSender",
     "RapidOCREngine",
+    "resolve_pid",
     "Screenshot",
     "Speaker",
     "SpeakerLoop",
@@ -94,7 +116,11 @@ __all__ = [
     "take_screenshot",
     "TemplateDetectEngine",
     "terminate",
+    "UmuLauncherNotFoundError",
     "unfocus",
+    "VRChatAlreadyRunningError",
+    "VRChatLauncherNotFoundError",
+    "VRChatMultipleInstancesError",
     "VRChatNotFocusedError",
     "VRChatNotRunningError",
 ]

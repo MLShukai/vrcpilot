@@ -72,6 +72,59 @@ class TestPackage:
         assert name not in vrcpilot.__all__
 
 
+class TestPidApis:
+    """New PID-resolution helpers must reach the top-level namespace.
+
+    ``find_pids`` and ``resolve_pid`` are the migration target for the
+    deprecated ``find_pid``; pinning them at ``vrcpilot.<name>`` keeps the
+    public surface stable as ``find_pid`` is phased out.
+    """
+
+    @pytest.mark.parametrize("name", ["find_pids", "resolve_pid"])
+    def test_exposed_at_top_level(self, name: str) -> None:
+        assert hasattr(vrcpilot, name)
+        assert name in vrcpilot.__all__
+
+    def test_find_pid_still_exposed(self) -> None:
+        """``find_pid`` remains public until 0.4.0 removes the deprecation."""
+        assert hasattr(vrcpilot, "find_pid")
+        assert "find_pid" in vrcpilot.__all__
+
+
+class TestNewProcessExceptions:
+    """Multi-instance / launcher-discovery exceptions must be re-exported.
+
+    Locks the public-error surface so callers can do
+    ``except vrcpilot.VRChatMultipleInstancesError`` without reaching
+    into ``vrcpilot.process``.
+    """
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "VRChatMultipleInstancesError",
+            "VRChatLauncherNotFoundError",
+            "VRChatAlreadyRunningError",
+            "UmuLauncherNotFoundError",
+        ],
+    )
+    def test_exposed_at_top_level(self, name: str) -> None:
+        assert hasattr(vrcpilot, name)
+        assert name in vrcpilot.__all__
+
+
+class TestLauncherDiscovery:
+    """Launcher discovery helpers must be reachable from the top-level."""
+
+    @pytest.mark.parametrize(
+        "name",
+        ["find_vrchat_launcher", "find_umu_launcher"],
+    )
+    def test_exposed_at_top_level(self, name: str) -> None:
+        assert hasattr(vrcpilot, name)
+        assert name in vrcpilot.__all__
+
+
 class TestOcrAttributeAndSubmoduleCoexist:
     """Pin the function-vs-submodule shadowing of ``vrcpilot.ocr``.
 
