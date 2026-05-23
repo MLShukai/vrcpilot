@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Targeting `0.3.0`. Adds first-class multi-instance VRChat support: every PID-dependent Python API and CLI subcommand now takes an explicit target PID, and `launch()` defaults to spawning the EAC-aware `launch.exe` wrapper directly (Windows: `launch.exe`, Linux: `umu-run launch.exe`) instead of going through Steam.
+
+### Breaking
+
+- **`VRChatNotRunningError` moved to `vrcpilot.process`.** Importing it from `vrcpilot.controls.errors` (or `vrcpilot.controls`) no longer works — there is no alias and no deprecation shim. Migrate to `from vrcpilot.process import VRChatNotRunningError` (or the top-level `from vrcpilot import VRChatNotRunningError`, which still works).
+- **`launch()` defaults to direct-spawn**, not Steam. On Windows it spawns `launch.exe` directly; on Linux it spawns `umu-run launch.exe`. The previous behaviour (`steam.exe -applaunch 438100`) is preserved behind the new opt-in `via_steam=True` argument (CLI: `--via-steam`), which refuses to launch when any VRChat process is already running (`VRChatAlreadyRunningError`). Direct-spawn was chosen because `VRChat.exe` cannot be invoked directly without breaking EAC (it falls back to offline mode); `launch.exe` is VRChat's own EAC-aware wrapper.
+- **PID-unspecified callers fail loudly under multi-instance.** When two or more VRChat processes are running and a PID-dependent API or CLI subcommand is called without `pid=` / `--pid`, the new `VRChatMultipleInstancesError` (a subclass of `VRChatNotRunningError`, so existing `except VRChatNotRunningError` blocks still trigger) is raised with the candidate PID list. The previous behaviour silently targeted the first PID returned by `psutil.process_iter`, which was unpredictable.
+- **`process.py` is now a package.** `vrcpilot/process.py` was split into `vrcpilot/process/__init__.py`, `vrcpilot/process/launch.py`, and `vrcpilot/process/_executable.py`. `from vrcpilot.process import ...` keeps working through the package's re-exports, but any code that imported `vrcpilot.process` expecting a single-file module attribute (e.g. `vrcpilot.process.__file__` pointing at a `.py` file) needs updating.
+- **`vrcpilot.process.find_pids()` is now sorted (newest first).** PIDs are returned in descending `psutil.Process.create_time()` order so that "the most recently launched VRChat" is at index 0. This makes diff-based PID detection in `launch()` natural but is a behavioural change for any caller that assumed OS-defined enumeration order.
+- **`vrcpilot.process.terminate` became variadic** (`terminate(*pids, timeout=5.0)`). The zero-argument call still kills every VRChat process; the new shape additionally allows partial termination (`terminate(1234, 5678)`) and validates each PID's process name before killing to avoid hitting unrelated processes. On the CLI, `vrcpilot terminate` likewise takes positional `PID...` (`vrcpilot terminate` / `vrcpilot terminate 1234` / `vrcpilot terminate 1234 5678`).
+- **`vrcpilot.controls.ensure_target` now returns `int`** (the resolved PID) instead of `None`. Callers that ignored the return value are unaffected.
+
+### Deprecated
+
+- **`vrcpilot.find_pid` / `vrcpilot.process.find_pid`** emit `DeprecationWarning` and will be removed in `0.4.0`. They are now thin wrappers around `find_pids()[0]` and still target the newest VRChat under the new sort order, but the helper is fundamentally ambiguous under multi-instance. Migrate to `find_pids()` (full list), `resolve_pid(pid)` (single resolution with multi-instance diagnostics), or pass `pid=` to the specific API you are calling.
+
+### Added
+
+- **`pid` keyword on every PID-dependent API.** `vrcpilot.window.focus / is_foreground / unfocus`, `vrcpilot.geometry.get_vrchat_window_rect`, `vrcpilot.screenshot.take_screenshot`, `vrcpilot.capture.Capture` / `CaptureLoop`, `vrcpilot.speaker.Speaker` / `SpeakerLoop`, `vrcpilot.controls.mouse.*`, `vrcpilot.controls.keyboard.*`, `vrcpilot.clipboard.paste`, and `vrcpilot.controls.ensure_target` all accept `pid: int | None = None` (keyword-only). Omitted means "resolve via `vrcpilot.process.resolve_pid` (which raises `VRChatMultipleInstancesError` under multi-instance)". For `controls.mouse` / `controls.keyboard`, the hot-loop fast path `focus=False` deliberately skips PID resolution entirely so per-frame call overhead is unchanged.
+- **`vrcpilot.process.resolve_pid(pid: int | None) -> int`**: single-PID resolution helper. Pass through an explicit PID, or under `None` consult `find_pids()` and raise `VRChatNotRunningError` (zero) or `VRChatMultipleInstancesError` (two or more). Used internally by every PID-dependent public surface.
+- **New exceptions in `vrcpilot.process`** (and re-exported from the top-level package): `VRChatMultipleInstancesError` (subclass of `VRChatNotRunningError`, carries `pids: list[int]`), `VRChatLauncherNotFoundError`, `VRChatAlreadyRunningError`, `UmuLauncherNotFoundError`. `vrcpilot.UmuLauncherNotFoundError.args[0]` includes installation hints for Ubuntu (deb from the [umu-launcher releases page](https://github.com/Open-Wine-Components/umu-launcher/releases/latest)) and a fallback suggestion to use `--via-steam`.
+- **Launcher auto-discovery**: `vrcpilot.process.find_vrchat_launcher(override=None)` locates the EAC wrapper `launch.exe` via (1) `override` / `--vrchat-launcher`, (2) `$VRCHAT_LAUNCHER`, (3) Steam `libraryfolders.vdf` lookup (registry on Windows, `~/.steam/steam/steamapps/libraryfolders.vdf` / `~/.local/share/Steam/...` on Linux), (4) standard install paths. `vrcpilot.process.find_umu_launcher(override=None)` resolves `umu-run` from `PATH`. Both are public.
+- **`vrcpilot.launch()` new options** (keyword-only, in addition to `via_steam`): `vrchat_launcher: Path | None` (override the auto-discovered `launch.exe`), and Linux + direct-spawn-only `wineprefix: Path | None`, `proton_path: Path | None`, `profile: int | None`. `profile=N` auto-generates `~/.local/share/vrcpilot/profiles/N/wineprefix/` (honouring `$XDG_DATA_HOME`) and injects it as `WINEPREFIX` so several VRChat instances can run side-by-side in isolated prefixes / save-data trees. Invalid flag combinations (e.g. `via_steam=True` with any of `wineprefix` / `proton_path` / `profile`, or any of those on Windows) raise `ValueError` at the launch entry point.
+- **`vrcpilot.process.wait_for_pid` / `wait_for_no_pid`** now accept a keyword-only `pid: int | None = None` to wait for a specific instance to appear / disappear (via `psutil.pid_exists`) rather than the legacy "any VRChat" semantics.
+- **CLI `--pid PID`** on `focus`, `unfocus`, `screenshot`, `record`, `mouse`, `keyboard`, `paste`. Omitted means "auto-resolve"; with multiple VRChat processes running, the command exits 1 with a `vrcpilot: multiple VRChat instances detected (PIDs: ...); pass --pid` diagnostic listing the candidate PIDs.
+- **CLI `vrcpilot terminate [PID ...]`**: positional variadic. Zero args still mean "kill every VRChat process" (backwards compatible); one or more PIDs kill exactly those. The command validates each PID's process name and exits 1 on a non-VRChat PID.
+- **CLI `vrcpilot launch` new flags**: `--via-steam`, `--vrchat-launcher PATH`, `--wineprefix PATH`, `--proton-path PATH`, `--profile N`. Exit codes: 2 for invalid argument combinations or any launcher-not-found, 3 for `VRChatAlreadyRunningError`. `--profile` rejects negative integers at the argparse layer.
+
+### Changed
+
+- `vrcpilot/process.py` split into a package: `vrcpilot/process/__init__.py` (`find_pids`, `resolve_pid`, `terminate`, `wait_for_pid`, `wait_for_no_pid`, exception hierarchy, constants), `vrcpilot/process/launch.py` (`launch`, `OscConfig`, `build_*`), `vrcpilot/process/_executable.py` (private `find_vrchat_launcher` / `find_umu_launcher` implementation). All public symbols remain importable from `vrcpilot.process`.
+- Linux speaker (`vrcpilot.speaker.linux.PipeWireSpeakerBackend`): node enumeration now filters by `application.process.id` matching the resolved VRChat PID, falling back to the previous name-based heuristic only when `process.id` is unavailable. The `tap.json` state file now records `vrchat_pid` so external janitors can tell which VRChat instance a tap belongs to.
+
 ## [0.2.0] - 2026-05-22
 
 Stable release of the 0.2.x series. The release pipeline rehearsed in `0.2.0rc1` is now promoted to stable; the Python and CLI surfaces are unchanged from the release candidate.
@@ -106,3 +141,4 @@ First public release candidate. Validates the end-to-end publish pipeline before
 [0.1.0rc1]: https://github.com/MLShukai/vrcpilot/releases/tag/v0.1.0rc1
 [0.2.0]: https://github.com/MLShukai/vrcpilot/compare/v0.2.0rc1...v0.2.0
 [0.2.0rc1]: https://github.com/MLShukai/vrcpilot/compare/v0.1.0...v0.2.0rc1
+[unreleased]: https://github.com/MLShukai/vrcpilot/compare/v0.2.0...HEAD
