@@ -10,7 +10,7 @@ on:
       - "pyproject.toml"
       - "uv.lock"
   pull_request:
-    branches: [main]
+    branches: [main, release/*]
     paths:
       - "**/*.py"
       - "**/*.pyi"
