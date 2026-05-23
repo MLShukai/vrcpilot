@@ -10,6 +10,7 @@ from __future__ import annotations
 # reaches the call site identically.
 import subprocess as subprocess
 import time
+import warnings
 from typing import Final
 
 import psutil
@@ -37,33 +38,118 @@ class VRChatNotRunningError(RuntimeError):
     """No VRChat process is running when an input was requested."""
 
 
-def find_pid() -> int | None:
-    """Return the PID of a running VRChat process, or ``None`` if absent.
+class VRChatMultipleInstancesError(VRChatNotRunningError):
+    """Raised when no pid is specified but multiple VRChat instances are
+    running.
 
-    Returns the first match from :func:`psutil.process_iter` - when
-    multiple instances run, enumeration order is OS-defined and the
-    choice is not configurable. Use :func:`find_pids` to retrieve every
-    matching PID.
+    Subclass of :class:`VRChatNotRunningError` so existing ``except`` blocks
+    still catch it. The candidate PIDs are exposed via :attr:`pids` (newest first,
+    matching :func:`find_pids`'s ordering).
     """
-    for proc in psutil.process_iter(["name"]):
-        if proc.info["name"] == VRCHAT_PROCESS_NAME:
-            return proc.pid
-    return None
+
+    pids: list[int]
+
+    def __init__(self, pids: list[int]) -> None:
+        super().__init__(
+            f"multiple VRChat instances detected (PIDs: {pids}); "
+            "pass pid= to disambiguate"
+        )
+        self.pids = list(pids)
+
+
+class VRChatLauncherNotFoundError(RuntimeError):
+    """Raised when VRChat's ``launch.exe`` (EAC wrapper) cannot be located.
+
+    The body of :func:`find_vrchat_launcher` (added in C2) raises this when
+    every discovery strategy fails.
+    """
+
+
+class VRChatAlreadyRunningError(RuntimeError):
+    """Raised when ``launch(via_steam=True)`` is called while VRChat is already
+    running.
+
+    ``steam.exe -applaunch`` simply focuses the existing instance instead of
+    spawning a new one, so the call would never observe a new PID. C8 will
+    use this; defining it here keeps the public exception surface consistent.
+    """
+
+
+class UmuLauncherNotFoundError(RuntimeError):
+    """Raised when Linux direct-spawn cannot find ``umu-run`` on PATH.
+
+    C2 / C8 use this; defining it here keeps the public exception
+    surface consistent.
+    """
+
+
+def find_pid() -> int | None:
+    """Return the newest VRChat PID, or ``None`` if absent. **Deprecated.**
+
+    .. deprecated:: 0.3.0
+        Will be removed in 0.4.0. Use :func:`find_pids` to enumerate all
+        instances, or pass ``pid=`` to specific APIs to target one explicitly.
+
+    Equivalent to ``find_pids()[0] if find_pids() else None`` — i.e. the
+    newest-started VRChat by ``create_time`` ordering.
+    """
+    warnings.warn(
+        "vrcpilot.process.find_pid is deprecated and will be removed in 0.4.0; "
+        "use find_pids() or pass pid= to specific APIs",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    pids = find_pids()
+    return pids[0] if pids else None
 
 
 def find_pids() -> list[int]:
-    """Return PIDs of every running VRChat process.
+    """Return PIDs of every running VRChat process, newest first.
 
-    The order of the returned list reflects the OS-defined enumeration
-    order of :func:`psutil.process_iter` and should not be treated as
-    stable across runs. Returns an empty list when no VRChat instance
-    is running.
+    Sorted by ``psutil.Process.create_time()`` in **descending** order so the
+    most-recently-started VRChat appears first. Useful when multiple instances
+    run and the caller wants the freshly launched one.
+
+    Processes whose ``create_time()`` raises ``psutil.NoSuchProcess`` or
+    ``psutil.AccessDenied`` are silently skipped. Returns an empty list when
+    no VRChat instance is running.
     """
-    return [
-        proc.pid
-        for proc in psutil.process_iter(["name"])
-        if proc.info["name"] == VRCHAT_PROCESS_NAME
-    ]
+    pairs: list[tuple[float, int]] = []
+    for proc in psutil.process_iter(["name"]):
+        if proc.info["name"] != VRCHAT_PROCESS_NAME:
+            continue
+        try:
+            ct = proc.create_time()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+        pairs.append((ct, proc.pid))
+    pairs.sort(key=lambda kv: kv[0], reverse=True)
+    return [pid for _, pid in pairs]
+
+
+def resolve_pid(pid: int | None) -> int:
+    """Resolve an explicit or implicit VRChat target PID to a concrete int.
+
+    When *pid* is provided, return it unchanged (no liveness check — callers
+    handle a stale PID at the syscall boundary). When *pid* is ``None``,
+    consult :func:`find_pids`:
+
+    * 0 matches → :class:`VRChatNotRunningError`
+    * 1 match → return that PID
+    * 2+ matches → :class:`VRChatMultipleInstancesError` listing all candidates
+
+    Does **not** read ``VRCPILOT_TARGET_PID`` or any other environment variable
+    (the env-var approach is intentionally avoided to prevent silent
+    cross-command contamination).
+    """
+    if pid is not None:
+        return pid
+    pids = find_pids()
+    if not pids:
+        raise VRChatNotRunningError("VRChat is not running")
+    if len(pids) > 1:
+        raise VRChatMultipleInstancesError(pids)
+    return pids[0]
 
 
 def wait_for_pid(
@@ -153,9 +239,14 @@ __all__ = [
     "OscConfig",
     "PID_WAIT_INTERVAL",
     "PID_WAIT_TIMEOUT",
+    "resolve_pid",
     "terminate",
+    "UmuLauncherNotFoundError",
     "VRCHAT_PROCESS_NAME",
     "VRCHAT_STEAM_APP_ID",
+    "VRChatAlreadyRunningError",
+    "VRChatLauncherNotFoundError",
+    "VRChatMultipleInstancesError",
     "VRChatNotRunningError",
     "wait_for_no_pid",
     "wait_for_pid",

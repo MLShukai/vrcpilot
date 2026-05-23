@@ -15,11 +15,17 @@ from vrcpilot.process import (
     VRCHAT_PROCESS_NAME,
     VRCHAT_STEAM_APP_ID,
     OscConfig,
+    UmuLauncherNotFoundError,
+    VRChatAlreadyRunningError,
+    VRChatLauncherNotFoundError,
+    VRChatMultipleInstancesError,
+    VRChatNotRunningError,
     build_launch_command,
     build_vrchat_launch_args,
     find_pid,
     find_pids,
     launch,
+    resolve_pid,
     terminate,
     wait_for_no_pid,
     wait_for_pid,
@@ -325,25 +331,34 @@ class TestFindPid:
     def test_returns_pid_when_running(self, mocker: MockerFixture):
         _process_iter_returning(mocker, FakeProcess(name=VRCHAT_PROCESS_NAME, pid=4242))
 
-        assert find_pid() == 4242
+        with pytest.warns(DeprecationWarning):
+            assert find_pid() == 4242
 
     def test_returns_none_when_not_running(self):
         # autouse fixture already empties ``process_iter``; no setup needed.
-        assert find_pid() is None
+        with pytest.warns(DeprecationWarning):
+            assert find_pid() is None
 
     def test_ignores_other_processes(self, mocker: MockerFixture):
         _process_iter_returning(mocker, FakeProcess(name="explorer.exe", pid=1))
 
-        assert find_pid() is None
+        with pytest.warns(DeprecationWarning):
+            assert find_pid() is None
 
-    def test_returns_first_when_multiple_match(self, mocker: MockerFixture):
+    def test_returns_newest_pid_when_multiple_running(self, mocker: MockerFixture):
+        # create_time descending → pid=222 (ct=20) is "newest" and wins.
         _process_iter_returning(
             mocker,
-            FakeProcess(name=VRCHAT_PROCESS_NAME, pid=111),
-            FakeProcess(name=VRCHAT_PROCESS_NAME, pid=222),
+            FakeProcess(name=VRCHAT_PROCESS_NAME, pid=111, create_time=10.0),
+            FakeProcess(name=VRCHAT_PROCESS_NAME, pid=222, create_time=20.0),
         )
 
-        assert find_pid() == 111
+        with pytest.warns(DeprecationWarning):
+            assert find_pid() == 222
+
+    def test_emits_deprecation_warning(self):
+        with pytest.warns(DeprecationWarning, match="find_pid is deprecated"):
+            find_pid()
 
 
 class TestFindPids:
@@ -356,20 +371,123 @@ class TestFindPids:
 
         assert find_pids() == [4242]
 
-    def test_returns_all_matches_in_iter_order(self, mocker: MockerFixture):
+    def test_returns_all_matches_skipping_other_processes(self, mocker: MockerFixture):
         _process_iter_returning(
             mocker,
-            FakeProcess(name=VRCHAT_PROCESS_NAME, pid=111),
-            FakeProcess(name="explorer.exe", pid=222),
-            FakeProcess(name=VRCHAT_PROCESS_NAME, pid=333),
+            FakeProcess(name=VRCHAT_PROCESS_NAME, pid=111, create_time=10.0),
+            FakeProcess(name="explorer.exe", pid=222, create_time=99.0),
+            FakeProcess(name=VRCHAT_PROCESS_NAME, pid=333, create_time=20.0),
         )
 
-        assert find_pids() == [111, 333]
+        # Sorted by create_time descending: pid=333 (20.0) before pid=111 (10.0).
+        assert find_pids() == [333, 111]
 
     def test_ignores_other_processes(self, mocker: MockerFixture):
         _process_iter_returning(mocker, FakeProcess(name="explorer.exe", pid=1))
 
         assert find_pids() == []
+
+    def test_returns_pids_in_create_time_descending_order(self, mocker: MockerFixture):
+        _process_iter_returning(
+            mocker,
+            FakeProcess(name=VRCHAT_PROCESS_NAME, pid=10, create_time=100.0),
+            FakeProcess(name=VRCHAT_PROCESS_NAME, pid=20, create_time=300.0),
+            FakeProcess(name=VRCHAT_PROCESS_NAME, pid=30, create_time=200.0),
+        )
+
+        # Newest first: 300 -> 200 -> 100.
+        assert find_pids() == [20, 30, 10]
+
+    def test_skips_processes_with_access_denied_on_create_time(
+        self, mocker: MockerFixture
+    ):
+        _process_iter_returning(
+            mocker,
+            FakeProcess(
+                name=VRCHAT_PROCESS_NAME,
+                pid=111,
+                create_time_raises=psutil.AccessDenied(pid=111),
+            ),
+            FakeProcess(name=VRCHAT_PROCESS_NAME, pid=222, create_time=5.0),
+        )
+
+        assert find_pids() == [222]
+
+    def test_skips_processes_with_no_such_process_on_create_time(
+        self, mocker: MockerFixture
+    ):
+        _process_iter_returning(
+            mocker,
+            FakeProcess(
+                name=VRCHAT_PROCESS_NAME,
+                pid=111,
+                create_time_raises=psutil.NoSuchProcess(pid=111),
+            ),
+            FakeProcess(name=VRCHAT_PROCESS_NAME, pid=222, create_time=5.0),
+        )
+
+        assert find_pids() == [222]
+
+
+class TestResolvePid:
+    def test_returns_explicit_pid_unchanged(self, mocker: MockerFixture):
+        # Even if a single VRChat instance is running with a different pid,
+        # an explicit pid arg is honoured verbatim (no liveness check).
+        _process_iter_returning(
+            mocker, FakeProcess(name=VRCHAT_PROCESS_NAME, pid=4242, create_time=1.0)
+        )
+
+        assert resolve_pid(999) == 999
+
+    def test_returns_single_when_no_pid_specified(self, mocker: MockerFixture):
+        _process_iter_returning(
+            mocker, FakeProcess(name=VRCHAT_PROCESS_NAME, pid=4242, create_time=1.0)
+        )
+
+        assert resolve_pid(None) == 4242
+
+    def test_raises_not_running_when_no_processes(self):
+        # autouse fixture leaves process_iter empty.
+        with pytest.raises(VRChatNotRunningError):
+            resolve_pid(None)
+
+    def test_raises_multiple_instances_with_pids_attribute(self, mocker: MockerFixture):
+        _process_iter_returning(
+            mocker,
+            FakeProcess(name=VRCHAT_PROCESS_NAME, pid=111, create_time=10.0),
+            FakeProcess(name=VRCHAT_PROCESS_NAME, pid=222, create_time=20.0),
+        )
+
+        with pytest.raises(VRChatMultipleInstancesError) as excinfo:
+            resolve_pid(None)
+
+        # ``.pids`` mirrors ``find_pids`` (newest first: 222, then 111).
+        assert excinfo.value.pids == find_pids()
+        assert excinfo.value.pids == [222, 111]
+
+
+class TestExceptions:
+    def test_multiple_instances_is_subclass_of_not_running(self):
+        assert issubclass(VRChatMultipleInstancesError, VRChatNotRunningError)
+
+    def test_multiple_instances_pids_is_independent_copy(self):
+        # Mutating the source list must not mutate the exception attribute.
+        source = [10, 20]
+        err = VRChatMultipleInstancesError(source)
+        source.append(30)
+
+        assert err.pids == [10, 20]
+
+    @pytest.mark.parametrize(
+        "exc_type",
+        [
+            VRChatLauncherNotFoundError,
+            VRChatAlreadyRunningError,
+            UmuLauncherNotFoundError,
+        ],
+    )
+    def test_runtime_error_subclasses(self, exc_type: type[BaseException]):
+        assert issubclass(exc_type, RuntimeError)
 
 
 class TestWaitForPid:

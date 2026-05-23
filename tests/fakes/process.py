@@ -14,10 +14,13 @@ from typing import Self
 class FakeProcess:
     """Stand-in for ``psutil.Process``.
 
-    Production code reads ``proc.info["name"]`` and calls
-    ``proc.kill()`` / ``proc.pid`` — nothing else. ``kill_raises`` is
-    available so tests can simulate a race where the process exits
-    between ``process_iter`` enumeration and ``kill()``.
+    Production code reads ``proc.info["name"]``, ``proc.pid``,
+    ``proc.create_time()`` and calls ``proc.kill()`` — nothing else.
+    ``kill_raises`` simulates a race where the process exits between
+    ``process_iter`` enumeration and ``kill()``;
+    ``create_time_raises`` simulates the analogous race on
+    ``create_time()`` (e.g. ``psutil.NoSuchProcess`` /
+    ``psutil.AccessDenied``).
     """
 
     def __init__(
@@ -26,16 +29,25 @@ class FakeProcess:
         name: str,
         pid: int = 4242,
         kill_raises: BaseException | None = None,
+        create_time: float = 0.0,
+        create_time_raises: BaseException | None = None,
     ) -> None:
         self.info: dict[str, object] = {"name": name}
         self.pid = pid
         self.kill_calls: int = 0
         self._kill_raises = kill_raises
+        self._create_time = create_time
+        self._create_time_raises = create_time_raises
 
     def kill(self) -> None:
         self.kill_calls += 1
         if self._kill_raises is not None:
             raise self._kill_raises
+
+    def create_time(self) -> float:
+        if self._create_time_raises is not None:
+            raise self._create_time_raises
+        return self._create_time
 
 
 class FakePopen:
