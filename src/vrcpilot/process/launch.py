@@ -94,24 +94,14 @@ def build_launch_command(
     return cmd
 
 
-def _profile_wineprefix(profile: int) -> Path:
-    """Vrcpilot 管理の profile 番号に対応する ``$WINEPREFIX`` パスを返す。
-
-    既存ディレクトリの存在は保証しない (呼び出し側で
-    ``mkdir(parents=True, exist_ok=True)`` する)。
-    """
-    base = Path(os.environ.get("XDG_DATA_HOME") or "~/.local/share").expanduser()
-    return base / "vrcpilot" / "profiles" / str(profile) / "wineprefix"
-
-
-def _validate_launch_args(
+def validate_launch_args(
     *,
     via_steam: bool,
     wineprefix: Path | None,
     proton_path: Path | None,
     profile: int | None,
 ) -> None:
-    """``launch()`` の入口バリデーション。違反は ``ValueError`` で fail-fast。"""
+    """``launch()`` 引数の fail-fast バリデーション."""
     if profile is not None and profile < 0:
         raise ValueError(f"profile must be non-negative (got {profile})")
 
@@ -128,54 +118,13 @@ def _validate_launch_args(
             raise ValueError("wineprefix/proton_path/profile are Linux-only")
 
 
-def _preflight_linux_environment(*, via_steam: bool) -> None:
-    """Linux 限定の runtime 環境チェック。direct-spawn は $DISPLAY / $WAYLAND_DISPLAY
-    を、via_steam は Steam クライアントの起動を要求する。
-
-    direct-spawn: ``umu-run`` + Wine は GUI セッションへ attach できないと
-    block して進まない (SSH 経由などで $DISPLAY が無い環境で発生)。事前検出
-    して :class:`VRChatDisplayNotAvailableError` を投げる方が、subprocess
-    が永久に hang するより早く失敗できる。X11 / Wayland どちらでも実用上は
-    動くので、$DISPLAY と $WAYLAND_DISPLAY のいずれかが立っていれば OK と
-    する。
-
-    via_steam: ``steam.exe -applaunch`` は Steam クライアントが既に起動して
-    いることを前提とした call (Steam は自分の display attachment を持って
-    いる)。vrcpilot からは Steam UI を立ち上げられないので、未起動なら
-    :class:`SteamNotRunningError` を投げてユーザーに通知する。Windows 上では
-    Steam が裏で常駐していなくても ``-applaunch`` が UI を立ち上げてくれる
-    ので、このチェックは Linux 限定。
-    """
-    if sys.platform != "linux":
-        return
-    if via_steam:
-        from vrcpilot.steam import SteamNotRunningError, is_steam_running
-
-        if not is_steam_running():
-            raise SteamNotRunningError(
-                "Steam client is not running on this Linux host. "
-                "Start the Steam desktop client in a graphical session "
-                "before retrying launch(via_steam=True)."
-            )
-        return
-    if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
-        from . import VRChatDisplayNotAvailableError
-
-        raise VRChatDisplayNotAvailableError(
-            "Neither DISPLAY nor WAYLAND_DISPLAY is set; "
-            "vrcpilot launch (direct-spawn) requires a graphical session. "
-            "Run from a desktop session, or set DISPLAY=:0 (or WAYLAND_DISPLAY) "
-            "before invoking launch()."
-        )
-
-
 def _wait_for_new_pid(
     pre_pids: set[int],
     *,
     timeout: float,
     interval: float,
 ) -> int | None:
-    """Launch 前後の PID 集合の差分から新規 PID を見つけて返す。
+    """Launch 前後の PID 集合差分から新規 PID を返す.
 
     :func:`find_pids` が新しい順なので、複数の新規 PID があれば最新の 1 つを返す
     (通常はそもそも 1 つしか増えないが、race 対策で先頭採用)。
@@ -270,7 +219,7 @@ def launch(
             ``$DISPLAY`` nor ``$WAYLAND_DISPLAY`` is set (no graphical
             session attached).
         ValueError: Invalid argument combination (see
-            :func:`_validate_launch_args`).
+            :func:`validate_launch_args`).
     """
     # Deferred imports — intentional, do not hoist to module top:
     #
@@ -290,13 +239,16 @@ def launch(
     from . import VRChatAlreadyRunningError, find_pids
     from .executable import find_vrchat_launcher
 
-    _validate_launch_args(
+    validate_launch_args(
         via_steam=via_steam,
         wineprefix=wineprefix,
         proton_path=proton_path,
         profile=profile,
     )
-    _preflight_linux_environment(via_steam=via_steam)
+    if sys.platform == "linux":
+        from .linux import preflight_linux_environment
+
+        preflight_linux_environment(via_steam=via_steam)
 
     vrchat_args = build_vrchat_launch_args(
         no_vr=no_vr,
@@ -323,7 +275,7 @@ def launch(
         if sys.platform == "win32":
             argv = [str(launcher), *vrchat_args]
         elif sys.platform == "linux":
-            from .linux import find_umu_launcher
+            from .linux import find_umu_launcher, profile_wineprefix
 
             umu_run = find_umu_launcher()
             argv = [str(umu_run), str(launcher), *vrchat_args]
@@ -337,7 +289,7 @@ def launch(
             if wineprefix is not None:
                 env_overrides["WINEPREFIX"] = str(wineprefix)
             elif profile is not None:
-                generated = _profile_wineprefix(profile)
+                generated = profile_wineprefix(profile)
                 generated.mkdir(parents=True, exist_ok=True)
                 env_overrides["WINEPREFIX"] = str(generated)
             if proton_path is not None:

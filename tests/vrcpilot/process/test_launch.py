@@ -14,6 +14,7 @@ never actually fork+execs.
 
 from __future__ import annotations
 
+import importlib
 import sys
 from pathlib import Path
 
@@ -21,40 +22,36 @@ import pytest
 from pytest_mock import MockerFixture
 
 from tests.fakes import FakePopen, FakeProcess
-from tests.helpers import only_linux
 from vrcpilot.process import (
     VRCHAT_PROCESS_NAME,
     OscConfig,
     VRChatAlreadyRunningError,
-    VRChatDisplayNotAvailableError,
     launch,
 )
-from vrcpilot.process.launch import (
-    _preflight_linux_environment,
-    _profile_wineprefix,
-    _validate_launch_args,
-)
-from vrcpilot.steam import SteamNotRunningError
+from vrcpilot.process.launch import validate_launch_args
 
 
 @pytest.fixture(autouse=True)
 def _bypass_preflight(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stub :func:`_preflight_linux_environment` for the argv/env shape tests.
+    """Stub Linux preflight for the argv/env shape tests.
 
     Real preflight inspects host state (DISPLAY env, running Steam process)
     which is irrelevant to argv-shape assertions and would otherwise force
     every test in this module to set up DISPLAY or stub psutil. The dedicated
-    :class:`TestPreflightLinuxEnvironment` class exercises the real
-    implementation in isolation.
+    ``TestPreflightLinuxEnvironment`` class in
+    :mod:`tests.vrcpilot.process.test_linux` exercises the real implementation
+    in isolation.
 
-    ``vrcpilot.process.launch`` resolves to the re-exported :func:`launch`
-    *function* (the package shadows the submodule attribute), so go through
-    ``sys.modules`` to reach the real module object — same dance as
-    :func:`fake_popen`.
+    ``launch()`` does a deferred ``from .linux import preflight_linux_environment``
+    only on Linux, so the bypass only needs to attach on Linux. On Windows
+    runs, ``launch()`` never imports the module and this fixture is a no-op.
     """
-    launch_mod = sys.modules["vrcpilot.process.launch"]
+    if sys.platform != "linux":
+        return
+    import vrcpilot.process.linux as linux_mod
+
     monkeypatch.setattr(
-        launch_mod, "_preflight_linux_environment", lambda *, via_steam: None
+        linux_mod, "preflight_linux_environment", lambda *, via_steam: None
     )
 
 
@@ -125,29 +122,29 @@ def _process_iter_returning(mocker: MockerFixture, *procs: FakeProcess) -> None:
 class TestValidateLaunchArgs:
     def test_accepts_defaults(self):
         # Should not raise.
-        _validate_launch_args(
+        validate_launch_args(
             via_steam=False, wineprefix=None, proton_path=None, profile=None
         )
 
     def test_accepts_via_steam_alone(self):
-        _validate_launch_args(
+        validate_launch_args(
             via_steam=True, wineprefix=None, proton_path=None, profile=None
         )
 
     def test_negative_profile_raises(self):
         with pytest.raises(ValueError, match="non-negative"):
-            _validate_launch_args(
+            validate_launch_args(
                 via_steam=False, wineprefix=None, proton_path=None, profile=-1
             )
 
     def test_zero_profile_allowed(self):
-        _validate_launch_args(
+        validate_launch_args(
             via_steam=False, wineprefix=None, proton_path=None, profile=0
         )
 
     def test_via_steam_with_wineprefix_raises(self, tmp_path: Path):
         with pytest.raises(ValueError, match="direct-spawn"):
-            _validate_launch_args(
+            validate_launch_args(
                 via_steam=True,
                 wineprefix=tmp_path,
                 proton_path=None,
@@ -156,7 +153,7 @@ class TestValidateLaunchArgs:
 
     def test_via_steam_with_proton_path_raises(self, tmp_path: Path):
         with pytest.raises(ValueError, match="direct-spawn"):
-            _validate_launch_args(
+            validate_launch_args(
                 via_steam=True,
                 wineprefix=None,
                 proton_path=tmp_path,
@@ -165,7 +162,7 @@ class TestValidateLaunchArgs:
 
     def test_via_steam_with_profile_raises(self):
         with pytest.raises(ValueError, match="direct-spawn"):
-            _validate_launch_args(
+            validate_launch_args(
                 via_steam=True, wineprefix=None, proton_path=None, profile=2
             )
 
@@ -174,7 +171,7 @@ class TestValidateLaunchArgs:
     ):
         monkeypatch.setattr(sys, "platform", "win32")
         with pytest.raises(ValueError, match="Linux-only"):
-            _validate_launch_args(
+            validate_launch_args(
                 via_steam=False,
                 wineprefix=tmp_path,
                 proton_path=None,
@@ -184,124 +181,30 @@ class TestValidateLaunchArgs:
     def test_windows_with_profile_raises(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setattr(sys, "platform", "win32")
         with pytest.raises(ValueError, match="Linux-only"):
-            _validate_launch_args(
+            validate_launch_args(
                 via_steam=False, wineprefix=None, proton_path=None, profile=0
             )
 
 
-class TestPreflightLinuxEnvironment:
-    """Linux runtime preflight (DISPLAY for direct-spawn, Steam for via_steam).
+class TestProcessLinuxModuleGuard:
+    """``vrcpilot.process.linux`` is Linux-only and must reject non-Linux
+    import."""
 
-    The autouse ``_bypass_preflight`` fixture rewires the module-level
-    binding inside :mod:`vrcpilot.process.launch` so :func:`launch` itself
-    sees a no-op. These tests call the original function directly via its
-    test-module-local import, so the autouse stub does not interfere.
-    """
-
-    def test_no_op_on_windows_direct_spawn(self, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.setattr(sys, "platform", "win32")
-        # Should be a no-op regardless of env / Steam state.
-        monkeypatch.delenv("DISPLAY", raising=False)
-        monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
-        _preflight_linux_environment(via_steam=False)
-
-    def test_no_op_on_windows_via_steam(self, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.setattr(sys, "platform", "win32")
-        _preflight_linux_environment(via_steam=True)
-
-    @only_linux
-    def test_direct_spawn_raises_without_display(self, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.delenv("DISPLAY", raising=False)
-        monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
-
-        with pytest.raises(VRChatDisplayNotAvailableError, match="DISPLAY"):
-            _preflight_linux_environment(via_steam=False)
-
-    @only_linux
-    def test_direct_spawn_accepts_x11_display(self, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.setenv("DISPLAY", ":0")
-        monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
-
-        _preflight_linux_environment(via_steam=False)
-
-    @only_linux
-    def test_direct_spawn_accepts_wayland_only(self, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.delenv("DISPLAY", raising=False)
-        monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
-
-        _preflight_linux_environment(via_steam=False)
-
-    @only_linux
-    def test_direct_spawn_rejects_empty_display(self, monkeypatch: pytest.MonkeyPatch):
-        # An empty string should be treated the same as "unset" so the
-        # check is not satisfied by ``DISPLAY=`` left over from a stripped
-        # systemd unit env.
-        monkeypatch.setenv("DISPLAY", "")
-        monkeypatch.setenv("WAYLAND_DISPLAY", "")
-
-        with pytest.raises(VRChatDisplayNotAvailableError):
-            _preflight_linux_environment(via_steam=False)
-
-    @only_linux
-    def test_via_steam_raises_when_steam_not_running(
+    def test_reimport_raises_on_non_linux(
         self, monkeypatch: pytest.MonkeyPatch
-    ):
-        monkeypatch.setattr("vrcpilot.steam.is_steam_running", lambda: False)
-        # No DISPLAY required for via_steam — verify the check skips it
-        # entirely.
-        monkeypatch.delenv("DISPLAY", raising=False)
-        monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
-
-        with pytest.raises(SteamNotRunningError, match="Steam"):
-            _preflight_linux_environment(via_steam=True)
-
-    @only_linux
-    def test_via_steam_passes_when_steam_running(self, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.setattr("vrcpilot.steam.is_steam_running", lambda: True)
-        # DISPLAY-less environment must not fail the via_steam path: Steam
-        # owns the display attachment in that case.
-        monkeypatch.delenv("DISPLAY", raising=False)
-        monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
-
-        _preflight_linux_environment(via_steam=True)
-
-
-class TestProfileWineprefix:
-    def test_uses_xdg_data_home(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
-
-        result = _profile_wineprefix(2)
-
-        assert result == tmp_path / "vrcpilot" / "profiles" / "2" / "wineprefix"
-
-    def test_falls_back_to_dot_local_share(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ):
-        monkeypatch.delenv("XDG_DATA_HOME", raising=False)
-        monkeypatch.setenv("HOME", str(tmp_path))
-
-        result = _profile_wineprefix(5)
-
-        assert (
-            result
-            == tmp_path
-            / ".local"
-            / "share"
-            / "vrcpilot"
-            / "profiles"
-            / "5"
-            / "wineprefix"
-        )
-
-    def test_zero_profile_path_shape(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ):
-        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
-
-        result = _profile_wineprefix(0)
-
-        assert result.name == "wineprefix"
-        assert result.parent.name == "0"
+    ) -> None:
+        # If the module was already loaded (Linux runs), reload under a
+        # patched ``sys.platform`` should hit the guard. On Windows runs
+        # the module was never imported, so we import it for the first
+        # time under the patch.
+        monkeypatch.setattr(sys, "platform", "win32")
+        if "vrcpilot.process.linux" in sys.modules:
+            linux_mod = sys.modules["vrcpilot.process.linux"]
+            with pytest.raises(ImportError, match="Linux-only"):
+                importlib.reload(linux_mod)
+        else:
+            with pytest.raises(ImportError, match="Linux-only"):
+                importlib.import_module("vrcpilot.process.linux")
 
 
 class TestLaunchViaSteam:
