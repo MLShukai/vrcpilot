@@ -1,276 +1,197 @@
-"""Tests for :mod:`vrcpilot.cli.launch`."""
+"""Tests for :mod:`vrcpilot.cli.launch`.
+
+The CLI's only job is argv parsing and dispatch to
+:func:`vrcpilot.process.launch`. We stub ``launch`` itself so the tests
+never spawn a real subprocess, never poll for PIDs, and remain fast and
+deterministic on every platform. Exception paths are exercised by
+setting ``side_effect`` on the stub.
+"""
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from pytest_mock import MockerFixture
 
-from tests.fakes import FakePopen
 from vrcpilot.cli import main
-from vrcpilot.process import VRCHAT_STEAM_APP_ID
+from vrcpilot.process import (
+    UmuLauncherNotFoundError,
+    VRChatAlreadyRunningError,
+    VRChatLauncherNotFoundError,
+)
+from vrcpilot.steam import SteamNotFoundError
 
 
 @pytest.fixture
-def fake_popen(mocker: MockerFixture, tmp_path: Path) -> type[FakePopen]:
-    """Patch ``subprocess.Popen`` so launch tests can record argv.
+def fake_launch(mocker: MockerFixture) -> MagicMock:
+    """Stub ``vrcpilot.cli.launch.launch`` so CLI tests do not actually spawn.
 
-    Also stubs :func:`vrcpilot.steam.find_steam_executable` to honour
-    any ``--steam-path`` override, falling back to a real file under
-    ``tmp_path``. That single mock is unavoidable - the real lookup
-    would touch the Windows registry or ``$PATH`` - but every other
-    byte of the launch chain runs unmodified, including the dispatch
-    on ``override is not None``.
-
-    Class-level state is reset every test so ``last_argv`` reflects
-    only this test's invocation.
+    Returns the mock so tests can assert call arguments. The mock's
+    ``return_value`` is the PID that ``launch`` would have observed
+    (set per-test via ``fake_launch.return_value = ...``).
     """
-    FakePopen.reset()
-    mocker.patch("vrcpilot.process.subprocess.Popen", FakePopen)
-    steam_stub = tmp_path / "Steam.exe"
-    steam_stub.write_bytes(b"")
-
-    def _find(override: Path | None = None) -> Path:
-        return override if override is not None else steam_stub
-
-    mocker.patch("vrcpilot.steam.find_steam_executable", side_effect=_find)
-    return FakePopen
-
-
-@pytest.fixture
-def fake_wait_for_pid(mocker: MockerFixture) -> MockerFixture:
-    """Stub ``wait_for_pid`` so launch tests do not poll for real.
-
-    The CLI no longer calls ``wait_for_pid`` directly; the polling now
-    happens inside ``vrcpilot.process.launch``, so we patch the helper
-    where it actually runs. Default return is ``12345`` so the happy
-    path "saw a PID" branch runs by default. Tests that need a
-    different value override the return via
-    ``mocker.patch(..., return_value=...)`` directly.
-    """
-    mocker.patch("vrcpilot.process.wait_for_pid", return_value=12345)
-    return mocker
+    mock = mocker.patch("vrcpilot.cli.launch.launch", return_value=12345, autospec=True)
+    return mock
 
 
 class TestLaunchCommand:
-    def test_uses_defaults(
-        self, fake_popen: type[FakePopen], fake_wait_for_pid: MockerFixture
-    ):
-        del fake_wait_for_pid
+    def test_via_steam_forwarded(self, fake_launch: MagicMock) -> None:
+        exit_code = main(["launch", "--via-steam"])
+        assert exit_code == 0
+        assert fake_launch.call_args.kwargs["via_steam"] is True
+
+    def test_default_uses_direct_spawn(self, fake_launch: MagicMock) -> None:
         exit_code = main(["launch"])
-
         assert exit_code == 0
-        assert fake_popen.last_argv is not None
-        assert fake_popen.last_argv[1:] == ["-applaunch", str(VRCHAT_STEAM_APP_ID)]
+        assert fake_launch.call_args.kwargs["via_steam"] is False
 
-    def test_prints_pid_on_success(
-        self,
-        fake_popen: type[FakePopen],
-        fake_wait_for_pid: MockerFixture,
-        capsys: pytest.CaptureFixture[str],
-    ):
-        del fake_popen, fake_wait_for_pid
-        exit_code = main(["launch"])
+    def test_app_id_forwarded(self, fake_launch: MagicMock) -> None:
+        main(["launch", "--app-id", "999"])
+        assert fake_launch.call_args.kwargs["app_id"] == 999
 
-        assert exit_code == 0
-        assert capsys.readouterr().out == "12345\n"
+    def test_steam_path_forwarded(self, fake_launch: MagicMock, tmp_path: Path) -> None:
+        steam_path = tmp_path / "steam.exe"
+        main(["launch", "--steam-path", str(steam_path)])
+        assert fake_launch.call_args.kwargs["steam_path"] == steam_path
 
-    def test_app_id_override(
-        self, fake_popen: type[FakePopen], fake_wait_for_pid: MockerFixture
-    ):
-        del fake_wait_for_pid
-        exit_code = main(["launch", "--app-id", "12345"])
+    def test_vrchat_launcher_forwarded(
+        self, fake_launch: MagicMock, tmp_path: Path
+    ) -> None:
+        launcher = tmp_path / "launch.exe"
+        main(["launch", "--vrchat-launcher", str(launcher)])
+        assert fake_launch.call_args.kwargs["vrchat_launcher"] == launcher
 
-        assert exit_code == 0
-        assert fake_popen.last_argv is not None
-        assert "-applaunch" in fake_popen.last_argv
-        assert "12345" in fake_popen.last_argv
+    def test_wineprefix_forwarded(self, fake_launch: MagicMock, tmp_path: Path) -> None:
+        prefix = tmp_path / "prefix"
+        main(["launch", "--wineprefix", str(prefix)])
+        assert fake_launch.call_args.kwargs["wineprefix"] == prefix
 
-    def test_steam_path_override(
-        self,
-        fake_popen: type[FakePopen],
-        fake_wait_for_pid: MockerFixture,
-        tmp_path: Path,
-    ):
-        # ``fake_popen`` mocks ``find_steam_executable`` with a
-        # pass-through ``side_effect`` that honours the ``override``
-        # arg, so the user-supplied path flows all the way through to
-        # ``Popen``.
-        del fake_wait_for_pid
-        override = tmp_path / "custom_steam.exe"
+    def test_proton_path_forwarded(
+        self, fake_launch: MagicMock, tmp_path: Path
+    ) -> None:
+        proton = tmp_path / "proton"
+        main(["launch", "--proton-path", str(proton)])
+        assert fake_launch.call_args.kwargs["proton_path"] == proton
 
-        exit_code = main(["launch", "--steam-path", str(override)])
+    def test_profile_forwarded(self, fake_launch: MagicMock) -> None:
+        main(["launch", "--profile", "3"])
+        assert fake_launch.call_args.kwargs["profile"] == 3
 
-        assert exit_code == 0
-        assert fake_popen.last_argv is not None
-        assert fake_popen.last_argv[0] == str(override)
+    def test_profile_zero_accepted(self, fake_launch: MagicMock) -> None:
+        # 0 is the boundary value and must be accepted (non-negative).
+        main(["launch", "--profile", "0"])
+        assert fake_launch.call_args.kwargs["profile"] == 0
 
-    def test_reports_steam_not_found(self, capsys: pytest.CaptureFixture[str]):
-        # Pass a path that does not exist - ``find_steam_executable``
-        # raises ``SteamNotFoundError`` for real, no patching needed.
-        steam_path = "/does/not/exist/Steam.exe"
-        exit_code = main(["launch", "--steam-path", steam_path])
+    def test_profile_negative_rejected_by_argparse(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        with pytest.raises(SystemExit):
+            main(["launch", "--profile", "-1"])
+        stderr = capsys.readouterr().err
+        assert "non-negative" in stderr
 
-        assert exit_code == 2
-        if sys.platform == "win32":
-            assert steam_path.replace("/", "\\") in capsys.readouterr().err
-        else:
-            assert "/does/not/exist/Steam.exe" in capsys.readouterr().err
+    def test_no_vr_propagates(self, fake_launch: MagicMock) -> None:
+        main(["launch", "--no-vr"])
+        assert fake_launch.call_args.kwargs["no_vr"] is True
 
-    def test_no_vr_flag_propagates(
-        self, fake_popen: type[FakePopen], fake_wait_for_pid: MockerFixture
-    ):
-        del fake_wait_for_pid
-        exit_code = main(["launch", "--no-vr"])
+    def test_screen_dimensions_propagate(self, fake_launch: MagicMock) -> None:
+        main(["launch", "--screen-width", "1920", "--screen-height", "1080"])
+        kw = fake_launch.call_args.kwargs
+        assert kw["screen_width"] == 1920
+        assert kw["screen_height"] == 1080
 
-        assert exit_code == 0
-        assert fake_popen.last_argv is not None
-        assert "--no-vr" in fake_popen.last_argv
+    def test_osc_in_port_creates_config(self, fake_launch: MagicMock) -> None:
+        main(["launch", "--osc-in-port", "9100"])
+        osc = fake_launch.call_args.kwargs["osc"]
+        assert osc is not None
+        assert osc.in_port == 9100
 
-    def test_screen_dimensions_propagate(
-        self, fake_popen: type[FakePopen], fake_wait_for_pid: MockerFixture
-    ):
-        del fake_wait_for_pid
-        exit_code = main(["launch", "--screen-width", "1280", "--screen-height", "720"])
-
-        assert exit_code == 0
-        assert fake_popen.last_argv is not None
-        assert "-screen-width" in fake_popen.last_argv
-        assert "1280" in fake_popen.last_argv
-        assert "-screen-height" in fake_popen.last_argv
-        assert "720" in fake_popen.last_argv
-
-    def test_osc_in_port_creates_config(
-        self, fake_popen: type[FakePopen], fake_wait_for_pid: MockerFixture
-    ):
-        del fake_wait_for_pid
-        exit_code = main(["launch", "--osc-in-port", "9000"])
-
-        assert exit_code == 0
-        assert fake_popen.last_argv is not None
-        assert "--osc=9000:127.0.0.1:9001" in fake_popen.last_argv
-
-    def test_osc_full_override(
-        self, fake_popen: type[FakePopen], fake_wait_for_pid: MockerFixture
-    ):
-        del fake_wait_for_pid
-        exit_code = main(
+    def test_osc_full_override(self, fake_launch: MagicMock) -> None:
+        main(
             [
                 "launch",
                 "--osc-in-port",
-                "10000",
+                "9100",
                 "--osc-out-ip",
-                "192.168.1.10",
+                "1.2.3.4",
                 "--osc-out-port",
-                "10001",
+                "9200",
             ]
         )
-
-        assert exit_code == 0
-        assert fake_popen.last_argv is not None
-        assert "--osc=10000:192.168.1.10:10001" in fake_popen.last_argv
+        osc = fake_launch.call_args.kwargs["osc"]
+        assert osc is not None
+        assert osc.in_port == 9100
+        assert osc.out_ip == "1.2.3.4"
+        assert osc.out_port == 9200
 
     def test_osc_out_options_ignored_without_in_port(
-        self, fake_popen: type[FakePopen], fake_wait_for_pid: MockerFixture
-    ):
-        del fake_wait_for_pid
-        exit_code = main(["launch", "--osc-out-ip", "192.168.1.10"])
+        self, fake_launch: MagicMock
+    ) -> None:
+        main(["launch", "--osc-out-ip", "1.2.3.4"])
+        assert fake_launch.call_args.kwargs["osc"] is None
 
-        assert exit_code == 0
-        assert fake_popen.last_argv is not None
-        # No --osc=... token because --osc-in-port was not given.
-        assert not any(token.startswith("--osc=") for token in fake_popen.last_argv)
+    def test_wait_timeout_forwarded(self, fake_launch: MagicMock) -> None:
+        main(["launch", "--wait-timeout", "0.5"])
+        assert fake_launch.call_args.kwargs["wait_timeout"] == 0.5
 
 
-class TestLaunchWaitTimeout:
-    def test_wait_timeout_zero_skips_wait(
-        self,
-        fake_popen: type[FakePopen],
-        mocker: MockerFixture,
-        capsys: pytest.CaptureFixture[str],
-    ):
-        del fake_popen
-        wait_mock = mocker.patch("vrcpilot.process.wait_for_pid")
+class TestLaunchExitCodes:
+    def test_prints_pid_on_success(
+        self, fake_launch: MagicMock, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        fake_launch.return_value = 4242
+        assert main(["launch"]) == 0
+        assert capsys.readouterr().out.strip() == "4242"
 
-        exit_code = main(["launch", "--wait-timeout", "0"])
+    def test_exit_1_when_wait_times_out(
+        self, fake_launch: MagicMock, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        fake_launch.return_value = None
+        assert main(["launch"]) == 1
+        assert "did not start" in capsys.readouterr().err
 
-        assert exit_code == 0
-        assert capsys.readouterr().out == ""
-        wait_mock.assert_not_called()
+    def test_exit_0_when_wait_skipped(self, fake_launch: MagicMock) -> None:
+        fake_launch.return_value = None
+        assert main(["launch", "--wait-timeout", "0"]) == 0
 
-    def test_negative_wait_timeout_skips_wait(
-        self,
-        fake_popen: type[FakePopen],
-        mocker: MockerFixture,
-        capsys: pytest.CaptureFixture[str],
-    ):
-        # The plan says "any value <= 0" skips the wait; lock that in
-        # explicitly so the boundary stays inclusive of zero.
-        del fake_popen
-        wait_mock = mocker.patch("vrcpilot.process.wait_for_pid")
+    def test_exit_0_when_wait_skipped_negative(self, fake_launch: MagicMock) -> None:
+        # Lock the boundary: any <=0 value skips the wait.
+        fake_launch.return_value = None
+        assert main(["launch", "--wait-timeout", "-1"]) == 0
 
-        exit_code = main(["launch", "--wait-timeout", "-1"])
+    def test_exit_2_on_steam_not_found(
+        self, fake_launch: MagicMock, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        fake_launch.side_effect = SteamNotFoundError("Steam not found")
+        assert main(["launch", "--via-steam"]) == 2
+        assert "Steam not found" in capsys.readouterr().err
 
-        assert exit_code == 0
-        assert capsys.readouterr().out == ""
-        wait_mock.assert_not_called()
+    def test_exit_2_on_vrchat_launcher_not_found(
+        self, fake_launch: MagicMock, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        fake_launch.side_effect = VRChatLauncherNotFoundError("nope")
+        assert main(["launch"]) == 2
+        assert "nope" in capsys.readouterr().err
 
-    def test_pid_observed_within_timeout(
-        self,
-        fake_popen: type[FakePopen],
-        mocker: MockerFixture,
-        capsys: pytest.CaptureFixture[str],
-    ):
-        del fake_popen
-        mocker.patch("vrcpilot.process.wait_for_pid", return_value=54321)
+    def test_exit_2_on_umu_launcher_not_found(
+        self, fake_launch: MagicMock, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        fake_launch.side_effect = UmuLauncherNotFoundError("no umu-run")
+        assert main(["launch"]) == 2
+        assert "no umu-run" in capsys.readouterr().err
 
-        exit_code = main(["launch", "--wait-timeout", "10"])
+    def test_exit_2_on_value_error(
+        self, fake_launch: MagicMock, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        fake_launch.side_effect = ValueError("bad flag combo")
+        assert main(["launch", "--via-steam", "--profile", "1"]) == 2
+        assert "bad flag combo" in capsys.readouterr().err
 
-        assert exit_code == 0
-        assert capsys.readouterr().out == "54321\n"
-
-    def test_timeout_returns_one_with_stderr(
-        self,
-        fake_popen: type[FakePopen],
-        mocker: MockerFixture,
-        capsys: pytest.CaptureFixture[str],
-    ):
-        del fake_popen
-        mocker.patch("vrcpilot.process.wait_for_pid", return_value=None)
-
-        exit_code = main(["launch", "--wait-timeout", "2.5"])
-
-        assert exit_code == 1
-        captured = capsys.readouterr()
-        assert captured.out == ""
-        assert "vrcpilot: VRChat did not start within 2.5s" in captured.err
-
-    def test_wait_timeout_zero_silent_when_launch_returns_none(
-        self,
-        fake_popen: type[FakePopen],
-        capsys: pytest.CaptureFixture[str],
-    ):
-        # No wait helper patch: with --wait-timeout 0, launch() returns
-        # None up-front (no polling) and the CLI must exit 0 silently.
-        del fake_popen
-        exit_code = main(["launch", "--wait-timeout", "0"])
-
-        assert exit_code == 0
-        captured = capsys.readouterr()
-        assert captured.out == ""
-        assert captured.err == ""
-
-    def test_wait_timeout_forwarded_to_helper(
-        self,
-        fake_popen: type[FakePopen],
-        mocker: MockerFixture,
-    ):
-        del fake_popen
-        wait_mock = mocker.patch("vrcpilot.process.wait_for_pid", return_value=99999)
-
-        exit_code = main(["launch", "--wait-timeout", "7"])
-
-        assert exit_code == 0
-        wait_mock.assert_called_once_with(timeout=7.0, interval=1.0)
+    def test_exit_3_on_already_running(
+        self, fake_launch: MagicMock, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        fake_launch.side_effect = VRChatAlreadyRunningError("running")
+        assert main(["launch", "--via-steam"]) == 3
+        assert "running" in capsys.readouterr().err
