@@ -28,7 +28,7 @@ from vrcpilot.speaker.session import Speaker
 
 @pytest.fixture(autouse=True)
 def _default_resolve_pid(mocker: MockerFixture) -> int:
-    """Pin :func:`vrcpilot.process.resolve_pid` to a deterministic PID.
+    """Pin :func:`vrcpilot.speaker.session.resolve_pid` to a deterministic PID.
 
     Speaker now delegates PID selection to ``resolve_pid``; tests in
     this file are concerned with the wrapper plumbing, not the process
@@ -36,9 +36,13 @@ def _default_resolve_pid(mocker: MockerFixture) -> int:
     while still exercising the real call site. Individual tests can
     override the patch (``mocker.patch(...)`` shadows it) to assert
     error paths.
+
+    The patch target is the binding inside :mod:`vrcpilot.speaker.session`
+    (which now imports ``resolve_pid`` at module level), mirroring the
+    convention used by :mod:`tests.vrcpilot.capture.test_session`.
     """
     pid = 4242
-    mocker.patch("vrcpilot.process.resolve_pid", return_value=pid)
+    mocker.patch("vrcpilot.speaker.session.resolve_pid", return_value=pid)
     return pid
 
 
@@ -113,7 +117,7 @@ class TestConstruction:
         # it to confirm both halves of the contract.
         explicit_pid = 9999
         resolve_spy = mocker.patch(
-            "vrcpilot.process.resolve_pid", return_value=explicit_pid
+            "vrcpilot.speaker.session.resolve_pid", return_value=explicit_pid
         )
         spy = mocker.patch(
             "vrcpilot.speaker.session._select_speaker_backend",
@@ -131,7 +135,7 @@ class TestConstruction:
         # VRChat processes are running; Speaker must surface that error
         # unmodified rather than picking an arbitrary instance.
         mocker.patch(
-            "vrcpilot.process.resolve_pid",
+            "vrcpilot.speaker.session.resolve_pid",
             side_effect=VRChatMultipleInstancesError([111, 222]),
         )
         backend_spy = mocker.patch(

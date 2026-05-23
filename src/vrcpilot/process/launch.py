@@ -139,6 +139,7 @@ def _wait_for_new_pid(
     :func:`find_pids` が新しい順なので、複数の新規 PID があれば最新の 1 つを返す
     (通常はそもそも 1 つしか増えないが、race 対策で先頭採用)。
     """
+    # ``process/__init__.py`` <-> ``launch.py`` の循環を断つため遅延 import。
     from . import find_pids
 
     deadline = time.monotonic() + timeout
@@ -222,6 +223,19 @@ def launch(
         ValueError: Invalid argument combination (see
             :func:`_validate_launch_args`).
     """
+    # Deferred imports — intentional, do not hoist to module top:
+    #
+    # * ``find_steam_executable`` is imported here so each ``launch()``
+    #   call resolves the *current* binding on ``vrcpilot.steam``. Tests
+    #   monkeypatch ``vrcpilot.steam.find_steam_executable`` directly; if
+    #   we hoisted this to a module-level ``from ... import ...`` the test
+    #   patch would no longer reach the binding actually used here. Keep
+    #   the lookup deferred so test patches against the source module are
+    #   guaranteed to take effect.
+    # * The ``from . import ...`` lines break the
+    #   ``process/__init__.py`` <-> ``launch.py`` import cycle: the
+    #   package re-exports :func:`launch`, so importing names from the
+    #   package at module load time would deadlock.
     from vrcpilot.steam import find_steam_executable
 
     from . import VRChatAlreadyRunningError, find_pids

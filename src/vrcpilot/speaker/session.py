@@ -17,6 +17,7 @@ from typing import Self
 import numpy as np
 from numpy.typing import NDArray
 
+from vrcpilot.process import resolve_pid
 from vrcpilot.speaker.base import SpeakerBackend
 
 
@@ -75,11 +76,6 @@ class Speaker:
     ) -> None:
         if read_timeout <= 0:
             raise ValueError(f"read_timeout must be > 0 (got {read_timeout})")
-
-        # Import lazily so the dispatch test can stub
-        # ``vrcpilot.speaker.session._select_speaker_backend`` without
-        # also having to satisfy ``resolve_pid``'s real implementation.
-        from vrcpilot.process import resolve_pid
 
         self._closed = False
         resolved = resolve_pid(pid)
