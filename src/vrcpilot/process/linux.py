@@ -36,14 +36,9 @@ def find_umu_launcher(override: Path | None = None) -> Path:
     located = shutil.which("umu-run")
     if located is None:
         raise UmuLauncherNotFoundError(
-            "umu-run not found on PATH. Install umu-launcher: "
-            "Ubuntu/Debian users should download the .deb from "
-            "https://github.com/Open-Wine-Components/umu-launcher/releases/latest "
-            "and run 'sudo apt install ./umu-launcher_*.deb'. "
-            "Other distributions: see "
-            "https://github.com/Open-Wine-Components/umu-launcher "
-            "for build/install instructions. "
-            "Alternatively, pass --via-steam to use steam.exe -applaunch."
+            "umu-run not found on PATH. Install umu-launcher (see README's "
+            "Linux setup) or use vrcpilot launch --via-steam to delegate to "
+            "Steam-managed Proton."
         )
     return Path(located)
 

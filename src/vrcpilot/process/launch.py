@@ -1,17 +1,9 @@
-"""VRChat launch flow.
+"""VRChat launch flow (direct-spawn / via-steam)。
 
-デフォルトでは VRChat の ``launch.exe`` (EAC ラッパー) を直接 spawn する。Windows は
-そのまま、Linux は ``umu-launcher`` (``umu-run``) 経由で起動。``via_steam=True`` を
-渡すと従来の ``steam.exe -applaunch`` 経路にフォールバックする (既存 VRChat が動いて
-いれば :class:`VRChatAlreadyRunningError` — Steam は同一インスタンスにフォーカスを
-移すだけなので意図した新規起動ができないため)。
-
-``launch.exe`` を経由する理由: ``VRChat.exe`` を直接叩くと EAC が初期化されず
-offline モード起動になる。EAC ラッパー ``launch.exe`` が VRChat 用の正規エントリ
-ポイント。
-
-launch 後の PID 検出は launch 前 PID 集合との差分で行う。これにより既に他の VRChat
-が動いていても、launch で生まれた新規 PID を確実に返せる。
+Direct-spawn は EAC ラッパー ``launch.exe`` を呼ぶ (``VRChat.exe`` 直叩きだと
+offline モードで起動するため)。``via_steam=True`` は ``steam.exe -applaunch``
+にフォールバックし、既存インスタンスがあれば :class:`VRChatAlreadyRunningError`
+を上げる (Steam が新規起動せず既存ウィンドウへ focus するだけのため)。
 """
 
 from __future__ import annotations
@@ -32,19 +24,13 @@ from . import (
 
 @dataclass(frozen=True)
 class OscConfig:
-    """Structured form of VRChat's ``--osc=<in>:<ip>:<out>`` launch flag.
-
-    Defaults mirror VRChat's factory OSC settings, so ``OscConfig()``
-    forwards the flag explicitly without changing client semantics —
-    useful when a deterministic argv is wanted (logging, tests).
-    """
+    """Structured form of VRChat's ``--osc=<in>:<ip>:<out>`` launch flag."""
 
     in_port: int = 9000
     out_ip: str = "127.0.0.1"
     out_port: int = 9001
 
     def to_launch_arg(self) -> str:
-        """Render as a single ``--osc=...`` argv token."""
         return f"--osc={self.in_port}:{self.out_ip}:{self.out_port}"
 
 
@@ -236,19 +222,9 @@ def launch(
         ValueError: Invalid argument combination (see
             :func:`validate_launch_args`).
     """
-    # Deferred imports — intentional, do not hoist to module top:
-    #
-    # * ``find_steam_executable`` is imported here so each ``launch()``
-    #   call resolves the *current* binding on ``vrcpilot.steam``. Tests
-    #   monkeypatch ``vrcpilot.steam.find_steam_executable`` directly; if
-    #   we hoisted this to a module-level ``from ... import ...`` the test
-    #   patch would no longer reach the binding actually used here. Keep
-    #   the lookup deferred so test patches against the source module are
-    #   guaranteed to take effect.
-    # * The ``from . import ...`` lines break the
-    #   ``process/__init__.py`` <-> ``launch.py`` import cycle: the
-    #   package re-exports :func:`launch`, so importing names from the
-    #   package at module load time would deadlock.
+    # Deferred imports: break the ``process/__init__.py`` <-> ``launch.py``
+    # import cycle, and let tests reach the live ``vrcpilot.steam`` binding
+    # via ``monkeypatch`` instead of a captured module-level alias.
     from vrcpilot.steam import find_steam_executable
 
     from . import VRChatAlreadyRunningError, find_pids
