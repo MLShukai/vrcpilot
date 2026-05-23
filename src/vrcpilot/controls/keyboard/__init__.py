@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import sys
 
-from vrcpilot.controls.guard import ensure_target
+from vrcpilot.controls.guard import ensure_target as ensure_target
 from vrcpilot.controls.keyboard.base import Key, Keyboard
 
-__all__ = ["Key", "Keyboard", "down", "ensure_target", "press", "up"]
+__all__ = ["Key", "Keyboard", "down", "press", "up"]
 
 _instance: Keyboard | None = None
 
