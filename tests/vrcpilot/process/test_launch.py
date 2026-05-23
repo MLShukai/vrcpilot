@@ -24,6 +24,7 @@ from pytest_mock import MockerFixture
 from tests.fakes import FakePopen, FakeProcess
 from vrcpilot.process import (
     VRCHAT_PROCESS_NAME,
+    VRCHAT_STEAM_APP_ID,
     OscConfig,
     VRChatAlreadyRunningError,
     launch,
@@ -117,6 +118,29 @@ def _process_iter_returning(mocker: MockerFixture, *procs: FakeProcess) -> None:
         "vrcpilot.process.psutil.process_iter",
         return_value=list(procs),
     )
+
+
+@pytest.fixture
+def linux_direct_spawn(
+    monkeypatch: pytest.MonkeyPatch,
+    mocker: MockerFixture,
+    tmp_path: Path,
+) -> tuple[Path, Path]:
+    """One-stop Linux direct-spawn setup.
+
+    Patches ``sys.platform`` to ``"linux"``, plants fake ``launch.exe`` and
+    ``umu-run`` files under ``tmp_path``, and stubs both discovery helpers
+    to point at them. Returns ``(launcher, umu_run)`` so tests that need
+    the concrete paths (e.g. for argv assertions) can read them back.
+    """
+    monkeypatch.setattr(sys, "platform", "linux")
+    launcher = tmp_path / "launch.exe"
+    launcher.write_bytes(b"")
+    umu = tmp_path / "umu-run"
+    umu.write_bytes(b"")
+    _patch_launcher(mocker, launcher)
+    _patch_umu(mocker, umu)
+    return launcher, umu
 
 
 class TestBuildVrchatLaunchArgs:
@@ -382,18 +406,10 @@ class TestLaunchDirectSpawnLinux:
 
     def test_uses_umu_run(
         self,
-        monkeypatch: pytest.MonkeyPatch,
-        mocker: MockerFixture,
+        linux_direct_spawn: tuple[Path, Path],
         fake_popen: type[FakePopen],
-        tmp_path: Path,
     ):
-        monkeypatch.setattr(sys, "platform", "linux")
-        launcher = tmp_path / "launch.exe"
-        launcher.write_bytes(b"")
-        umu = tmp_path / "umu-run"
-        umu.write_bytes(b"")
-        _patch_launcher(mocker, launcher)
-        _patch_umu(mocker, umu)
+        launcher, umu = linux_direct_spawn
 
         launch(wait_timeout=0)
 
@@ -401,87 +417,45 @@ class TestLaunchDirectSpawnLinux:
 
     def test_appends_vrchat_args(
         self,
-        monkeypatch: pytest.MonkeyPatch,
-        mocker: MockerFixture,
+        linux_direct_spawn: tuple[Path, Path],
         fake_popen: type[FakePopen],
-        tmp_path: Path,
     ):
-        monkeypatch.setattr(sys, "platform", "linux")
-        launcher = tmp_path / "launch.exe"
-        launcher.write_bytes(b"")
-        umu = tmp_path / "umu-run"
-        umu.write_bytes(b"")
-        _patch_launcher(mocker, launcher)
-        _patch_umu(mocker, umu)
+        launcher, umu = linux_direct_spawn
 
         launch(no_vr=True, wait_timeout=0)
 
         assert fake_popen.last_argv == [str(umu), str(launcher), "--no-vr"]
 
+    @pytest.mark.parametrize("app_id", [VRCHAT_STEAM_APP_ID, 440])
     def test_does_not_set_gameid_env(
         self,
-        monkeypatch: pytest.MonkeyPatch,
-        mocker: MockerFixture,
+        linux_direct_spawn: tuple[Path, Path],
         fake_popen: type[FakePopen],
-        tmp_path: Path,
+        app_id: int,
     ):
         # GAMEID=438100 を umu-run に渡すと ProtonFixes が VRChat 用 fix を
         # 持たないために "global defaults" を当て、UMU-Proton-latest では未実装の
         # coremessaging.dll.DllGetActivationFactory を呼んで wine が即死する
-        # (2026-05-23 実機観測)。direct-spawn 経路では GAMEID を渡さない。
-        monkeypatch.setattr(sys, "platform", "linux")
-        launcher = tmp_path / "launch.exe"
-        launcher.write_bytes(b"")
-        umu = tmp_path / "umu-run"
-        umu.write_bytes(b"")
-        _patch_launcher(mocker, launcher)
-        _patch_umu(mocker, umu)
+        # (2026-05-23 実機観測)。app_id を変えても direct-spawn では env に
+        # 乗らない (via_steam=True の steam.exe -applaunch <app_id> 経路でのみ
+        # 意味を持つ)。
+        del linux_direct_spawn
 
-        launch(wait_timeout=0)
+        launch(app_id=app_id, wait_timeout=0)
 
         env = fake_popen.last_kwargs.get("env")
         # env_overrides が空なら popen_env=None になり、Popen は親環境を継承する
         if env is not None:
             assert "GAMEID" not in env
 
-    def test_does_not_set_gameid_for_custom_app_id(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        mocker: MockerFixture,
-        fake_popen: type[FakePopen],
-        tmp_path: Path,
-    ):
-        # app_id を変えても direct-spawn では env に乗らない (via_steam=True の
-        # ``steam.exe -applaunch <app_id>`` 経路でのみ意味を持つ)。
-        monkeypatch.setattr(sys, "platform", "linux")
-        launcher = tmp_path / "launch.exe"
-        launcher.write_bytes(b"")
-        umu = tmp_path / "umu-run"
-        umu.write_bytes(b"")
-        _patch_launcher(mocker, launcher)
-        _patch_umu(mocker, umu)
-
-        launch(app_id=440, wait_timeout=0)
-
-        env = fake_popen.last_kwargs.get("env")
-        if env is not None:
-            assert "GAMEID" not in env
-
     def test_sets_wineprefix_when_provided(
         self,
-        monkeypatch: pytest.MonkeyPatch,
-        mocker: MockerFixture,
+        linux_direct_spawn: tuple[Path, Path],
         fake_popen: type[FakePopen],
         tmp_path: Path,
     ):
-        monkeypatch.setattr(sys, "platform", "linux")
-        launcher = tmp_path / "launch.exe"
-        launcher.write_bytes(b"")
-        umu = tmp_path / "umu-run"
-        umu.write_bytes(b"")
+        del linux_direct_spawn
         prefix = tmp_path / "prefix"
-        _patch_launcher(mocker, launcher)
-        _patch_umu(mocker, umu)
 
         launch(wineprefix=prefix, wait_timeout=0)
 
@@ -492,18 +466,12 @@ class TestLaunchDirectSpawnLinux:
     def test_creates_profile_wineprefix(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        mocker: MockerFixture,
+        linux_direct_spawn: tuple[Path, Path],
         fake_popen: type[FakePopen],
         tmp_path: Path,
     ):
-        monkeypatch.setattr(sys, "platform", "linux")
+        del linux_direct_spawn
         monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
-        launcher = tmp_path / "launch.exe"
-        launcher.write_bytes(b"")
-        umu = tmp_path / "umu-run"
-        umu.write_bytes(b"")
-        _patch_launcher(mocker, launcher)
-        _patch_umu(mocker, umu)
 
         launch(profile=3, wait_timeout=0)
 
@@ -517,19 +485,13 @@ class TestLaunchDirectSpawnLinux:
     def test_profile_forwards_to_argv_and_sets_wineprefix(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        mocker: MockerFixture,
+        linux_direct_spawn: tuple[Path, Path],
         fake_popen: type[FakePopen],
         tmp_path: Path,
     ):
         # Linux profile: both argv (--profile=N) and WINEPREFIX must be set.
-        monkeypatch.setattr(sys, "platform", "linux")
+        launcher, umu = linux_direct_spawn
         monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
-        launcher = tmp_path / "launch.exe"
-        launcher.write_bytes(b"")
-        umu = tmp_path / "umu-run"
-        umu.write_bytes(b"")
-        _patch_launcher(mocker, launcher)
-        _patch_umu(mocker, umu)
 
         launch(profile=2, wait_timeout=0)
 
@@ -545,19 +507,13 @@ class TestLaunchDirectSpawnLinux:
     def test_wineprefix_overrides_profile(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        mocker: MockerFixture,
+        linux_direct_spawn: tuple[Path, Path],
         fake_popen: type[FakePopen],
         tmp_path: Path,
     ):
-        monkeypatch.setattr(sys, "platform", "linux")
+        del linux_direct_spawn
         monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
-        launcher = tmp_path / "launch.exe"
-        launcher.write_bytes(b"")
-        umu = tmp_path / "umu-run"
-        umu.write_bytes(b"")
         prefix = tmp_path / "explicit"
-        _patch_launcher(mocker, launcher)
-        _patch_umu(mocker, umu)
 
         launch(wineprefix=prefix, profile=4, wait_timeout=0)
 
@@ -570,19 +526,12 @@ class TestLaunchDirectSpawnLinux:
 
     def test_sets_proton_path_when_provided(
         self,
-        monkeypatch: pytest.MonkeyPatch,
-        mocker: MockerFixture,
+        linux_direct_spawn: tuple[Path, Path],
         fake_popen: type[FakePopen],
         tmp_path: Path,
     ):
-        monkeypatch.setattr(sys, "platform", "linux")
-        launcher = tmp_path / "launch.exe"
-        launcher.write_bytes(b"")
-        umu = tmp_path / "umu-run"
-        umu.write_bytes(b"")
+        del linux_direct_spawn
         proton = tmp_path / "proton"
-        _patch_launcher(mocker, launcher)
-        _patch_umu(mocker, umu)
 
         launch(proton_path=proton, wait_timeout=0)
 
@@ -592,18 +541,10 @@ class TestLaunchDirectSpawnLinux:
 
     def test_uses_new_session(
         self,
-        monkeypatch: pytest.MonkeyPatch,
-        mocker: MockerFixture,
+        linux_direct_spawn: tuple[Path, Path],
         fake_popen: type[FakePopen],
-        tmp_path: Path,
     ):
-        monkeypatch.setattr(sys, "platform", "linux")
-        launcher = tmp_path / "launch.exe"
-        launcher.write_bytes(b"")
-        umu = tmp_path / "umu-run"
-        umu.write_bytes(b"")
-        _patch_launcher(mocker, launcher)
-        _patch_umu(mocker, umu)
+        del linux_direct_spawn
 
         launch(wait_timeout=0)
 
@@ -616,55 +557,29 @@ class TestLaunchWait:
 
     def test_wait_timeout_zero_returns_none(
         self,
-        monkeypatch: pytest.MonkeyPatch,
-        mocker: MockerFixture,
+        linux_direct_spawn: tuple[Path, Path],
         fake_popen: type[FakePopen],
-        tmp_path: Path,
     ):
-        del fake_popen
-        monkeypatch.setattr(sys, "platform", "linux")
-        launcher = tmp_path / "launch.exe"
-        launcher.write_bytes(b"")
-        umu = tmp_path / "umu-run"
-        umu.write_bytes(b"")
-        _patch_launcher(mocker, launcher)
-        _patch_umu(mocker, umu)
+        del linux_direct_spawn, fake_popen
 
         assert launch(wait_timeout=0) is None
 
     def test_negative_wait_timeout_returns_none(
         self,
-        monkeypatch: pytest.MonkeyPatch,
-        mocker: MockerFixture,
+        linux_direct_spawn: tuple[Path, Path],
         fake_popen: type[FakePopen],
-        tmp_path: Path,
     ):
-        del fake_popen
-        monkeypatch.setattr(sys, "platform", "linux")
-        launcher = tmp_path / "launch.exe"
-        launcher.write_bytes(b"")
-        umu = tmp_path / "umu-run"
-        umu.write_bytes(b"")
-        _patch_launcher(mocker, launcher)
-        _patch_umu(mocker, umu)
+        del linux_direct_spawn, fake_popen
 
         assert launch(wait_timeout=-1.0) is None
 
     def test_returns_new_pid_after_spawn(
         self,
-        monkeypatch: pytest.MonkeyPatch,
-        mocker: MockerFixture,
+        linux_direct_spawn: tuple[Path, Path],
         fake_popen: type[FakePopen],
-        tmp_path: Path,
+        mocker: MockerFixture,
     ):
-        del fake_popen
-        monkeypatch.setattr(sys, "platform", "linux")
-        launcher = tmp_path / "launch.exe"
-        launcher.write_bytes(b"")
-        umu = tmp_path / "umu-run"
-        umu.write_bytes(b"")
-        _patch_launcher(mocker, launcher)
-        _patch_umu(mocker, umu)
+        del linux_direct_spawn, fake_popen
         # Pre-spawn snapshot: nothing running. Post-spawn poll: PID 4242
         # alive — the diff identifies it as the new one.
         pre: list[FakeProcess] = []
@@ -681,21 +596,13 @@ class TestLaunchWait:
 
     def test_returns_only_new_pid_diff_when_pre_existing_pids(
         self,
-        monkeypatch: pytest.MonkeyPatch,
-        mocker: MockerFixture,
+        linux_direct_spawn: tuple[Path, Path],
         fake_popen: type[FakePopen],
-        tmp_path: Path,
+        mocker: MockerFixture,
     ):
         """Pre-existing VRChat PIDs must be excluded from the new-PID
         result."""
-        del fake_popen
-        monkeypatch.setattr(sys, "platform", "linux")
-        launcher = tmp_path / "launch.exe"
-        launcher.write_bytes(b"")
-        umu = tmp_path / "umu-run"
-        umu.write_bytes(b"")
-        _patch_launcher(mocker, launcher)
-        _patch_umu(mocker, umu)
+        del linux_direct_spawn, fake_popen
         # First call (pre snapshot): one existing PID 100.
         # Second call (post-spawn poll loop): existing + brand-new PID 200.
         pre = [FakeProcess(name=VRCHAT_PROCESS_NAME, pid=100, create_time=1.0)]
@@ -717,19 +624,10 @@ class TestLaunchWait:
 
     def test_returns_none_when_no_new_pid_appears(
         self,
-        monkeypatch: pytest.MonkeyPatch,
-        mocker: MockerFixture,
+        linux_direct_spawn: tuple[Path, Path],
         fake_popen: type[FakePopen],
-        tmp_path: Path,
     ):
-        del fake_popen
-        monkeypatch.setattr(sys, "platform", "linux")
-        launcher = tmp_path / "launch.exe"
-        launcher.write_bytes(b"")
-        umu = tmp_path / "umu-run"
-        umu.write_bytes(b"")
-        _patch_launcher(mocker, launcher)
-        _patch_umu(mocker, umu)
+        del linux_direct_spawn, fake_popen
         # autouse fixture: process_iter is empty -> no PID ever appears.
         result = launch(wait_timeout=0.05, wait_interval=0.01)
 
