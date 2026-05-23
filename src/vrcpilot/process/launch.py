@@ -14,12 +14,13 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Final
 
-from . import (
-    PID_WAIT_INTERVAL,
-    PID_WAIT_TIMEOUT,
-    VRCHAT_STEAM_APP_ID,
-)
+from .errors import VRChatAlreadyRunningError
+from .pid import PID_WAIT_INTERVAL, PID_WAIT_TIMEOUT, find_pids
+
+#: Steam application id for VRChat.
+VRCHAT_STEAM_APP_ID: Final[int] = 438100
 
 
 @dataclass(frozen=True)
@@ -222,12 +223,10 @@ def launch(
         ValueError: Invalid argument combination (see
             :func:`validate_launch_args`).
     """
-    # Deferred imports: break the ``process/__init__.py`` <-> ``launch.py``
-    # import cycle, and let tests reach the live ``vrcpilot.steam`` binding
-    # via ``monkeypatch`` instead of a captured module-level alias.
+    # Deferred so tests reach the live ``vrcpilot.steam`` binding via
+    # ``monkeypatch`` instead of a captured module-level alias.
     from vrcpilot.steam import find_steam_executable
 
-    from . import VRChatAlreadyRunningError, find_pids
     from .executable import find_vrchat_launcher
 
     validate_launch_args(

@@ -15,7 +15,7 @@ class TestPidCommand:
         self, mocker: MockerFixture, capsys: pytest.CaptureFixture[str]
     ):
         mocker.patch(
-            "vrcpilot.process.psutil.process_iter",
+            "vrcpilot.process.pid.psutil.process_iter",
             return_value=[
                 FakeProcess(name=VRCHAT_PROCESS_NAME, pid=111),
                 FakeProcess(name=VRCHAT_PROCESS_NAME, pid=222),
@@ -32,7 +32,7 @@ class TestPidCommand:
         self, mocker: MockerFixture, capsys: pytest.CaptureFixture[str]
     ):
         mocker.patch(
-            "vrcpilot.process.psutil.process_iter",
+            "vrcpilot.process.pid.psutil.process_iter",
             return_value=[FakeProcess(name=VRCHAT_PROCESS_NAME, pid=12345)],
         )
 
@@ -63,7 +63,7 @@ class TestPidCommand:
         # Order in stdout must mirror ``process_iter`` order so callers
         # can rely on it staying consistent with ``find_pids()``.
         mocker.patch(
-            "vrcpilot.process.psutil.process_iter",
+            "vrcpilot.process.pid.psutil.process_iter",
             return_value=[
                 FakeProcess(name=VRCHAT_PROCESS_NAME, pid=300),
                 FakeProcess(name="other.exe", pid=999),

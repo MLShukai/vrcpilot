@@ -11,7 +11,7 @@ import os
 import shutil
 from pathlib import Path
 
-from . import UmuLauncherNotFoundError
+from .errors import UmuLauncherNotFoundError, VRChatDisplayNotAvailableError
 
 
 def find_umu_launcher(override: Path | None = None) -> Path:
@@ -79,8 +79,6 @@ def preflight_linux_environment(*, via_steam: bool) -> None:
             )
         return
     if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
-        from . import VRChatDisplayNotAvailableError
-
         raise VRChatDisplayNotAvailableError(
             "Neither DISPLAY nor WAYLAND_DISPLAY is set; "
             "vrcpilot launch (direct-spawn) requires a graphical session. "

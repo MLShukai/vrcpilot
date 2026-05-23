@@ -7,7 +7,7 @@ import re
 import sys
 from pathlib import Path
 
-from vrcpilot.process import VRChatLauncherNotFoundError
+from .errors import VRChatLauncherNotFoundError
 
 #: launch.exe の Steam 配下相対パス。
 _LAUNCHER_RELATIVE: Path = Path("steamapps/common/VRChat/launch.exe")

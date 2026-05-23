@@ -20,7 +20,7 @@ def stub_wait_procs(mocker: MockerFixture) -> None:
     result, so a ``([], [])`` return is enough to keep the run
     end-to-end while bypassing the type check.
     """
-    mocker.patch("vrcpilot.process.psutil.wait_procs", return_value=([], []))
+    mocker.patch("vrcpilot.process.pid.psutil.wait_procs", return_value=([], []))
 
 
 class TestTerminateCommand:
@@ -32,7 +32,7 @@ class TestTerminateCommand:
     ):
         del stub_wait_procs
         mocker.patch(
-            "vrcpilot.process.psutil.process_iter",
+            "vrcpilot.process.pid.psutil.process_iter",
             return_value=[FakeProcess(name=VRCHAT_PROCESS_NAME, pid=4242)],
         )
 
@@ -67,7 +67,7 @@ class TestTerminateCommand:
     ):
         del stub_wait_procs
         mocker.patch(
-            "vrcpilot.process.psutil.process_iter",
+            "vrcpilot.process.pid.psutil.process_iter",
             return_value=[
                 FakeProcess(name=VRCHAT_PROCESS_NAME, pid=pid) for pid in running_pids
             ],
@@ -85,7 +85,7 @@ class TestTerminateCommand:
     ):
         del stub_wait_procs
         mocker.patch(
-            "vrcpilot.process.psutil.process_iter",
+            "vrcpilot.process.pid.psutil.process_iter",
             return_value=[
                 FakeProcess(name=VRCHAT_PROCESS_NAME, pid=111),
                 FakeProcess(name=VRCHAT_PROCESS_NAME, pid=222),

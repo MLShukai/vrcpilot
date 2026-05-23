@@ -115,7 +115,7 @@ def _patch_umu(mocker: MockerFixture, umu: Path) -> None:
 def _process_iter_returning(mocker: MockerFixture, *procs: FakeProcess) -> None:
     """Override the autouse empty-iterator default with the given fakes."""
     mocker.patch(
-        "vrcpilot.process.psutil.process_iter",
+        "vrcpilot.process.pid.psutil.process_iter",
         return_value=list(procs),
     )
 
@@ -586,7 +586,7 @@ class TestLaunchWait:
         post = [FakeProcess(name=VRCHAT_PROCESS_NAME, pid=4242, create_time=10.0)]
         iters = iter([pre, post, post, post])
         mocker.patch(
-            "vrcpilot.process.psutil.process_iter",
+            "vrcpilot.process.pid.psutil.process_iter",
             side_effect=lambda *_a, **_kw: list(next(iters)),
         )
 
@@ -614,7 +614,7 @@ class TestLaunchWait:
         # subsequent invocation returns the "post" list.
         iters = iter([pre, post, post, post])
         mocker.patch(
-            "vrcpilot.process.psutil.process_iter",
+            "vrcpilot.process.pid.psutil.process_iter",
             side_effect=lambda *_a, **_kw: list(next(iters)),
         )
 

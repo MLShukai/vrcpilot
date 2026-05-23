@@ -33,7 +33,7 @@ from vrcpilot.process import (
 def _process_iter_returning(mocker: MockerFixture, *procs: FakeProcess) -> None:
     """Override the autouse empty-iterator default with the given fakes."""
     mocker.patch(
-        "vrcpilot.process.psutil.process_iter",
+        "vrcpilot.process.pid.psutil.process_iter",
         return_value=list(procs),
     )
 
@@ -331,7 +331,7 @@ class TestWaitForPid:
     def test_returns_immediately_when_pid_exists(self, mocker: MockerFixture):
         _process_iter_returning(mocker, FakeProcess(name=VRCHAT_PROCESS_NAME, pid=42))
         # Sleep should never be called when the pid is already there.
-        sleep_spy = mocker.patch("vrcpilot.process.time.sleep")
+        sleep_spy = mocker.patch("vrcpilot.process.pid.time.sleep")
 
         result = wait_for_pid(timeout=5.0, interval=1.0)
 
@@ -362,14 +362,14 @@ class TestWaitForPid:
     def test_returns_specific_pid_when_alive(self, mocker: MockerFixture):
         # With ``pid=`` specified, ``psutil.pid_exists`` is the gate; the
         # ``process_iter`` content is irrelevant.
-        mocker.patch("vrcpilot.process.psutil.pid_exists", return_value=True)
+        mocker.patch("vrcpilot.process.pid.psutil.pid_exists", return_value=True)
 
         result = wait_for_pid(timeout=5.0, interval=0.01, pid=12345)
 
         assert result == 12345
 
     def test_returns_none_when_specific_pid_never_appears(self, mocker: MockerFixture):
-        mocker.patch("vrcpilot.process.psutil.pid_exists", return_value=False)
+        mocker.patch("vrcpilot.process.pid.psutil.pid_exists", return_value=False)
 
         result = wait_for_pid(timeout=0.05, interval=0.01, pid=99999)
 
@@ -386,7 +386,7 @@ class TestWaitForPid:
 class TestWaitForNoPid:
     def test_returns_true_immediately_when_absent(self, mocker: MockerFixture):
         # autouse fixture: process_iter is empty -> find_pids() is empty.
-        sleep_spy = mocker.patch("vrcpilot.process.time.sleep")
+        sleep_spy = mocker.patch("vrcpilot.process.pid.time.sleep")
 
         result = wait_for_no_pid(timeout=5.0, interval=1.0)
 
@@ -404,14 +404,14 @@ class TestWaitForNoPid:
         # ``pid=`` mode: only the named PID matters. Other VRChat processes
         # may still be running.
         _process_iter_returning(mocker, FakeProcess(name=VRCHAT_PROCESS_NAME, pid=4242))
-        mocker.patch("vrcpilot.process.psutil.pid_exists", return_value=False)
+        mocker.patch("vrcpilot.process.pid.psutil.pid_exists", return_value=False)
 
         result = wait_for_no_pid(timeout=5.0, interval=0.01, pid=99999)
 
         assert result is True
 
     def test_returns_false_when_specific_pid_still_alive(self, mocker: MockerFixture):
-        mocker.patch("vrcpilot.process.psutil.pid_exists", return_value=True)
+        mocker.patch("vrcpilot.process.pid.psutil.pid_exists", return_value=True)
 
         result = wait_for_no_pid(timeout=0.05, interval=0.01, pid=4242)
 
@@ -428,7 +428,7 @@ class TestTerminate:
     def test_kills_matching_process(self, mocker: MockerFixture):
         proc = FakeProcess(name=VRCHAT_PROCESS_NAME, pid=4242)
         _process_iter_returning(mocker, proc)
-        mocker.patch("vrcpilot.process.psutil.wait_procs")
+        mocker.patch("vrcpilot.process.pid.psutil.wait_procs")
 
         result = terminate()
 
@@ -437,7 +437,7 @@ class TestTerminate:
 
     def test_returns_empty_list_when_not_running(self, mocker: MockerFixture):
         _process_iter_returning(mocker, FakeProcess(name="explorer.exe"))
-        mocker.patch("vrcpilot.process.psutil.wait_procs")
+        mocker.patch("vrcpilot.process.pid.psutil.wait_procs")
 
         result = terminate()
 
@@ -450,7 +450,7 @@ class TestTerminate:
         p2 = FakeProcess(name=VRCHAT_PROCESS_NAME, pid=20)
         other = FakeProcess(name="explorer.exe", pid=30)
         _process_iter_returning(mocker, p1, other, p2)
-        mocker.patch("vrcpilot.process.psutil.wait_procs")
+        mocker.patch("vrcpilot.process.pid.psutil.wait_procs")
 
         result = terminate()
 
@@ -466,7 +466,7 @@ class TestTerminate:
             kill_raises=psutil.NoSuchProcess(pid=9999),
         )
         _process_iter_returning(mocker, proc)
-        mocker.patch("vrcpilot.process.psutil.wait_procs")
+        mocker.patch("vrcpilot.process.pid.psutil.wait_procs")
 
         result = terminate()
 
@@ -477,14 +477,14 @@ class TestTerminate:
         # ``terminate(10)`` constructs ``psutil.Process(10)`` and reads
         # ``.name()``; intercept the constructor so it returns our fake.
         mocker.patch(
-            "vrcpilot.process.psutil.Process",
+            "vrcpilot.process.pid.psutil.Process",
             return_value=target,
         )
         # ``process_iter`` must not be consulted in the explicit-pid path —
         # populate it with the *other* PID and assert nothing fires.
         other = FakeProcess(name=VRCHAT_PROCESS_NAME, pid=20)
         _process_iter_returning(mocker, other)
-        mocker.patch("vrcpilot.process.psutil.wait_procs")
+        mocker.patch("vrcpilot.process.pid.psutil.wait_procs")
 
         result = terminate(10)
 
@@ -500,10 +500,10 @@ class TestTerminate:
             return {10: p10, 20: p20}[pid]
 
         mocker.patch(
-            "vrcpilot.process.psutil.Process",
+            "vrcpilot.process.pid.psutil.Process",
             side_effect=_fake_process,
         )
-        mocker.patch("vrcpilot.process.psutil.wait_procs")
+        mocker.patch("vrcpilot.process.pid.psutil.wait_procs")
 
         result = terminate(10, 20)
 
@@ -514,7 +514,7 @@ class TestTerminate:
     def test_refuses_to_kill_non_vrchat_pid(self, mocker: MockerFixture):
         impostor = FakeProcess(name="notepad.exe", pid=4242)
         mocker.patch(
-            "vrcpilot.process.psutil.Process",
+            "vrcpilot.process.pid.psutil.Process",
             return_value=impostor,
         )
 
@@ -528,10 +528,10 @@ class TestTerminate:
         # psutil.Process(pid) raises NoSuchProcess for a vanished PID --
         # terminate() must treat that as "already gone" (not an error).
         mocker.patch(
-            "vrcpilot.process.psutil.Process",
+            "vrcpilot.process.pid.psutil.Process",
             side_effect=psutil.NoSuchProcess(pid=9999),
         )
-        mocker.patch("vrcpilot.process.psutil.wait_procs")
+        mocker.patch("vrcpilot.process.pid.psutil.wait_procs")
 
         result = terminate(9999)
 
@@ -547,10 +547,10 @@ class TestTerminate:
             return alive
 
         mocker.patch(
-            "vrcpilot.process.psutil.Process",
+            "vrcpilot.process.pid.psutil.Process",
             side_effect=_fake_process,
         )
-        mocker.patch("vrcpilot.process.psutil.wait_procs")
+        mocker.patch("vrcpilot.process.pid.psutil.wait_procs")
 
         result = terminate(9999, 10)
 

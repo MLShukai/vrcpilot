@@ -79,7 +79,7 @@ class TestFocus:
     def test_resolves_pid_when_omitted(self, mocker: MockerFixture):
         # Single running instance: ``resolve_pid(None)`` returns it and
         # the dispatch forwards the resolved value to the backend.
-        mocker.patch("vrcpilot.process.find_pids", return_value=[7777])
+        mocker.patch("vrcpilot.process.pid.find_pids", return_value=[7777])
         backend = mocker.patch(_backend_focus_name(), return_value=True)
 
         assert vrcpilot.window.focus() is True
@@ -88,7 +88,7 @@ class TestFocus:
     def test_raises_when_multiple_instances_and_no_pid(self, mocker: MockerFixture):
         # Two running instances + no ``pid=`` => CLI users need a hint
         # to disambiguate, so the error propagates.
-        mocker.patch("vrcpilot.process.find_pids", return_value=[1, 2])
+        mocker.patch("vrcpilot.process.pid.find_pids", return_value=[1, 2])
         backend = mocker.patch(_backend_focus_name(), return_value=True)
 
         with pytest.raises(VRChatMultipleInstancesError):
@@ -109,14 +109,14 @@ class TestIsForeground:
         backend.assert_called_once_with(pid=12345)
 
     def test_resolves_pid_when_omitted(self, mocker: MockerFixture):
-        mocker.patch("vrcpilot.process.find_pids", return_value=[7777])
+        mocker.patch("vrcpilot.process.pid.find_pids", return_value=[7777])
         backend = mocker.patch(_backend_is_foreground_name(), return_value=False)
 
         assert vrcpilot.window.is_foreground() is False
         backend.assert_called_once_with(pid=7777)
 
     def test_raises_when_multiple_instances_and_no_pid(self, mocker: MockerFixture):
-        mocker.patch("vrcpilot.process.find_pids", return_value=[1, 2])
+        mocker.patch("vrcpilot.process.pid.find_pids", return_value=[1, 2])
         backend = mocker.patch(_backend_is_foreground_name(), return_value=False)
 
         with pytest.raises(VRChatMultipleInstancesError):
@@ -137,14 +137,14 @@ class TestUnfocus:
         backend.assert_called_once_with(pid=12345)
 
     def test_resolves_pid_when_omitted(self, mocker: MockerFixture):
-        mocker.patch("vrcpilot.process.find_pids", return_value=[7777])
+        mocker.patch("vrcpilot.process.pid.find_pids", return_value=[7777])
         backend = mocker.patch(_backend_unfocus_name(), return_value=True)
 
         assert vrcpilot.window.unfocus() is True
         backend.assert_called_once_with(pid=7777)
 
     def test_raises_when_multiple_instances_and_no_pid(self, mocker: MockerFixture):
-        mocker.patch("vrcpilot.process.find_pids", return_value=[1, 2])
+        mocker.patch("vrcpilot.process.pid.find_pids", return_value=[1, 2])
         backend = mocker.patch(_backend_unfocus_name(), return_value=True)
 
         with pytest.raises(VRChatMultipleInstancesError):
