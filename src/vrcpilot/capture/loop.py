@@ -30,7 +30,13 @@ class CaptureLoop:
     propagate from it unchanged.
 
     Raises:
+        RuntimeError: The internal :class:`Capture` cannot start (e.g.
+            VRChat is not running or the platform backend failed to
+            open). Propagated unchanged from :class:`Capture`.
         ValueError: ``fps`` is not strictly positive.
+        VRChatMultipleInstancesError: ``pid`` omitted and multiple
+            VRChat instances are running. Propagated unchanged from
+            :class:`Capture`.
     """
 
     _capture: Capture
