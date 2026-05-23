@@ -8,10 +8,12 @@ from typing import Self
 
 import numpy as np
 
+from vrcpilot.process import resolve_pid
+
 from .base import CaptureBackend
 
 
-def _select_capture_backend(*, frame_timeout: float) -> CaptureBackend:
+def _select_capture_backend(*, frame_timeout: float, pid: int) -> CaptureBackend:
     """Return the platform-appropriate :class:`CaptureBackend`.
 
     Imports the chosen backend lazily so platform-specific dependencies
@@ -21,11 +23,11 @@ def _select_capture_backend(*, frame_timeout: float) -> CaptureBackend:
     if sys.platform == "win32":
         from .windows import Win32CaptureBackend
 
-        return Win32CaptureBackend(frame_timeout=frame_timeout)
+        return Win32CaptureBackend(frame_timeout=frame_timeout, pid=pid)
     if sys.platform == "linux":
         from .linux import X11CaptureBackend
 
-        return X11CaptureBackend()
+        return X11CaptureBackend(pid=pid)
     raise NotImplementedError(f"Capture is not supported on {sys.platform}")
 
 
@@ -42,6 +44,13 @@ class Capture:
         frame_timeout: Seconds :meth:`read` will wait for a frame before
             raising :class:`TimeoutError`. Must be ``> 0``. Default
             ``2.0`` is generous for WGC's ~33 ms cadence.
+        pid: Target VRChat PID. When omitted,
+            :func:`vrcpilot.process.resolve_pid` picks the sole running
+            instance and raises
+            :class:`vrcpilot.process.VRChatMultipleInstancesError` if
+            more than one VRChat process is running. Use this explicitly
+            to bind the capture session to one instance when several are
+            running.
 
     Raises:
         NotImplementedError: Platform other than Windows or Linux.
@@ -49,18 +58,23 @@ class Capture:
             not mapped, X11 display unavailable, Composite missing, WGC
             session failed, or native Wayland — streaming has no useful
             fallback there).
+        VRChatMultipleInstancesError: ``pid`` omitted and multiple
+            instances are running.
         ValueError: ``frame_timeout`` is not strictly positive.
     """
 
     _backend: CaptureBackend
     _closed: bool
 
-    def __init__(self, *, frame_timeout: float = 2.0) -> None:
+    def __init__(self, *, frame_timeout: float = 2.0, pid: int | None = None) -> None:
         if frame_timeout <= 0:
             raise ValueError("frame_timeout must be > 0")
 
         self._closed = False
-        self._backend = _select_capture_backend(frame_timeout=frame_timeout)
+        resolved = resolve_pid(pid)
+        self._backend = _select_capture_backend(
+            frame_timeout=frame_timeout, pid=resolved
+        )
 
     def read(self) -> np.ndarray:
         """Return the latest unread frame as an ``(H, W, 3)`` uint8 RGB

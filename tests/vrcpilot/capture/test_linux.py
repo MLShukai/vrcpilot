@@ -2,9 +2,9 @@
 
 The module raises ``ImportError`` on non-Linux because it depends on
 ``Xlib``, so a module-level skip up front gates the rest of the file.
-Below the gate, the autouse ``_no_real_vrchat`` fixture in
-:mod:`tests.conftest` pins ``find_pid()`` to ``None`` so the "VRChat
-not running" branch is exercised with zero explicit mocks.
+``X11CaptureBackend`` now requires ``pid`` as a keyword argument; PID
+resolution lives one layer up in :class:`vrcpilot.capture.Capture`, so
+each test passes a concrete PID explicitly.
 
 These tests never open a real X display; ``open_x11_display`` is
 patched with :class:`tests.fakes.FakeXDisplay` so we can assert
@@ -40,7 +40,7 @@ class _X11Chain:
 
 @pytest.fixture
 def x11_chain(mocker: MockerFixture, monkeypatch: pytest.MonkeyPatch) -> _X11Chain:
-    """Patch the find/open/lookup chain past the early VRChat-running check.
+    """Patch the display/window lookup chain past the Wayland check.
 
     Returns the ``FakeXDisplay`` and ``FakeXWindow`` so each test can
     assert against them or override one entry (e.g. set
@@ -51,7 +51,6 @@ def x11_chain(mocker: MockerFixture, monkeypatch: pytest.MonkeyPatch) -> _X11Cha
     monkeypatch.setenv("DISPLAY", ":0")
     fake_display = FakeXDisplay()
     fake_window = FakeXWindow()
-    mocker.patch("vrcpilot.capture.linux.find_pid", return_value=4242)
     mocker.patch("vrcpilot.capture.linux.open_x11_display", return_value=fake_display)
     mocker.patch("vrcpilot.capture.linux.find_vrchat_window", return_value=fake_window)
     return _X11Chain(display=fake_display, window=fake_window)
@@ -66,15 +65,7 @@ class TestX11CaptureBackend:
         monkeypatch.delenv("DISPLAY", raising=False)
 
         with pytest.raises(RuntimeError, match="native Wayland is not supported"):
-            X11CaptureBackend()
-
-    def test_raises_when_vrchat_not_running(self, monkeypatch: pytest.MonkeyPatch):
-        # Autouse fixture pins ``find_pid()`` to ``None``; the backend
-        # must surface this as RuntimeError before opening a display.
-        monkeypatch.setenv("DISPLAY", ":0")
-
-        with pytest.raises(RuntimeError, match="VRChat is not running"):
-            X11CaptureBackend()
+            X11CaptureBackend(pid=4242)
 
     def test_raises_when_display_unavailable(
         self, mocker: MockerFixture, monkeypatch: pytest.MonkeyPatch
@@ -83,11 +74,10 @@ class TestX11CaptureBackend:
         # the backend converts this to RuntimeError so callers do not
         # need to read the docs of the helper.
         monkeypatch.setenv("DISPLAY", ":0")
-        mocker.patch("vrcpilot.capture.linux.find_pid", return_value=4242)
         mocker.patch("vrcpilot.capture.linux.open_x11_display", return_value=None)
 
         with pytest.raises(RuntimeError, match="X11 display unavailable"):
-            X11CaptureBackend()
+            X11CaptureBackend(pid=4242)
 
     def test_closes_display_when_window_not_found(
         self, mocker: MockerFixture, x11_chain: _X11Chain
@@ -97,8 +87,30 @@ class TestX11CaptureBackend:
         mocker.patch("vrcpilot.capture.linux.find_vrchat_window", return_value=None)
 
         with pytest.raises(RuntimeError, match="window is not yet mapped"):
-            X11CaptureBackend()
+            X11CaptureBackend(pid=4242)
         assert x11_chain.display.close_calls == 1
+
+    def test_pid_is_forwarded_to_find_vrchat_window(
+        self, mocker: MockerFixture, monkeypatch: pytest.MonkeyPatch
+    ):
+        # The backend must thread the caller-provided PID into
+        # ``find_vrchat_window`` so multi-instance disambiguation
+        # (handled by ``resolve_pid`` one layer up) actually targets
+        # the right X window. We deliberately make the lookup fail so
+        # the backend short-circuits before touching Composite.
+        monkeypatch.setenv("DISPLAY", ":0")
+        fake_display = FakeXDisplay()
+        mocker.patch(
+            "vrcpilot.capture.linux.open_x11_display", return_value=fake_display
+        )
+        find_window = mocker.patch(
+            "vrcpilot.capture.linux.find_vrchat_window", return_value=None
+        )
+        with pytest.raises(RuntimeError, match="window is not yet mapped"):
+            X11CaptureBackend(pid=98765)
+        assert find_window.call_args is not None
+        args, _kwargs = find_window.call_args
+        assert args[1] == 98765
 
     def test_closes_display_on_composite_xerror(
         self, mocker: MockerFixture, x11_chain: _X11Chain
@@ -113,7 +125,7 @@ class TestX11CaptureBackend:
         )
 
         with pytest.raises(RuntimeError, match="X11 Composite extension"):
-            X11CaptureBackend()
+            X11CaptureBackend(pid=4242)
         assert x11_chain.display.close_calls == 1
 
     def test_closes_display_on_redirect_xerror(
@@ -130,5 +142,5 @@ class TestX11CaptureBackend:
         )
 
         with pytest.raises(RuntimeError, match="Failed to redirect window"):
-            X11CaptureBackend()
+            X11CaptureBackend(pid=4242)
         assert x11_chain.display.close_calls == 1
