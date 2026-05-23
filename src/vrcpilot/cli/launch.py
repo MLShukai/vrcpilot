@@ -200,16 +200,12 @@ def run(args: argparse.Namespace) -> int:
             osc=osc,
             wait_timeout=timeout,
         )
-    except ValueError as exc:
-        print(f"vrcpilot: {exc}", file=sys.stderr)
-        return 2
-    except SteamNotFoundError as exc:
-        print(f"vrcpilot: {exc}", file=sys.stderr)
-        return 2
-    except VRChatLauncherNotFoundError as exc:
-        print(f"vrcpilot: {exc}", file=sys.stderr)
-        return 2
-    except UmuLauncherNotFoundError as exc:
+    except (
+        ValueError,
+        SteamNotFoundError,
+        UmuLauncherNotFoundError,
+        VRChatLauncherNotFoundError,
+    ) as exc:
         print(f"vrcpilot: {exc}", file=sys.stderr)
         return 2
     except VRChatAlreadyRunningError as exc:
