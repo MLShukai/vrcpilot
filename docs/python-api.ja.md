@@ -121,7 +121,7 @@ ______________________________________________________________________
 
 ## 画面キャプチャ
 
-### `vrcpilot.Capture`
+### `vrcpilot.capture.Capture`
 
 ```python
 class Capture:
@@ -444,7 +444,7 @@ ______________________________________________________________________
 
 ## OCR
 
-### `vrcpilot.OCRWord`
+### `vrcpilot.ocr.OCRWord`
 
 ```python
 @dataclass(frozen=True)
@@ -459,7 +459,7 @@ class OCRWord:
     def center(self) -> tuple[float, float]: ...
 ```
 
-### `vrcpilot.OCRResult`
+### `vrcpilot.ocr.OCRResult`
 
 ```python
 @dataclass(frozen=True, eq=False)
@@ -470,7 +470,7 @@ class OCRResult:
 
 `Screenshot` と、その上で検出された単語群をまとめます。すべての `OCRWord.polygon` / `OCRWord.bbox` の値は **ウィンドウローカル**（原点は VRChat ウィンドウの左上）で、これは `mouse.move()` が受け取る座標系と同じです — 変換ステップは不要です。
 
-### `vrcpilot.OCREngine`
+### `vrcpilot.ocr.OCREngine`
 
 ```python
 class OCREngine(ABC):
@@ -480,7 +480,7 @@ class OCREngine(ABC):
 
 この ABC を実装すれば、独自のバックエンドに差し替えられます。
 
-### `vrcpilot.RapidOCREngine`
+### `vrcpilot.ocr.RapidOCREngine`
 
 ```python
 class RapidOCREngine(OCREngine):
@@ -509,7 +509,7 @@ ______________________________________________________________________
 
 ## 画像テンプレート検出
 
-### `vrcpilot.Detection`
+### `vrcpilot.detect.Detection`
 
 ```python
 @dataclass(frozen=True)
@@ -525,7 +525,7 @@ class Detection:
     def center(self) -> tuple[float, float]: ...
 ```
 
-### `vrcpilot.DetectResult`
+### `vrcpilot.detect.DetectResult`
 
 ```python
 @dataclass(frozen=True, eq=False)
@@ -537,7 +537,7 @@ class DetectResult:
 
 すべての `Detection.polygon` / `Detection.bbox` の値は **ウィンドウローカル** で、`OCRResult` および `mouse.move()` が受け取る座標系と一致しています。
 
-### `vrcpilot.DetectEngine`
+### `vrcpilot.detect.DetectEngine`
 
 ```python
 class DetectEngine(ABC):
@@ -549,7 +549,7 @@ class DetectEngine(ABC):
     ) -> Sequence[Detection]: ...
 ```
 
-### `vrcpilot.TemplateDetectEngine`
+### `vrcpilot.detect.TemplateDetectEngine`
 
 ```python
 class TemplateDetectEngine(DetectEngine):
@@ -634,7 +634,7 @@ def release(*buttons: MouseButton, focus: bool = True) -> None: ...
 
 `press` / `release` はコードクリック用の対になる半アクションです。`keyboard.down` / `up` と同様に、単一の Python プロセス内でのみ意味があります。
 
-### `vrcpilot.ensure_target`
+### `vrcpilot.controls.ensure_target`
 
 ```python
 def ensure_target() -> None: ...

@@ -21,8 +21,29 @@ import pytest
 from pytest_mock import MockerFixture
 
 from tests.helpers import ImplSpeakerBackend
+from vrcpilot.process import VRChatMultipleInstancesError
 from vrcpilot.speaker.base import CHANNELS
 from vrcpilot.speaker.session import Speaker
+
+
+@pytest.fixture(autouse=True)
+def _default_resolve_pid(mocker: MockerFixture) -> int:
+    """Pin :func:`vrcpilot.speaker.session.resolve_pid` to a deterministic PID.
+
+    Speaker now delegates PID selection to ``resolve_pid``; tests in
+    this file are concerned with the wrapper plumbing, not the process
+    module. Pinning here keeps every test off the live process iterator
+    while still exercising the real call site. Individual tests can
+    override the patch (``mocker.patch(...)`` shadows it) to assert
+    error paths.
+
+    The patch target is the binding inside :mod:`vrcpilot.speaker.session`
+    (which now imports ``resolve_pid`` at module level), mirroring the
+    convention used by :mod:`tests.vrcpilot.capture.test_session`.
+    """
+    pid = 4242
+    mocker.patch("vrcpilot.speaker.session.resolve_pid", return_value=pid)
+    return pid
 
 
 def _patch_backend(
@@ -60,7 +81,9 @@ class TestConstruction:
             Speaker(read_timeout=bad_timeout)
         spy.assert_not_called()
 
-    def test_forwards_kwargs_to_backend_factory(self, mocker: MockerFixture):
+    def test_forwards_kwargs_to_backend_factory(
+        self, mocker: MockerFixture, _default_resolve_pid: int
+    ):
         # The whole point of the wrapper is to be a thin shim, so the
         # backend factory must receive exactly the kwargs the caller
         # supplied (no rewriting, no defaults leaking through).
@@ -70,20 +93,59 @@ class TestConstruction:
         )
         speaker = Speaker(read_timeout=1.5)
         try:
-            spy.assert_called_once_with(read_timeout=1.5)
+            spy.assert_called_once_with(read_timeout=1.5, pid=_default_resolve_pid)
         finally:
             speaker.close()
 
-    def test_uses_documented_defaults(self, mocker: MockerFixture):
+    def test_uses_documented_defaults(
+        self, mocker: MockerFixture, _default_resolve_pid: int
+    ):
         spy = mocker.patch(
             "vrcpilot.speaker.session._select_speaker_backend",
             return_value=ImplSpeakerBackend(),
         )
         speaker = Speaker()
         try:
-            spy.assert_called_once_with(read_timeout=2.0)
+            spy.assert_called_once_with(read_timeout=2.0, pid=_default_resolve_pid)
         finally:
             speaker.close()
+
+    def test_forwards_explicit_pid_to_backend_factory(self, mocker: MockerFixture):
+        # When the caller pins an explicit pid, Speaker must hand exactly
+        # that PID to the backend factory. resolve_pid still runs but
+        # returns its argument unchanged for non-None pids, so we patch
+        # it to confirm both halves of the contract.
+        explicit_pid = 9999
+        resolve_spy = mocker.patch(
+            "vrcpilot.speaker.session.resolve_pid", return_value=explicit_pid
+        )
+        spy = mocker.patch(
+            "vrcpilot.speaker.session._select_speaker_backend",
+            return_value=ImplSpeakerBackend(),
+        )
+        speaker = Speaker(pid=explicit_pid)
+        try:
+            resolve_spy.assert_called_once_with(explicit_pid)
+            spy.assert_called_once_with(read_timeout=2.0, pid=explicit_pid)
+        finally:
+            speaker.close()
+
+    def test_multiple_instances_raises_when_pid_omitted(self, mocker: MockerFixture):
+        # resolve_pid(None) raises VRChatMultipleInstancesError when 2+
+        # VRChat processes are running; Speaker must surface that error
+        # unmodified rather than picking an arbitrary instance.
+        mocker.patch(
+            "vrcpilot.speaker.session.resolve_pid",
+            side_effect=VRChatMultipleInstancesError([111, 222]),
+        )
+        backend_spy = mocker.patch(
+            "vrcpilot.speaker.session._select_speaker_backend",
+            return_value=ImplSpeakerBackend(),
+        )
+        with pytest.raises(VRChatMultipleInstancesError):
+            Speaker()
+        # Backend must never be created when PID resolution fails.
+        backend_spy.assert_not_called()
 
 
 class TestRead:
@@ -173,9 +235,9 @@ class TestBackendDispatch:
 
         from vrcpilot.speaker.session import _select_speaker_backend
 
-        _select_speaker_backend(read_timeout=2.0)
+        _select_speaker_backend(read_timeout=2.0, pid=4242)
 
-        pipewire_mock.assert_called_once_with(read_timeout=2.0)
+        pipewire_mock.assert_called_once_with(read_timeout=2.0, pid=4242)
         proctap_mock.assert_not_called()
 
     def test_win32_dispatches_to_proctap(self, mocker: MockerFixture):
@@ -191,9 +253,9 @@ class TestBackendDispatch:
 
         from vrcpilot.speaker.session import _select_speaker_backend
 
-        _select_speaker_backend(read_timeout=2.0)
+        _select_speaker_backend(read_timeout=2.0, pid=4242)
 
-        proctap_mock.assert_called_once_with(read_timeout=2.0)
+        proctap_mock.assert_called_once_with(read_timeout=2.0, pid=4242)
         pipewire_mock.assert_not_called()
 
     def test_unsupported_platform_raises(self, mocker: MockerFixture):
@@ -211,7 +273,7 @@ class TestBackendDispatch:
         from vrcpilot.speaker.session import _select_speaker_backend
 
         with pytest.raises(NotImplementedError, match="darwin"):
-            _select_speaker_backend(read_timeout=2.0)
+            _select_speaker_backend(read_timeout=2.0, pid=4242)
 
         pipewire_mock.assert_not_called()
         proctap_mock.assert_not_called()

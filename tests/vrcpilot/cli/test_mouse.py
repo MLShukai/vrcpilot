@@ -21,8 +21,9 @@ from pytest_mock import MockerFixture
 
 from tests.helpers import ImplMouse
 from vrcpilot.cli import main
-from vrcpilot.controls import VRChatNotFocusedError, VRChatNotRunningError
+from vrcpilot.controls import VRChatNotFocusedError
 from vrcpilot.controls.mouse import MouseButton
+from vrcpilot.process import VRChatMultipleInstancesError, VRChatNotRunningError
 
 
 @pytest.fixture
@@ -268,3 +269,72 @@ class TestMouseDispatch:
         assert excinfo.value.code != 0
         captured = capsys.readouterr()
         assert captured.err != ""
+
+
+class TestMousePidArg:
+    """``--pid`` is wired on every mouse action sub-subcommand."""
+
+    def test_move_passes_pid_to_api(self, fake_mouse: ImplMouse, mocker: MockerFixture):
+        del fake_mouse
+        spy = mocker.patch("vrcpilot.cli.mouse.mouse_api.move")
+
+        exit_code = main(["mouse", "move", "10", "20", "--pid", "555"])
+
+        assert exit_code == 0
+        spy.assert_called_once_with(10, 20, relative=False, pid=555)
+
+    def test_click_passes_pid_to_api(
+        self, fake_mouse: ImplMouse, mocker: MockerFixture
+    ):
+        del fake_mouse
+        spy = mocker.patch("vrcpilot.cli.mouse.mouse_api.click")
+
+        exit_code = main(["mouse", "click", "right", "--pid", "777"])
+
+        assert exit_code == 0
+        spy.assert_called_once_with(MouseButton.RIGHT, count=1, duration=0.0, pid=777)
+
+    def test_scroll_passes_pid_to_api(
+        self, fake_mouse: ImplMouse, mocker: MockerFixture
+    ):
+        del fake_mouse
+        spy = mocker.patch("vrcpilot.cli.mouse.mouse_api.scroll")
+
+        exit_code = main(["mouse", "scroll", "3", "--pid", "999"])
+
+        assert exit_code == 0
+        spy.assert_called_once_with(3, pid=999)
+
+    def test_no_pid_passes_none(self, fake_mouse: ImplMouse, mocker: MockerFixture):
+        del fake_mouse
+        spy = mocker.patch("vrcpilot.cli.mouse.mouse_api.move")
+
+        exit_code = main(["mouse", "move", "10", "20"])
+
+        assert exit_code == 0
+        spy.assert_called_once_with(10, 20, relative=False, pid=None)
+
+    def test_multiple_instances_exits_with_diagnostic(
+        self,
+        fake_mouse: ImplMouse,
+        mocker: MockerFixture,
+        capsys: pytest.CaptureFixture[str],
+    ):
+        del fake_mouse
+        # ``VRChatMultipleInstancesError`` is a subclass of
+        # ``VRChatNotRunningError`` -- the CLI must catch it first or
+        # the multi-instance branch never runs.
+        mocker.patch(
+            "vrcpilot.controls.mouse.base.ensure_target",
+            side_effect=VRChatMultipleInstancesError([100, 200]),
+        )
+
+        exit_code = main(["mouse", "click"])
+
+        assert exit_code == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert (
+            captured.err == "vrcpilot: multiple VRChat instances detected "
+            "(PIDs: 100 200); pass --pid\n"
+        )

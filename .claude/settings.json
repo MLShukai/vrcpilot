@@ -68,6 +68,7 @@
       "Bash(true)",
       "Bash(false)",
       "Bash(test:*)",
+      "Bash(wait:*)",
       "Bash([:*)",
       "Bash(git status:*)",
       "Bash(git log:*)",

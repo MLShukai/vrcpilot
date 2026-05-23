@@ -13,6 +13,7 @@ from PIL import Image
 from pytest_mock import MockerFixture
 
 from vrcpilot.cli import main
+from vrcpilot.process import VRChatMultipleInstancesError
 from vrcpilot.screenshot import Screenshot
 
 
@@ -226,4 +227,59 @@ class TestScreenshotCommand:
         captured = capsys.readouterr()
         assert captured.out == ""
         assert "vrcpilot: could not capture VRChat screenshot" in captured.err
+        assert not output.exists()
+
+    def test_passes_pid_to_api(
+        self,
+        mocker: MockerFixture,
+        tmp_path: Path,
+    ):
+        shot = _make_screenshot()
+        stub = mocker.patch(
+            "vrcpilot.cli.screenshot.take_screenshot", return_value=shot
+        )
+        output = tmp_path / "shot.png"
+
+        exit_code = main(["screenshot", "-o", str(output), "--pid", "13579"])
+
+        assert exit_code == 0
+        stub.assert_called_once_with(pid=13579)
+
+    def test_no_pid_passes_none(
+        self,
+        mocker: MockerFixture,
+        tmp_path: Path,
+    ):
+        shot = _make_screenshot()
+        stub = mocker.patch(
+            "vrcpilot.cli.screenshot.take_screenshot", return_value=shot
+        )
+        output = tmp_path / "shot.png"
+
+        exit_code = main(["screenshot", "-o", str(output)])
+
+        assert exit_code == 0
+        stub.assert_called_once_with(pid=None)
+
+    def test_multiple_instances_exits_with_diagnostic(
+        self,
+        mocker: MockerFixture,
+        capsys: pytest.CaptureFixture[str],
+        tmp_path: Path,
+    ):
+        mocker.patch(
+            "vrcpilot.cli.screenshot.take_screenshot",
+            side_effect=VRChatMultipleInstancesError([42, 43]),
+        )
+        output = tmp_path / "shot.png"
+
+        exit_code = main(["screenshot", "-o", str(output)])
+
+        assert exit_code == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert (
+            captured.err == "vrcpilot: multiple VRChat instances detected "
+            "(PIDs: 42 43); pass --pid\n"
+        )
         assert not output.exists()

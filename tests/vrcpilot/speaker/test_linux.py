@@ -14,9 +14,9 @@ The backend talks to PipeWire / PulseAudio via four seams:
   recording :class:`unittest.mock.MagicMock` so tests assert which
   ``pw-link`` invocations the backend would have issued.
 
-The autouse ``_no_real_vrchat`` fixture in :mod:`tests.conftest` pins
-:func:`vrcpilot.process.find_pid` to ``None``. The ``patch_pid`` helper
-below overrides it with a deterministic PID; the ``shutil.which`` and
+PID resolution lives in :class:`vrcpilot.speaker.Speaker` now; this
+backend takes ``pid`` as a required keyword. The ``patch_pid`` helper
+returns the canonical deterministic PID; the ``shutil.which`` and
 ``XDG_RUNTIME_DIR`` patches keep CLI / filesystem side-effects
 hermetic.
 """
@@ -57,11 +57,9 @@ from vrcpilot.speaker.linux import PipeWireSpeakerBackend
 
 
 @pytest.fixture
-def patch_pid(mocker: MockerFixture) -> int:
-    """Override the autouse ``find_pid`` patch with a deterministic PID."""
-    pid = 12345
-    mocker.patch("vrcpilot.speaker.linux.process.find_pid", return_value=pid)
-    return pid
+def patch_pid() -> int:
+    """Return the canonical deterministic PID used by Linux backend tests."""
+    return 12345
 
 
 @pytest.fixture
@@ -99,8 +97,9 @@ def fake_record_proc(mocker: MockerFixture) -> FakePwRecordProcess:
 
 
 @pytest.fixture
-def pw_dump_vrchat(mocker: MockerFixture) -> list[dict[str, Any]]:
-    """``_run_pw_dump`` returns one VRChat audio output node."""
+def pw_dump_vrchat(mocker: MockerFixture, patch_pid: int) -> list[dict[str, Any]]:
+    """``_run_pw_dump`` returns one VRChat audio output node owned by
+    ``patch_pid``."""
     payload: list[dict[str, Any]] = [
         {
             "id": 42,
@@ -109,6 +108,7 @@ def pw_dump_vrchat(mocker: MockerFixture) -> list[dict[str, Any]]:
                     "media.class": "Stream/Output/Audio",
                     "application.process.binary": "VRChat.exe",
                     "application.name": "VRChat",
+                    "application.process.id": str(patch_pid),
                     "node.name": "stream.VRChat.42",
                 },
             },
@@ -146,7 +146,7 @@ def disable_atexit(mocker: MockerFixture) -> MagicMock:
 @pytest.fixture
 def started_backend(
     mock_clis: None,  # noqa: ARG001
-    patch_pid: int,  # noqa: ARG001
+    patch_pid: int,
     isolate_state_dir: Path,  # noqa: ARG001
     fake_pulse: FakePulse,
     fake_record_proc: FakePwRecordProcess,
@@ -155,7 +155,7 @@ def started_backend(
     disable_atexit: MagicMock,  # noqa: ARG001
 ) -> Iterator[tuple[PipeWireSpeakerBackend, FakePulse, FakePwRecordProcess]]:
     """Yield a fully-started backend plus its fakes; tears down on exit."""
-    backend = PipeWireSpeakerBackend()
+    backend = PipeWireSpeakerBackend(pid=patch_pid)
     try:
         yield backend, fake_pulse, fake_record_proc
     finally:
@@ -173,6 +173,7 @@ class TestPipeWireSpeakerBackendConstruction:
         self,
         mocker: MockerFixture,
         bad: float,
+        patch_pid: int,
     ) -> None:
         # Validation must fire before any subprocess / pulse work.
         which_spy = mocker.patch(
@@ -180,16 +181,20 @@ class TestPipeWireSpeakerBackendConstruction:
             return_value="/usr/bin/dummy",
         )
         with pytest.raises(ValueError, match="read_timeout must be > 0"):
-            PipeWireSpeakerBackend(read_timeout=bad)
+            PipeWireSpeakerBackend(read_timeout=bad, pid=patch_pid)
         which_spy.assert_not_called()
 
-    def test_raises_when_clis_missing(self, mocker: MockerFixture) -> None:
+    def test_raises_when_clis_missing(
+        self, mocker: MockerFixture, patch_pid: int
+    ) -> None:
         # All CLIs missing -> aggregated error message lists them.
         mocker.patch("vrcpilot.speaker.linux.shutil.which", return_value=None)
         with pytest.raises(RuntimeError, match="PipeWire backend requires"):
-            PipeWireSpeakerBackend()
+            PipeWireSpeakerBackend(pid=patch_pid)
 
-    def test_lists_all_missing_clis_in_error(self, mocker: MockerFixture) -> None:
+    def test_lists_all_missing_clis_in_error(
+        self, mocker: MockerFixture, patch_pid: int
+    ) -> None:
         # Only pw-record + pw-link missing: error must mention each by
         # name so the user knows which package to install.
         def fake_which(name: str) -> str | None:
@@ -199,20 +204,13 @@ class TestPipeWireSpeakerBackendConstruction:
 
         mocker.patch("vrcpilot.speaker.linux.shutil.which", side_effect=fake_which)
         with pytest.raises(RuntimeError) as excinfo:
-            PipeWireSpeakerBackend()
+            PipeWireSpeakerBackend(pid=patch_pid)
         msg = str(excinfo.value)
         assert "pw-record" in msg
         assert "pw-link" in msg
         # Found CLIs are NOT listed.
         assert "pactl" not in msg.split("missing:")[1]
         assert "pw-dump" not in msg.split("missing:")[1]
-
-    def test_raises_when_vrchat_not_running(self, mock_clis: None) -> None:
-        del mock_clis
-        # find_pid -> None (the autouse default) must surface as
-        # RuntimeError, not crash deeper in pulse / subprocess.
-        with pytest.raises(RuntimeError, match="VRChat is not running"):
-            PipeWireSpeakerBackend()
 
     def test_loads_null_sink_on_start(
         self,
@@ -232,7 +230,7 @@ class TestPipeWireSpeakerBackendConstruction:
     def test_unloads_stale_null_sink_first(
         self,
         mock_clis: None,  # noqa: ARG002
-        patch_pid: int,  # noqa: ARG002
+        patch_pid: int,
         isolate_state_dir: Path,  # noqa: ARG002
         fake_record_proc: FakePwRecordProcess,  # noqa: ARG002
         pw_dump_empty: None,  # noqa: ARG002
@@ -261,7 +259,7 @@ class TestPipeWireSpeakerBackendConstruction:
         )
         mocker.patch.object(PipeWireSpeakerBackend, "_open_pulse", return_value=pulse)
 
-        backend = PipeWireSpeakerBackend()
+        backend = PipeWireSpeakerBackend(pid=patch_pid)
         try:
             assert 99 in pulse.module_unload_calls
             assert 100 not in pulse.module_unload_calls
@@ -294,7 +292,7 @@ class TestPipeWireSpeakerBackendConstruction:
     def test_links_match_via_application_name_when_binary_missing(
         self,
         mock_clis: None,  # noqa: ARG002
-        patch_pid: int,  # noqa: ARG002
+        patch_pid: int,
         isolate_state_dir: Path,  # noqa: ARG002
         fake_pulse: FakePulse,  # noqa: ARG002
         fake_record_proc: FakePwRecordProcess,  # noqa: ARG002
@@ -303,8 +301,10 @@ class TestPipeWireSpeakerBackendConstruction:
         mocker: MockerFixture,
     ) -> None:
         # Wine / Proton sometimes presents only application.name with
-        # "VRChat" in it (no process.binary). The matcher must accept
-        # that path so Linux runs are not regressed.
+        # "VRChat" in it (no process.binary / process.id). The matcher
+        # must accept that path — when a single VRChat-like node has no
+        # process.id we link it (the unambiguous fallback). See the
+        # multi-ambiguous test below for the safety-skip behaviour.
         mocker.patch.object(
             PipeWireSpeakerBackend,
             "_run_pw_dump",
@@ -320,7 +320,7 @@ class TestPipeWireSpeakerBackendConstruction:
                 }
             ],
         )
-        backend = PipeWireSpeakerBackend()
+        backend = PipeWireSpeakerBackend(pid=patch_pid)
         try:
             assert mock_pw_link.call_count == 2
         finally:
@@ -329,7 +329,7 @@ class TestPipeWireSpeakerBackendConstruction:
     def test_ignores_non_vrchat_streams(
         self,
         mock_clis: None,  # noqa: ARG002
-        patch_pid: int,  # noqa: ARG002
+        patch_pid: int,
         isolate_state_dir: Path,  # noqa: ARG002
         fake_pulse: FakePulse,  # noqa: ARG002
         fake_record_proc: FakePwRecordProcess,  # noqa: ARG002
@@ -363,27 +363,131 @@ class TestPipeWireSpeakerBackendConstruction:
                 },
             ],
         )
-        backend = PipeWireSpeakerBackend()
+        backend = PipeWireSpeakerBackend(pid=patch_pid)
         try:
             assert mock_pw_link.call_count == 0
         finally:
             backend.close()
 
+    def test_pid_filter_only_links_matching_instance(
+        self,
+        mock_clis: None,  # noqa: ARG002
+        patch_pid: int,
+        isolate_state_dir: Path,  # noqa: ARG002
+        fake_pulse: FakePulse,  # noqa: ARG002
+        fake_record_proc: FakePwRecordProcess,  # noqa: ARG002
+        mock_pw_link: MagicMock,
+        disable_atexit: MagicMock,  # noqa: ARG002
+        mocker: MockerFixture,
+    ) -> None:
+        # Two concurrent VRChat instances expose two output nodes; the
+        # backend must only link the one whose application.process.id
+        # matches its configured pid, never the other one.
+        other_pid = 99999
+        mocker.patch.object(
+            PipeWireSpeakerBackend,
+            "_run_pw_dump",
+            return_value=[
+                {
+                    "info": {
+                        "props": {
+                            "media.class": "Stream/Output/Audio",
+                            "application.process.binary": "VRChat.exe",
+                            "application.process.id": str(patch_pid),
+                            "node.name": "stream.VRChat.mine",
+                        }
+                    }
+                },
+                {
+                    "info": {
+                        "props": {
+                            "media.class": "Stream/Output/Audio",
+                            "application.process.binary": "VRChat.exe",
+                            "application.process.id": str(other_pid),
+                            "node.name": "stream.VRChat.other",
+                        }
+                    }
+                },
+            ],
+        )
+        backend = PipeWireSpeakerBackend(pid=patch_pid)
+        try:
+            sources = {c.args[0] for c in mock_pw_link.call_args_list}
+            assert sources == {
+                "stream.VRChat.mine:output_FL",
+                "stream.VRChat.mine:output_FR",
+            }
+        finally:
+            backend.close()
+
+    def test_pid_filter_skips_ambiguous_when_multiple_lack_process_id(
+        self,
+        mock_clis: None,  # noqa: ARG002
+        patch_pid: int,
+        isolate_state_dir: Path,  # noqa: ARG002
+        fake_pulse: FakePulse,  # noqa: ARG002
+        fake_record_proc: FakePwRecordProcess,  # noqa: ARG002
+        mock_pw_link: MagicMock,
+        disable_atexit: MagicMock,  # noqa: ARG002
+        mocker: MockerFixture,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # Two VRChat-like nodes without application.process.id is the
+        # ambiguous case — we cannot tell which one belongs to our
+        # configured pid, so the backend must skip both (no pw-link
+        # calls) and surface a warning rather than misroute audio.
+        mocker.patch.object(
+            PipeWireSpeakerBackend,
+            "_run_pw_dump",
+            return_value=[
+                {
+                    "info": {
+                        "props": {
+                            "media.class": "Stream/Output/Audio",
+                            "application.process.binary": "VRChat.exe",
+                            "node.name": "stream.VRChat.a",
+                        }
+                    }
+                },
+                {
+                    "info": {
+                        "props": {
+                            "media.class": "Stream/Output/Audio",
+                            "application.name": "VRChat",
+                            "node.name": "stream.VRChat.b",
+                        }
+                    }
+                },
+            ],
+        )
+        with caplog.at_level(logging.WARNING, logger="vrcpilot.speaker.linux"):
+            backend = PipeWireSpeakerBackend(pid=patch_pid)
+            try:
+                assert mock_pw_link.call_count == 0
+            finally:
+                backend.close()
+        assert any("cannot disambiguate" in r.getMessage() for r in caplog.records)
+
     def test_writes_state_file(
         self,
         started_backend: tuple[PipeWireSpeakerBackend, FakePulse, FakePwRecordProcess],
         isolate_state_dir: Path,
+        patch_pid: int,
     ) -> None:
         del started_backend
         # The state file is a crash-recovery breadcrumb; it must
         # contain enough metadata for an external janitor to identify
-        # the leaked null-sink and verify the owning PID is gone.
+        # the leaked null-sink and verify the owning VRChat PID is
+        # gone (``vrchat_pid``) — the janitor cannot trust the ``pid``
+        # field alone because that records the vrcpilot process, not
+        # VRChat itself.
         state_file = isolate_state_dir / "vrcpilot" / "tap.json"
         assert state_file.exists()
         payload = json.loads(state_file.read_text())
         assert payload["sink_name"] == "vrcpilot_tap"
         assert isinstance(payload["pid"], int)
         assert isinstance(payload["module_id"], int)
+        assert payload["vrchat_pid"] == patch_pid
 
     def test_subscribes_to_sink_input_events(
         self,
@@ -412,7 +516,7 @@ class TestPipeWireSpeakerBackendConstruction:
     def test_cleanup_on_partial_startup_failure(
         self,
         mock_clis: None,  # noqa: ARG002
-        patch_pid: int,  # noqa: ARG002
+        patch_pid: int,
         isolate_state_dir: Path,
         fake_pulse: FakePulse,
         pw_dump_vrchat: list[dict[str, Any]],  # noqa: ARG002
@@ -429,7 +533,7 @@ class TestPipeWireSpeakerBackendConstruction:
             side_effect=OSError("pw-record not executable"),
         )
         with pytest.raises(OSError, match="pw-record not executable"):
-            PipeWireSpeakerBackend()
+            PipeWireSpeakerBackend(pid=patch_pid)
         # Null-sink was loaded then unloaded as part of unwind.
         assert fake_pulse.module_unload_calls
         # State file rolled back too.

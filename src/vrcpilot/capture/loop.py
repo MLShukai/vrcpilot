@@ -24,12 +24,19 @@ class CaptureLoop:
 
     The loop is deadline-based (drift-resistant) and uses an
     :class:`threading.Event` sleep so :meth:`stop` wakes the worker
-    promptly. ``frame_timeout`` is forwarded to the owned
-    :class:`Capture`; startup failures (VRChat not running, unsupported
-    platform, etc.) propagate from it unchanged.
+    promptly. ``frame_timeout`` and ``pid`` are forwarded to the owned
+    :class:`Capture`; startup failures (VRChat not running, multiple
+    instances without an explicit ``pid``, unsupported platform, etc.)
+    propagate from it unchanged.
 
     Raises:
+        RuntimeError: The internal :class:`Capture` cannot start (e.g.
+            VRChat is not running or the platform backend failed to
+            open). Propagated unchanged from :class:`Capture`.
         ValueError: ``fps`` is not strictly positive.
+        VRChatMultipleInstancesError: ``pid`` omitted and multiple
+            VRChat instances are running. Propagated unchanged from
+            :class:`Capture`.
     """
 
     _capture: Capture
@@ -47,6 +54,7 @@ class CaptureLoop:
         *,
         fps: float,
         frame_timeout: float = 2.0,
+        pid: int | None = None,
     ) -> None:
         if fps <= 0:
             raise ValueError("fps must be > 0")
@@ -59,7 +67,7 @@ class CaptureLoop:
         self._exception = None
         self._lock = threading.Lock()
         # Capture last so a ValueError above does not leak a backend.
-        self._capture = Capture(frame_timeout=frame_timeout)
+        self._capture = Capture(frame_timeout=frame_timeout, pid=pid)
 
     @property
     def is_running(self) -> bool:

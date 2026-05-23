@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from vrcpilot.controls.errors import VRChatNotFocusedError, VRChatNotRunningError
+from vrcpilot.controls.errors import VRChatNotFocusedError
+from vrcpilot.process import VRChatNotRunningError
 
 
 @pytest.mark.parametrize(

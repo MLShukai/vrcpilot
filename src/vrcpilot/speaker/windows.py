@@ -21,7 +21,6 @@ from typing import Any, override
 import numpy as np
 from numpy.typing import NDArray
 
-from vrcpilot import process
 from vrcpilot.speaker.base import CHANNELS, SpeakerBackend
 
 _logger = logging.getLogger(__name__)
@@ -30,8 +29,17 @@ _logger = logging.getLogger(__name__)
 class ProcTapSpeakerBackend(SpeakerBackend):
     """SpeakerBackend backed by :class:`proctap.ProcessAudioCapture`.
 
+    Args:
+        read_timeout: Seconds :meth:`read` waits for the first chunk
+            before returning empty. Must be ``> 0``.
+        pid: Target VRChat PID. The caller (typically
+            :class:`vrcpilot.speaker.Speaker`) is responsible for
+            supplying a resolved PID — this backend does not consult
+            :func:`vrcpilot.process.resolve_pid` itself so it stays
+            usable in tests and in scenarios where the PID was selected
+            externally.
+
     Raises:
-        RuntimeError: VRChat is not running.
         ValueError: ``read_timeout`` is not strictly positive.
     """
 
@@ -45,13 +53,10 @@ class ProcTapSpeakerBackend(SpeakerBackend):
         self,
         *,
         read_timeout: float = 2.0,
+        pid: int,
     ) -> None:
         if read_timeout <= 0:
             raise ValueError(f"read_timeout must be > 0 (got {read_timeout})")
-
-        pid = process.find_pid()
-        if pid is None:
-            raise RuntimeError("VRChat is not running")
 
         self._pid = pid
         self._read_timeout = read_timeout

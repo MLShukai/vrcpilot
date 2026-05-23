@@ -39,7 +39,6 @@ from typing import Any, Final, override
 import numpy as np
 from numpy.typing import NDArray
 
-from vrcpilot import process
 from vrcpilot.speaker.base import CHANNELS, SpeakerBackend
 
 _logger = logging.getLogger(__name__)
@@ -88,11 +87,19 @@ class PipeWireSpeakerBackend(SpeakerBackend):
     leaks the null-sink or the ``pw-record`` subprocess. :meth:`close`
     is also registered with :func:`atexit` for the same reason.
 
+    Args:
+        read_timeout: Seconds :meth:`read` waits for the first chunk
+            before returning empty. Must be ``> 0``.
+        pid: Target VRChat PID. The caller (typically
+            :class:`vrcpilot.speaker.Speaker`) supplies a resolved PID;
+            the backend filters PipeWire output nodes by
+            ``application.process.id`` so concurrent VRChat instances
+            never share an audio tap.
+
     Raises:
         ValueError: ``read_timeout`` is not strictly positive.
-        RuntimeError: A required CLI is missing, VRChat is not running,
-            or the PulseAudio / PipeWire control plane refused the
-            null-sink load.
+        RuntimeError: A required CLI is missing, or the PulseAudio /
+            PipeWire control plane refused the null-sink load.
     """
 
     _read_timeout: float
@@ -112,7 +119,7 @@ class PipeWireSpeakerBackend(SpeakerBackend):
     _closed: bool
     _lock: threading.Lock
 
-    def __init__(self, *, read_timeout: float = 2.0) -> None:
+    def __init__(self, *, read_timeout: float = 2.0, pid: int) -> None:
         if read_timeout <= 0:
             raise ValueError(f"read_timeout must be > 0 (got {read_timeout})")
 
@@ -122,10 +129,6 @@ class PipeWireSpeakerBackend(SpeakerBackend):
                 f"PipeWire backend requires {_REQUIRED_CLIS}; missing: {missing}. "
                 "Install 'pipewire' and 'pipewire-pulse' (or distro equivalents)."
             )
-
-        pid = process.find_pid()
-        if pid is None:
-            raise RuntimeError("VRChat is not running")
 
         self._read_timeout = read_timeout
         self._pid = pid
@@ -309,6 +312,7 @@ class PipeWireSpeakerBackend(SpeakerBackend):
                 "pid": os.getpid(),
                 "module_id": module_id,
                 "sink_name": _TAP_SINK_NAME,
+                "vrchat_pid": self._pid,
             }
             state_file.write_text(json.dumps(payload))
             return state_file
@@ -320,10 +324,23 @@ class PipeWireSpeakerBackend(SpeakerBackend):
             return None
 
     def _enumerate_vrchat_nodes(self) -> list[str]:
-        """Return ``node.name`` for every active VRChat audio output.
+        """Return ``node.name`` for every active VRChat audio output owned by
+        ``self._pid``.
 
-        VRChat typically exposes one output node but can surface
-        multiple (voice / music submix), so we link every match.
+        Filtering rules (applied in order):
+
+        1. ``info.props['media.class']`` must be ``Stream/Output/Audio``.
+        2. ``info.props['application.process.id']`` (when present) must
+           equal ``self._pid``. Mismatching PID -> skip.
+        3. If ``application.process.id`` is absent, fall back to the
+           legacy "looks like VRChat" check
+           (``application.process.binary == 'VRChat.exe'`` or
+           ``'VRChat' in application.name``). This is needed because
+           some PipeWire client paths under Proton / Wine omit
+           ``process.id``. The fallback is conservative: if multiple
+           VRChat-like nodes lack ``process.id`` we cannot disambiguate
+           against ``self._pid``, so we skip them all and log a warning
+           rather than misroute audio to the wrong instance.
         """
         try:
             dump = self._run_pw_dump()
@@ -331,7 +348,8 @@ class PipeWireSpeakerBackend(SpeakerBackend):
             _logger.warning("pw-dump failed: %s", exc)
             return []
 
-        names: list[str] = []
+        matched: list[str] = []
+        ambiguous: list[str] = []
         for entry in dump:
             if not isinstance(entry, dict):
                 continue
@@ -347,14 +365,54 @@ class PipeWireSpeakerBackend(SpeakerBackend):
             media_class: Any = props_dict.get("media.class")
             if media_class != "Stream/Output/Audio":
                 continue
-            binary: Any = props_dict.get("application.process.binary")
-            app_name: Any = props_dict.get("application.name", "") or ""
-            if binary != "VRChat.exe" and "VRChat" not in str(app_name):
-                continue
+
+            proc_id_raw: Any = props_dict.get("application.process.id")
+            proc_id: int | None
+            if proc_id_raw is None:
+                proc_id = None
+            else:
+                try:
+                    proc_id = int(proc_id_raw)
+                except (TypeError, ValueError):
+                    proc_id = None
+
             node_name: Any = props_dict.get("node.name")
-            if isinstance(node_name, str):
-                names.append(node_name)
-        return names
+            node_str = node_name if isinstance(node_name, str) else None
+
+            if proc_id is not None:
+                if proc_id != self._pid:
+                    continue
+                if node_str is not None:
+                    matched.append(node_str)
+            else:
+                # process.id missing — apply legacy "looks like VRChat" filter.
+                binary: Any = props_dict.get("application.process.binary")
+                app_name: Any = props_dict.get("application.name", "") or ""
+                looks_like_vrchat = binary == "VRChat.exe" or "VRChat" in str(app_name)
+                if not looks_like_vrchat:
+                    continue
+                if node_str is not None:
+                    ambiguous.append(node_str)
+
+        if not ambiguous:
+            return matched
+
+        # process.id absent for at least one VRChat-like node:
+        # * 1 ambiguous + 0 matched -> safe to link (no other VRChat
+        #   candidate to confuse it with);
+        # * everything else -> refuse, warn, return whatever PID-matched
+        #   nodes we have so we never misroute audio to another instance.
+        if len(ambiguous) == 1 and not matched:
+            return ambiguous
+
+        _logger.warning(
+            "%d VRChat-like audio nodes lack application.process.id; "
+            "cannot disambiguate against pid=%d. Skipping ambiguous "
+            "nodes to avoid misrouted audio.",
+            len(ambiguous),
+            self._pid,
+        )
+        return matched
 
     def _link_existing_streams(self) -> None:
         """Link every currently-active VRChat output node to the tap."""

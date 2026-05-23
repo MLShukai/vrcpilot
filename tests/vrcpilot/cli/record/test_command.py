@@ -16,6 +16,7 @@ from tests.fakes import (
     FakeWavFileMuxer,
 )
 from vrcpilot.cli import main
+from vrcpilot.process import VRChatMultipleInstancesError
 
 
 @dataclass
@@ -643,3 +644,79 @@ class TestProgressMessaging:
         captured = capsys.readouterr()
         # Pipe mode: stdout must stay byte-clean for the MKV payload.
         assert captured.out == ""
+
+
+# ---------------------------------------------------------------------------
+# --pid plumbing (multi-instance VRChat targeting)
+# ---------------------------------------------------------------------------
+
+
+class TestPidArg:
+    """``--pid`` should reach both ``CaptureLoop`` and ``SpeakerLoop``."""
+
+    def test_passes_pid_to_both_loops(
+        self, record_fakes: _RecordFakes, tmp_path: Path
+    ) -> None:
+        exit_code = main(["record", "-o", str(tmp_path / "pid.mp4"), "--pid", "8765"])
+
+        assert exit_code == 0
+        assert len(record_fakes.capture_loop.instances) == 1
+        assert record_fakes.capture_loop.instances[0].pid == 8765
+        assert len(record_fakes.speaker_loop.instances) == 1
+        assert record_fakes.speaker_loop.instances[0].pid == 8765
+
+    def test_no_pid_passes_none(
+        self, record_fakes: _RecordFakes, tmp_path: Path
+    ) -> None:
+        exit_code = main(["record", "-o", str(tmp_path / "nopid.mp4")])
+
+        assert exit_code == 0
+        assert record_fakes.capture_loop.instances[0].pid is None
+        assert record_fakes.speaker_loop.instances[0].pid is None
+
+    def test_video_only_passes_pid_to_capture(
+        self, record_fakes: _RecordFakes, tmp_path: Path
+    ) -> None:
+        # In ``--video`` mode SpeakerLoop is never constructed; only
+        # CaptureLoop should receive the pid kwarg.
+        exit_code = main(
+            ["record", "--video", "-o", str(tmp_path / "v.mp4"), "--pid", "111"]
+        )
+
+        assert exit_code == 0
+        assert record_fakes.capture_loop.instances[0].pid == 111
+        assert record_fakes.speaker_loop.instances == []
+
+    def test_audio_only_passes_pid_to_speaker(
+        self, record_fakes: _RecordFakes, tmp_path: Path
+    ) -> None:
+        exit_code = main(
+            ["record", "--audio", "-o", str(tmp_path / "a.wav"), "--pid", "222"]
+        )
+
+        assert exit_code == 0
+        assert record_fakes.speaker_loop.instances[0].pid == 222
+        assert record_fakes.capture_loop.instances == []
+
+    def test_multiple_instances_exits_with_diagnostic(
+        self,
+        record_fakes: _RecordFakes,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        # CaptureLoop's constructor surfaces VRChatMultipleInstancesError
+        # when --pid is omitted on a multi-instance host. The CLI must
+        # map that to the shared multi-instance diagnostic (exit 1).
+        record_fakes.capture_loop.init_side_effect = VRChatMultipleInstancesError(
+            [900, 901]
+        )
+
+        exit_code = main(["record", "-o", str(tmp_path / "multi.mp4")])
+
+        assert exit_code == 1
+        captured = capsys.readouterr()
+        assert (
+            captured.err.splitlines()[-1]
+            == "vrcpilot: multiple VRChat instances detected "
+            "(PIDs: 900 901); pass --pid"
+        )

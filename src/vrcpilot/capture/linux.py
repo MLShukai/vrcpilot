@@ -22,7 +22,6 @@ from Xlib.ext import composite
 from Xlib.xobject.drawable import Window as _XWindow
 
 from vrcpilot.linux import find_vrchat_window, open_x11_display
-from vrcpilot.process import find_pid
 from vrcpilot.session import is_wayland_native
 
 from .base import CaptureBackend
@@ -34,15 +33,11 @@ class X11CaptureBackend(CaptureBackend):
     _display: Xlib.display.Display
     _window: _XWindow
 
-    def __init__(self) -> None:
+    def __init__(self, *, pid: int) -> None:
         if is_wayland_native():
             raise RuntimeError(
                 "Capture requires X11 or XWayland; native Wayland is not supported",
             )
-
-        pid = find_pid()
-        if pid is None:
-            raise RuntimeError("VRChat is not running")
 
         display = open_x11_display()
         if display is None:

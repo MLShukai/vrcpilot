@@ -16,7 +16,8 @@ import pytest
 from pytest_mock import MockerFixture
 
 from vrcpilot.cli import main
-from vrcpilot.controls import VRChatNotFocusedError, VRChatNotRunningError
+from vrcpilot.controls import VRChatNotFocusedError
+from vrcpilot.process import VRChatMultipleInstancesError, VRChatNotRunningError
 
 
 @pytest.fixture
@@ -40,7 +41,7 @@ class TestPasteSuccessPath:
         exit_code = main(["paste", "hello"])
 
         assert exit_code == 0
-        fake_paste.assert_called_once_with("hello")
+        fake_paste.assert_called_once_with("hello", pid=None)
         captured = capsys.readouterr()
         assert captured.out == ""
         assert captured.err == ""
@@ -49,7 +50,7 @@ class TestPasteSuccessPath:
         exit_code = main(["paste", "こんにちは"])
 
         assert exit_code == 0
-        fake_paste.assert_called_once_with("こんにちは")
+        fake_paste.assert_called_once_with("こんにちは", pid=None)
 
     def test_silent_on_success(self, fake_paste, capsys: pytest.CaptureFixture[str]):
         del fake_paste
@@ -75,7 +76,7 @@ class TestPasteStdinFallback:
         exit_code = main(["paste"])
 
         assert exit_code == 0
-        fake_paste.assert_called_once_with("piped\ntext\n")
+        fake_paste.assert_called_once_with("piped\ntext\n", pid=None)
 
     def test_tty_with_no_text_exits_2(
         self,
@@ -139,3 +140,32 @@ class TestPastePyperclipError:
         captured = capsys.readouterr()
         assert captured.out == ""
         assert "vrcpilot: xclip not found" in captured.err
+
+
+class TestPastePidArg:
+    """``--pid`` is wired on the ``paste`` subcommand."""
+
+    def test_passes_pid_to_api(self, fake_paste):
+        exit_code = main(["paste", "hi", "--pid", "31415"])
+
+        assert exit_code == 0
+        fake_paste.assert_called_once_with("hi", pid=31415)
+
+    def test_multiple_instances_exits_with_diagnostic(
+        self,
+        fake_paste,
+        capsys: pytest.CaptureFixture[str],
+    ):
+        # Subclass-order matters: ``VRChatMultipleInstancesError`` must
+        # be caught before the generic ``VRChatNotRunningError`` branch.
+        fake_paste.side_effect = VRChatMultipleInstancesError([700, 800])
+
+        exit_code = main(["paste", "hi"])
+
+        assert exit_code == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert (
+            captured.err == "vrcpilot: multiple VRChat instances detected "
+            "(PIDs: 700 800); pass --pid\n"
+        )

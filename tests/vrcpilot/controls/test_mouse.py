@@ -33,8 +33,8 @@ from pytest_mock import MockerFixture
 from tests.fakes import FakeInputtinoMouse, FakePyDirectInput
 from tests.helpers import ImplMouse, only_linux, only_windows
 from vrcpilot.controls import mouse as mouse_mod
-from vrcpilot.controls.errors import VRChatNotRunningError
 from vrcpilot.controls.mouse import Mouse, MouseButton
+from vrcpilot.process import VRChatMultipleInstancesError, VRChatNotRunningError
 
 
 @pytest.fixture(autouse=True)
@@ -104,7 +104,9 @@ class TestMouseGuardWiring:
         fake_vrchat_window: tuple[int, int, int, int],
     ):
         del fake_vrchat_window  # only needed so move()'s _to_desktop resolves
-        guard = mocker.patch("vrcpilot.controls.mouse.base.ensure_target")
+        guard = mocker.patch(
+            "vrcpilot.controls.mouse.base.ensure_target", return_value=4242
+        )
         impl = ImplMouse()
 
         impl.move(1, 2)
@@ -120,6 +122,8 @@ class TestMouseGuardWiring:
         mocker: MockerFixture,
         fake_vrchat_window: tuple[int, int, int, int],
     ):
+        # focus=False is the hot-loop fast path: it must skip
+        # ensure_target entirely (including the internal resolve_pid).
         del fake_vrchat_window  # only needed so move()'s _to_desktop resolves
         guard = mocker.patch("vrcpilot.controls.mouse.base.ensure_target")
         impl = ImplMouse()
@@ -132,12 +136,30 @@ class TestMouseGuardWiring:
 
         guard.assert_not_called()
 
+    def test_focus_false_does_not_call_resolve_pid_in_hot_loop(
+        self, mocker: MockerFixture
+    ):
+        # Hot-loop guarantee: with focus=False, none of click /
+        # press / release / scroll (and relative move) trigger a
+        # psutil.process_iter scan. We patch process.resolve_pid at
+        # the canonical path so any indirect call would be observed.
+        resolve_spy = mocker.patch("vrcpilot.process.resolve_pid")
+        impl = ImplMouse()
+
+        impl.click(focus=False)
+        impl.press(focus=False)
+        impl.release(focus=False)
+        impl.scroll(1, focus=False)
+        impl.move(10, 20, relative=True, focus=False)  # relative -> no rect lookup
+
+        resolve_spy.assert_not_called()
+
     def test_move_forwards_arguments(
         self,
         mocker: MockerFixture,
         fake_vrchat_window: tuple[int, int, int, int],
     ):
-        mocker.patch("vrcpilot.controls.mouse.base.ensure_target")
+        mocker.patch("vrcpilot.controls.mouse.base.ensure_target", return_value=4242)
         impl = ImplMouse()
         wx, wy, _, _ = fake_vrchat_window
 
@@ -154,7 +176,7 @@ class TestMouseGuardWiring:
     def test_click_single_button_decomposes_to_press_release(
         self, mocker: MockerFixture
     ):
-        mocker.patch("vrcpilot.controls.mouse.base.ensure_target")
+        mocker.patch("vrcpilot.controls.mouse.base.ensure_target", return_value=4242)
         sleep_spy = mocker.patch("vrcpilot.controls.mouse.base.time.sleep")
         impl = ImplMouse()
 
@@ -167,7 +189,7 @@ class TestMouseGuardWiring:
         sleep_spy.assert_not_called()
 
     def test_click_with_no_args_defaults_to_left(self, mocker: MockerFixture):
-        mocker.patch("vrcpilot.controls.mouse.base.ensure_target")
+        mocker.patch("vrcpilot.controls.mouse.base.ensure_target", return_value=4242)
         impl = ImplMouse()
 
         impl.click()
@@ -178,7 +200,7 @@ class TestMouseGuardWiring:
         ]
 
     def test_click_combo_simultaneous(self, mocker: MockerFixture):
-        mocker.patch("vrcpilot.controls.mouse.base.ensure_target")
+        mocker.patch("vrcpilot.controls.mouse.base.ensure_target", return_value=4242)
         sleep_spy = mocker.patch("vrcpilot.controls.mouse.base.time.sleep")
         impl = ImplMouse()
 
@@ -193,7 +215,7 @@ class TestMouseGuardWiring:
         sleep_spy.assert_called_once_with(0.05)
 
     def test_click_with_duration_zero_skips_sleep(self, mocker: MockerFixture):
-        mocker.patch("vrcpilot.controls.mouse.base.ensure_target")
+        mocker.patch("vrcpilot.controls.mouse.base.ensure_target", return_value=4242)
         sleep_spy = mocker.patch("vrcpilot.controls.mouse.base.time.sleep")
         impl = ImplMouse()
 
@@ -208,7 +230,7 @@ class TestMouseGuardWiring:
         sleep_spy.assert_not_called()
 
     def test_click_count_3_runs_three_combo_cycles(self, mocker: MockerFixture):
-        mocker.patch("vrcpilot.controls.mouse.base.ensure_target")
+        mocker.patch("vrcpilot.controls.mouse.base.ensure_target", return_value=4242)
         sleep_spy = mocker.patch("vrcpilot.controls.mouse.base.time.sleep")
         impl = ImplMouse()
 
@@ -226,7 +248,7 @@ class TestMouseGuardWiring:
             assert call.args == (0.02,)
 
     def test_click_count_zero_emits_nothing(self, mocker: MockerFixture):
-        mocker.patch("vrcpilot.controls.mouse.base.ensure_target")
+        mocker.patch("vrcpilot.controls.mouse.base.ensure_target", return_value=4242)
         sleep_spy = mocker.patch("vrcpilot.controls.mouse.base.time.sleep")
         impl = ImplMouse()
 
@@ -236,7 +258,7 @@ class TestMouseGuardWiring:
         sleep_spy.assert_not_called()
 
     def test_press_combo_left_to_right(self, mocker: MockerFixture):
-        mocker.patch("vrcpilot.controls.mouse.base.ensure_target")
+        mocker.patch("vrcpilot.controls.mouse.base.ensure_target", return_value=4242)
         impl = ImplMouse()
 
         impl.press(MouseButton.LEFT, MouseButton.RIGHT, MouseButton.MIDDLE)
@@ -248,7 +270,7 @@ class TestMouseGuardWiring:
         ]
 
     def test_press_with_no_args_defaults_to_left(self, mocker: MockerFixture):
-        mocker.patch("vrcpilot.controls.mouse.base.ensure_target")
+        mocker.patch("vrcpilot.controls.mouse.base.ensure_target", return_value=4242)
         impl = ImplMouse()
 
         impl.press()
@@ -256,7 +278,7 @@ class TestMouseGuardWiring:
         assert impl.calls == [("_do_press", {"button": MouseButton.LEFT})]
 
     def test_release_combo_reversed(self, mocker: MockerFixture):
-        mocker.patch("vrcpilot.controls.mouse.base.ensure_target")
+        mocker.patch("vrcpilot.controls.mouse.base.ensure_target", return_value=4242)
         impl = ImplMouse()
 
         impl.release(MouseButton.LEFT, MouseButton.RIGHT, MouseButton.MIDDLE)
@@ -270,7 +292,7 @@ class TestMouseGuardWiring:
         ]
 
     def test_release_with_no_args_defaults_to_left(self, mocker: MockerFixture):
-        mocker.patch("vrcpilot.controls.mouse.base.ensure_target")
+        mocker.patch("vrcpilot.controls.mouse.base.ensure_target", return_value=4242)
         impl = ImplMouse()
 
         impl.release()
@@ -278,7 +300,9 @@ class TestMouseGuardWiring:
         assert impl.calls == [("_do_release", {"button": MouseButton.LEFT})]
 
     def test_focus_guard_runs_once_per_combo(self, mocker: MockerFixture):
-        guard = mocker.patch("vrcpilot.controls.mouse.base.ensure_target")
+        guard = mocker.patch(
+            "vrcpilot.controls.mouse.base.ensure_target", return_value=4242
+        )
         mocker.patch("vrcpilot.controls.mouse.base.time.sleep")
         impl = ImplMouse()
 
@@ -297,12 +321,123 @@ class TestMouseGuardWiring:
         assert guard.call_count == 3
 
     def test_scroll_forwards_amount(self, mocker: MockerFixture):
-        mocker.patch("vrcpilot.controls.mouse.base.ensure_target")
+        mocker.patch("vrcpilot.controls.mouse.base.ensure_target", return_value=4242)
         impl = ImplMouse()
 
         impl.scroll(-3)
 
         assert impl.calls == [("_do_scroll", {"amount": -3})]
+
+
+# --- pid keyword routing tests --------------------------------------------
+
+
+class TestMousePidRouting:
+    """Verify ``pid`` flows correctly through every public method.
+
+    Covers four properties:
+
+    * ``focus=True`` -> ``ensure_target`` receives the same ``pid``.
+    * ``focus=False`` -> ``ensure_target`` is NOT called (hot-loop
+      fast path), and no other PID lookup is triggered for click /
+      press / release / scroll / relative-move.
+    * On :meth:`move`'s absolute path with ``focus=True``, the resolved
+      PID returned by ``ensure_target`` is reused for the window-rect
+      lookup so a single call cannot race against VRChat exiting.
+    * On :meth:`move`'s absolute path with ``focus=False``, the
+      caller's ``pid`` is forwarded to :meth:`_to_desktop` /
+      :func:`get_vrchat_window_rect` as-is.
+    """
+
+    def test_passes_pid_to_ensure_target_for_every_method(
+        self, mocker: MockerFixture, fake_vrchat_window: tuple[int, int, int, int]
+    ):
+        del fake_vrchat_window
+        guard = mocker.patch(
+            "vrcpilot.controls.mouse.base.ensure_target", return_value=12345
+        )
+        impl = ImplMouse()
+
+        impl.move(1, 2, pid=12345)
+        impl.click(pid=12345)
+        impl.press(pid=12345)
+        impl.release(pid=12345)
+        impl.scroll(1, pid=12345)
+
+        assert guard.call_count == 5
+        for call in guard.call_args_list:
+            assert call.kwargs == {"pid": 12345}
+
+    def test_raises_multiple_instances_when_no_pid_and_focus_true(
+        self, mocker: MockerFixture, fake_vrchat_window: tuple[int, int, int, int]
+    ):
+        # Multi-instance state must propagate from ensure_target's
+        # internal resolve_pid call instead of silently first-matching.
+        del fake_vrchat_window
+        mocker.patch(
+            "vrcpilot.controls.mouse.base.ensure_target",
+            side_effect=VRChatMultipleInstancesError([4242, 5151]),
+        )
+        impl = ImplMouse()
+
+        for action in (
+            lambda: impl.move(1, 2),
+            lambda: impl.click(),
+            lambda: impl.press(),
+            lambda: impl.release(),
+            lambda: impl.scroll(1),
+        ):
+            with pytest.raises(VRChatMultipleInstancesError):
+                action()
+
+    def test_move_focus_true_uses_resolved_pid_for_window_rect_lookup(
+        self, mocker: MockerFixture
+    ):
+        # ensure_target returns the resolved PID; Mouse.move must reuse
+        # it for the window rect lookup (rather than calling resolve_pid
+        # twice and racing against VRChat exiting).
+        mocker.patch("vrcpilot.controls.mouse.base.ensure_target", return_value=9999)
+        rect_spy = mocker.patch(
+            "vrcpilot.controls.mouse.base.get_vrchat_window_rect",
+            return_value=(200, 100, 1280, 720),
+        )
+        impl = ImplMouse()
+
+        impl.move(50, 30, pid=9999)
+
+        rect_spy.assert_called_once_with(pid=9999)
+
+    def test_move_focus_false_absolute_forwards_pid_to_rect_lookup(
+        self, mocker: MockerFixture
+    ):
+        # With focus=False, no resolve_pid is performed -- the caller's
+        # pid is forwarded as-is to _to_desktop / get_vrchat_window_rect.
+        rect_spy = mocker.patch(
+            "vrcpilot.controls.mouse.base.get_vrchat_window_rect",
+            return_value=(200, 100, 1280, 720),
+        )
+        impl = ImplMouse()
+
+        impl.move(50, 30, focus=False, pid=12345)
+
+        rect_spy.assert_called_once_with(pid=12345)
+
+    def test_move_focus_false_absolute_pid_none_forwards_none(
+        self, mocker: MockerFixture
+    ):
+        # focus=False + pid=None -> _to_desktop receives pid=None, and
+        # get_vrchat_window_rect(pid=None) is what triggers the (rare)
+        # late resolve_pid call. We just assert the forwarding shape
+        # here; the rect helper's own tests cover its resolve behaviour.
+        rect_spy = mocker.patch(
+            "vrcpilot.controls.mouse.base.get_vrchat_window_rect",
+            return_value=(200, 100, 1280, 720),
+        )
+        impl = ImplMouse()
+
+        impl.move(50, 30, focus=False)
+
+        rect_spy.assert_called_once_with(pid=None)
 
 
 # --- Window-local -> desktop translation tests ---------------------------
@@ -324,7 +459,7 @@ class TestMouseToDesktop:
         impl = ImplMouse()
         wx, wy, _, _ = fake_vrchat_window
 
-        assert impl._to_desktop(0, 0) == (wx, wy)
+        assert impl._to_desktop(0, 0, pid=4242) == (wx, wy)
 
     def test_positive_offsets_add_to_window_origin(
         self, fake_vrchat_window: tuple[int, int, int, int]
@@ -332,7 +467,7 @@ class TestMouseToDesktop:
         impl = ImplMouse()
         wx, wy, _, _ = fake_vrchat_window
 
-        assert impl._to_desktop(50, 30) == (wx + 50, wy + 30)
+        assert impl._to_desktop(50, 30, pid=4242) == (wx + 50, wy + 30)
 
     def test_negative_offsets_do_not_raise(
         self, fake_vrchat_window: tuple[int, int, int, int]
@@ -342,7 +477,7 @@ class TestMouseToDesktop:
         impl = ImplMouse()
         wx, wy, _, _ = fake_vrchat_window
 
-        assert impl._to_desktop(-5, -5) == (wx - 5, wy - 5)
+        assert impl._to_desktop(-5, -5, pid=4242) == (wx - 5, wy - 5)
 
     def test_offsets_beyond_window_size_do_not_raise(
         self, fake_vrchat_window: tuple[int, int, int, int]
@@ -350,7 +485,16 @@ class TestMouseToDesktop:
         impl = ImplMouse()
         wx, wy, _, _ = fake_vrchat_window
 
-        assert impl._to_desktop(10000, 10000) == (wx + 10000, wy + 10000)
+        assert impl._to_desktop(10000, 10000, pid=4242) == (wx + 10000, wy + 10000)
+
+    def test_accepts_pid_none(self, fake_vrchat_window: tuple[int, int, int, int]):
+        # _to_desktop must accept pid=None and forward it to
+        # get_vrchat_window_rect, which then takes responsibility for
+        # resolving (this is the focus=False + absolute-move path).
+        impl = ImplMouse()
+        wx, wy, _, _ = fake_vrchat_window
+
+        assert impl._to_desktop(10, 20, pid=None) == (wx + 10, wy + 20)
 
     def test_missing_window_raises_vrchat_not_running(self, mocker: MockerFixture):
         # No VRChat window -> _to_desktop cannot resolve an origin. The
@@ -362,7 +506,7 @@ class TestMouseToDesktop:
         impl = ImplMouse()
 
         with pytest.raises(VRChatNotRunningError, match="VRChat window not found"):
-            impl._to_desktop(0, 0)
+            impl._to_desktop(0, 0, pid=4242)
 
 
 class TestMouseMovePublicAbsolute:
@@ -379,7 +523,7 @@ class TestMouseMovePublicAbsolute:
         mocker: MockerFixture,
         fake_vrchat_window: tuple[int, int, int, int],
     ):
-        mocker.patch("vrcpilot.controls.mouse.base.ensure_target")
+        mocker.patch("vrcpilot.controls.mouse.base.ensure_target", return_value=4242)
         impl = ImplMouse()
         wx, wy, _, _ = fake_vrchat_window
 
@@ -391,7 +535,8 @@ class TestMouseMovePublicAbsolute:
 
     def test_missing_window_propagates_vrchat_not_running(self, mocker: MockerFixture):
         # focus=False so we bypass ensure_target and prove the failure
-        # comes from _to_desktop, not the guard.
+        # comes from _to_desktop, not the guard. The fake rect helper
+        # returns None to simulate "VRChat went away".
         mocker.patch(
             "vrcpilot.controls.mouse.base.get_vrchat_window_rect", return_value=None
         )
@@ -412,7 +557,7 @@ class TestMouseMovePublicRelative:
     """
 
     def test_does_not_call_get_vrchat_window_rect(self, mocker: MockerFixture):
-        mocker.patch("vrcpilot.controls.mouse.base.ensure_target")
+        mocker.patch("vrcpilot.controls.mouse.base.ensure_target", return_value=4242)
         rect_spy = mocker.patch(
             "vrcpilot.controls.mouse.base.get_vrchat_window_rect",
             # Deliberately return None: if the production code reads
@@ -429,7 +574,7 @@ class TestMouseMovePublicRelative:
         self, mocker: MockerFixture, fake_vrchat_window: tuple[int, int, int, int]
     ):
         del fake_vrchat_window  # not consulted on the relative path
-        mocker.patch("vrcpilot.controls.mouse.base.ensure_target")
+        mocker.patch("vrcpilot.controls.mouse.base.ensure_target", return_value=4242)
         impl = ImplMouse()
 
         impl.move(50, 30, relative=True)
@@ -520,7 +665,7 @@ class TestLinuxMouse:
         # press / release calls.
         from vrcpilot.controls.mouse.linux import LinuxMouse
 
-        mocker.patch("vrcpilot.controls.mouse.base.ensure_target")
+        mocker.patch("vrcpilot.controls.mouse.base.ensure_target", return_value=4242)
         mocker.patch("vrcpilot.controls.mouse.base.time.sleep")
 
         m = LinuxMouse()
@@ -538,7 +683,7 @@ class TestLinuxMouse:
     ):
         from vrcpilot.controls.mouse.linux import LinuxMouse
 
-        mocker.patch("vrcpilot.controls.mouse.base.ensure_target")
+        mocker.patch("vrcpilot.controls.mouse.base.ensure_target", return_value=4242)
 
         m = LinuxMouse()
         m.click(MouseButton.LEFT, count=0, duration=0.0)
@@ -649,7 +794,7 @@ class TestWin32Mouse:
         # the legacy ``click()`` shortcut on pydirectinput is gone.
         from vrcpilot.controls.mouse.windows import Win32Mouse
 
-        mocker.patch("vrcpilot.controls.mouse.base.ensure_target")
+        mocker.patch("vrcpilot.controls.mouse.base.ensure_target", return_value=4242)
         sleep_spy = mocker.patch("vrcpilot.controls.mouse.base.time.sleep")
 
         m = Win32Mouse()
@@ -667,7 +812,7 @@ class TestWin32Mouse:
     ):
         from vrcpilot.controls.mouse.windows import Win32Mouse
 
-        mocker.patch("vrcpilot.controls.mouse.base.ensure_target")
+        mocker.patch("vrcpilot.controls.mouse.base.ensure_target", return_value=4242)
         sleep_spy = mocker.patch("vrcpilot.controls.mouse.base.time.sleep")
 
         m = Win32Mouse()
@@ -694,7 +839,7 @@ class TestWin32Mouse:
     ):
         from vrcpilot.controls.mouse.windows import Win32Mouse
 
-        mocker.patch("vrcpilot.controls.mouse.base.ensure_target")
+        mocker.patch("vrcpilot.controls.mouse.base.ensure_target", return_value=4242)
         sleep_spy = mocker.patch("vrcpilot.controls.mouse.base.time.sleep")
 
         m = Win32Mouse()
@@ -722,7 +867,7 @@ class TestWin32Mouse:
     ):
         from vrcpilot.controls.mouse.windows import Win32Mouse
 
-        mocker.patch("vrcpilot.controls.mouse.base.ensure_target")
+        mocker.patch("vrcpilot.controls.mouse.base.ensure_target", return_value=4242)
 
         m = Win32Mouse()
         m.click(MouseButton.LEFT, count=0, duration=0.0)
@@ -791,7 +936,7 @@ class TestGetLazyInit:
     def test_returns_same_instance_on_repeated_calls(self, mocker: MockerFixture):
         # Replace the backend with a recording impl so the test runs
         # on every platform without needing inputtino or pydirectinput.
-        mocker.patch("vrcpilot.controls.mouse.base.ensure_target")
+        mocker.patch("vrcpilot.controls.mouse.base.ensure_target", return_value=4242)
         instance = ImplMouse()
         mouse_mod._instance = instance
 
@@ -825,12 +970,24 @@ class _SpyMouse(Mouse):
 
     @override
     def move(
-        self, x: int, y: int, *, relative: bool = False, focus: bool = True
+        self,
+        x: int,
+        y: int,
+        *,
+        relative: bool = False,
+        focus: bool = True,
+        pid: int | None = None,
     ) -> None:
         self.calls.append(
             (
                 "move",
-                {"x": x, "y": y, "relative": relative, "focus": focus},
+                {
+                    "x": x,
+                    "y": y,
+                    "relative": relative,
+                    "focus": focus,
+                    "pid": pid,
+                },
             )
         )
 
@@ -841,6 +998,7 @@ class _SpyMouse(Mouse):
         count: int = 1,
         duration: float = 0.0,
         focus: bool = True,
+        pid: int | None = None,
     ) -> None:
         self.calls.append(
             (
@@ -850,6 +1008,7 @@ class _SpyMouse(Mouse):
                     "count": count,
                     "duration": duration,
                     "focus": focus,
+                    "pid": pid,
                 },
             )
         )
@@ -859,20 +1018,24 @@ class _SpyMouse(Mouse):
         self,
         *buttons: MouseButton,
         focus: bool = True,
+        pid: int | None = None,
     ) -> None:
-        self.calls.append(("press", {"buttons": buttons, "focus": focus}))
+        self.calls.append(("press", {"buttons": buttons, "focus": focus, "pid": pid}))
 
     @override
     def release(
         self,
         *buttons: MouseButton,
         focus: bool = True,
+        pid: int | None = None,
     ) -> None:
-        self.calls.append(("release", {"buttons": buttons, "focus": focus}))
+        self.calls.append(("release", {"buttons": buttons, "focus": focus, "pid": pid}))
 
     @override
-    def scroll(self, amount: int, *, focus: bool = True) -> None:
-        self.calls.append(("scroll", {"amount": amount, "focus": focus}))
+    def scroll(
+        self, amount: int, *, focus: bool = True, pid: int | None = None
+    ) -> None:
+        self.calls.append(("scroll", {"amount": amount, "focus": focus, "pid": pid}))
 
     @override
     def _do_move(self, x: int, y: int, *, relative: bool) -> None:
@@ -899,12 +1062,18 @@ class TestModuleFunctions:
         spy = _SpyMouse()
         mouse_mod._instance = spy
 
-        mouse_mod.move(100, 200, relative=True, focus=False)
+        mouse_mod.move(100, 200, relative=True, focus=False, pid=9999)
 
         assert spy.calls == [
             (
                 "move",
-                {"x": 100, "y": 200, "relative": True, "focus": False},
+                {
+                    "x": 100,
+                    "y": 200,
+                    "relative": True,
+                    "focus": False,
+                    "pid": 9999,
+                },
             )
         ]
 
@@ -912,7 +1081,7 @@ class TestModuleFunctions:
         spy = _SpyMouse()
         mouse_mod._instance = spy
 
-        mouse_mod.click(MouseButton.RIGHT, count=2, duration=0.1, focus=False)
+        mouse_mod.click(MouseButton.RIGHT, count=2, duration=0.1, focus=False, pid=9999)
 
         assert spy.calls == [
             (
@@ -922,6 +1091,7 @@ class TestModuleFunctions:
                     "count": 2,
                     "duration": 0.1,
                     "focus": False,
+                    "pid": 9999,
                 },
             )
         ]
@@ -940,6 +1110,7 @@ class TestModuleFunctions:
                     "count": 1,
                     "duration": 0.05,
                     "focus": True,
+                    "pid": None,
                 },
             )
         ]
@@ -949,11 +1120,17 @@ class TestModuleFunctions:
         mouse_mod._instance = spy
 
         mouse_mod.press(MouseButton.MIDDLE)
-        mouse_mod.release(MouseButton.MIDDLE, focus=False)
+        mouse_mod.release(MouseButton.MIDDLE, focus=False, pid=9999)
 
         assert spy.calls == [
-            ("press", {"buttons": (MouseButton.MIDDLE,), "focus": True}),
-            ("release", {"buttons": (MouseButton.MIDDLE,), "focus": False}),
+            (
+                "press",
+                {"buttons": (MouseButton.MIDDLE,), "focus": True, "pid": None},
+            ),
+            (
+                "release",
+                {"buttons": (MouseButton.MIDDLE,), "focus": False, "pid": 9999},
+            ),
         ]
 
     def test_press_release_combo_forward(self):
@@ -966,11 +1143,19 @@ class TestModuleFunctions:
         assert spy.calls == [
             (
                 "press",
-                {"buttons": (MouseButton.LEFT, MouseButton.RIGHT), "focus": True},
+                {
+                    "buttons": (MouseButton.LEFT, MouseButton.RIGHT),
+                    "focus": True,
+                    "pid": None,
+                },
             ),
             (
                 "release",
-                {"buttons": (MouseButton.LEFT, MouseButton.RIGHT), "focus": True},
+                {
+                    "buttons": (MouseButton.LEFT, MouseButton.RIGHT),
+                    "focus": True,
+                    "pid": None,
+                },
             ),
         ]
 
@@ -978,6 +1163,6 @@ class TestModuleFunctions:
         spy = _SpyMouse()
         mouse_mod._instance = spy
 
-        mouse_mod.scroll(-2, focus=False)
+        mouse_mod.scroll(-2, focus=False, pid=9999)
 
-        assert spy.calls == [("scroll", {"amount": -2, "focus": False})]
+        assert spy.calls == [("scroll", {"amount": -2, "focus": False, "pid": 9999})]

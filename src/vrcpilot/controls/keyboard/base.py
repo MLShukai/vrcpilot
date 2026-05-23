@@ -129,48 +129,67 @@ class Keyboard(ABC):
     down left-to-right and come up in reverse so modifiers outlive the
     keys they modify (the ``Ctrl+C`` convention). Every public method
     raises :class:`TypeError` when called with zero keys.
+
+    Every public method also accepts a keyword-only ``pid`` to target a
+    specific VRChat instance when multiple are running. ``focus=False``
+    is an optimisation flag for hot loops where the caller already
+    ensures VRChat is foreground: it skips :func:`ensure_target`
+    entirely, including the internal :func:`vrcpilot.process.resolve_pid`
+    that scans ``psutil.process_iter`` (too expensive per frame).
     """
 
-    def press(self, *keys: Key, duration: float = 0.1, focus: bool = True) -> None:
+    def press(
+        self,
+        *keys: Key,
+        duration: float = 0.1,
+        focus: bool = True,
+        pid: int | None = None,
+    ) -> None:
         """Tap ``keys`` simultaneously, holding for ``duration`` seconds.
 
         The 0.1s default is tuned for Unity / VRChat — shorter holds
-        (including ``0.0``) get dropped in practice.
+        (including ``0.0``) get dropped in practice. ``pid`` selects
+        the target VRChat instance when multiple are running;
+        ``focus=False`` skips every PID lookup (hot-loop fast path).
         """
         if not keys:
             raise TypeError("press() requires at least one Key")
         if focus:
-            ensure_target()
+            ensure_target(pid=pid)
         for k in keys:
             self._do_down(k)
         time.sleep(duration)
         for k in reversed(keys):
             self._do_up(k)
 
-    def down(self, *keys: Key, focus: bool = True) -> None:
+    def down(self, *keys: Key, focus: bool = True, pid: int | None = None) -> None:
         """Press and hold ``keys`` until a matching :meth:`up`.
 
         Half-action; only valid within a single Python process. For a
         one-shot combo prefer ``press(Key.CTRL, Key.C)`` over the
-        explicit down / press / up triple.
+        explicit down / press / up triple. ``pid`` selects the target
+        VRChat instance when multiple are running; ``focus=False``
+        skips every PID lookup (hot-loop fast path).
         """
         if not keys:
             raise TypeError("down() requires at least one Key")
         if focus:
-            ensure_target()
+            ensure_target(pid=pid)
         for k in keys:
             self._do_down(k)
 
-    def up(self, *keys: Key, focus: bool = True) -> None:
+    def up(self, *keys: Key, focus: bool = True, pid: int | None = None) -> None:
         """Release ``keys`` previously pressed with :meth:`down`.
 
         Passing the same argument list to :meth:`down` and :meth:`up`
-        yields LIFO release order.
+        yields LIFO release order. ``pid`` selects the target VRChat
+        instance when multiple are running; ``focus=False`` skips every
+        PID lookup (hot-loop fast path).
         """
         if not keys:
             raise TypeError("up() requires at least one Key")
         if focus:
-            ensure_target()
+            ensure_target(pid=pid)
         for k in reversed(keys):
             self._do_up(k)
 

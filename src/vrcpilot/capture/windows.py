@@ -29,7 +29,6 @@ from windows_capture import (  # pyright: ignore[reportMissingTypeStubs]
     WindowsCapture as _WindowsCaptureRaw,
 )
 
-from vrcpilot.process import find_pid
 from vrcpilot.windows import find_vrchat_hwnd
 
 from .base import CaptureBackend
@@ -52,13 +51,9 @@ class Win32CaptureBackend(CaptureBackend):
     _frame_event: threading.Event
     _control: object  # ``windows_capture.CaptureControl`` (no stubs).
 
-    def __init__(self, *, frame_timeout: float) -> None:
+    def __init__(self, *, frame_timeout: float, pid: int) -> None:
         self._frame_timeout = frame_timeout
         self._closed = False
-
-        pid = find_pid()
-        if pid is None:
-            raise RuntimeError("VRChat is not running")
 
         hwnd = find_vrchat_hwnd(pid)
         if hwnd is None:

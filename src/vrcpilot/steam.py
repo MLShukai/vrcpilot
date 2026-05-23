@@ -1,4 +1,4 @@
-"""Steam executable discovery."""
+"""Steam executable discovery and runtime-state probing."""
 
 from __future__ import annotations
 
@@ -6,9 +6,46 @@ import shutil
 import sys
 from pathlib import Path
 
+import psutil
+
 
 class SteamNotFoundError(RuntimeError):
     """Raised when the Steam executable cannot be located."""
+
+
+class SteamNotRunningError(RuntimeError):
+    """Raised when ``launch(via_steam=True)`` is invoked on Linux but the Steam
+    client process is not running.
+
+    The Steam ``-applaunch`` route delegates display setup to the
+    already-running Steam desktop client; vrcpilot has no way to spin up the
+    full Steam UI itself (and doing so would be far outside this library's
+    scope). Surface the constraint to the caller so the user knows to start
+    Steam manually.
+    """
+
+
+#: Linux Steam desktop client main-process name. The Steam launcher shell
+#: script ``steam.sh`` execs into a native ``steam`` binary, so the
+#: top-level process visible to ``psutil`` is named ``steam``. Child
+#: helpers (``steamwebhelper``, ``steam-runtime-launcher-service``, ...) are
+#: deliberately excluded by an exact-equality match.
+_LINUX_STEAM_PROCESS_NAME: str = "steam"
+
+
+def is_steam_running() -> bool:
+    """Return ``True`` when the Steam desktop client is alive on this host.
+
+    Linux is the only platform where vrcpilot actually consults this (the
+    ``via_steam=True`` Linux preflight needs the user's Steam UI to already
+    be up because Steam is what owns the X/Wayland display attachment).
+    The implementation is platform-agnostic — it just enumerates processes
+    via :mod:`psutil` — but on Windows the answer is unused by vrcpilot.
+    """
+    for proc in psutil.process_iter(["name"]):
+        if proc.info["name"] == _LINUX_STEAM_PROCESS_NAME:
+            return True
+    return False
 
 
 _WINDOWS_STANDARD_PATHS: tuple[Path, ...] = (

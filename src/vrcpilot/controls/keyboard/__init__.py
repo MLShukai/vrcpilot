@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import sys
 
-from vrcpilot.controls.guard import ensure_target
+from vrcpilot.controls.guard import ensure_target as ensure_target
 from vrcpilot.controls.keyboard.base import Key, Keyboard
 
-__all__ = ["Key", "Keyboard", "down", "ensure_target", "press", "up"]
+__all__ = ["Key", "Keyboard", "down", "press", "up"]
 
 _instance: Keyboard | None = None
 
@@ -41,16 +41,21 @@ def _get() -> Keyboard:
     return _instance
 
 
-def press(*keys: Key, duration: float = 0.1, focus: bool = True) -> None:
+def press(
+    *keys: Key,
+    duration: float = 0.1,
+    focus: bool = True,
+    pid: int | None = None,
+) -> None:
     """See :meth:`Keyboard.press`."""
-    _get().press(*keys, duration=duration, focus=focus)
+    _get().press(*keys, duration=duration, focus=focus, pid=pid)
 
 
-def down(*keys: Key, focus: bool = True) -> None:
+def down(*keys: Key, focus: bool = True, pid: int | None = None) -> None:
     """See :meth:`Keyboard.down`."""
-    _get().down(*keys, focus=focus)
+    _get().down(*keys, focus=focus, pid=pid)
 
 
-def up(*keys: Key, focus: bool = True) -> None:
+def up(*keys: Key, focus: bool = True, pid: int | None = None) -> None:
     """See :meth:`Keyboard.up`."""
-    _get().up(*keys, focus=focus)
+    _get().up(*keys, focus=focus, pid=pid)

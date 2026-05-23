@@ -14,16 +14,11 @@ import win32api
 import win32con
 import win32gui
 
-from vrcpilot.process import find_pid
 from vrcpilot.windows import find_vrchat_hwnd
 
 
-def focus_window() -> bool:
+def focus_window(*, pid: int) -> bool:
     """Win32 implementation of :func:`vrcpilot.window.focus`."""
-    pid = find_pid()
-    if pid is None:
-        return False
-
     hwnd = find_vrchat_hwnd(pid)
     if hwnd is None:
         return False
@@ -49,12 +44,8 @@ def focus_window() -> bool:
     return True
 
 
-def is_window_foreground() -> bool:
+def is_window_foreground(*, pid: int) -> bool:
     """Win32 implementation of :func:`vrcpilot.window.is_foreground`."""
-    pid = find_pid()
-    if pid is None:
-        return False
-
     hwnd = find_vrchat_hwnd(pid)
     if hwnd is None:
         return False
@@ -65,12 +56,8 @@ def is_window_foreground() -> bool:
         return False
 
 
-def unfocus_window() -> bool:
+def unfocus_window(*, pid: int) -> bool:
     """Win32 implementation of :func:`vrcpilot.window.unfocus`."""
-    pid = find_pid()
-    if pid is None:
-        return False
-
     hwnd = find_vrchat_hwnd(pid)
     if hwnd is None:
         return False

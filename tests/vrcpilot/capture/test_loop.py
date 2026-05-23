@@ -63,6 +63,27 @@ class TestCaptureLoop:
         with pytest.raises(RuntimeError, match="VRChat is not running"):
             CaptureLoop(_noop, fps=30.0)
 
+    def test_pid_forwarded_to_capture(self, mocker: MockerFixture):
+        # ``pid`` is the disambiguator on multi-instance setups; the
+        # loop must forward it (along with ``frame_timeout``) to the
+        # internally-owned Capture so users see one consistent surface.
+        capture_cls = mocker.patch(
+            "vrcpilot.capture.loop.Capture", return_value=FakeCapture()
+        )
+        CaptureLoop(_noop, fps=30.0, frame_timeout=1.5, pid=98765)
+        capture_cls.assert_called_once_with(frame_timeout=1.5, pid=98765)
+
+    def test_pid_defaults_to_none(self, mocker: MockerFixture):
+        # Omitting ``pid`` must forward ``None`` so ``Capture`` (and
+        # downstream ``resolve_pid``) handles the auto-resolve path the
+        # same way as a direct call.
+        capture_cls = mocker.patch(
+            "vrcpilot.capture.loop.Capture", return_value=FakeCapture()
+        )
+        CaptureLoop(_noop, fps=30.0)
+        _args, kwargs = capture_cls.call_args
+        assert kwargs["pid"] is None
+
     # --- basic loop behaviour ------------------------------------------
 
     def test_invokes_callback_with_frames(self, mocker: MockerFixture):

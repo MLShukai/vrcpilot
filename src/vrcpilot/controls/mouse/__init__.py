@@ -8,14 +8,13 @@ from __future__ import annotations
 
 import sys
 
-from vrcpilot.controls.guard import ensure_target
+from vrcpilot.controls.guard import ensure_target as ensure_target
 from vrcpilot.controls.mouse.base import Mouse, MouseButton
 
 __all__ = [
     "Mouse",
     "MouseButton",
     "click",
-    "ensure_target",
     "move",
     "press",
     "release",
@@ -48,9 +47,16 @@ def _get() -> Mouse:
     return _instance
 
 
-def move(x: int, y: int, *, relative: bool = False, focus: bool = True) -> None:
+def move(
+    x: int,
+    y: int,
+    *,
+    relative: bool = False,
+    focus: bool = True,
+    pid: int | None = None,
+) -> None:
     """See :meth:`Mouse.move`."""
-    _get().move(x, y, relative=relative, focus=focus)
+    _get().move(x, y, relative=relative, focus=focus, pid=pid)
 
 
 def click(
@@ -58,21 +64,22 @@ def click(
     count: int = 1,
     duration: float = 0.0,
     focus: bool = True,
+    pid: int | None = None,
 ) -> None:
     """See :meth:`Mouse.click`."""
-    _get().click(*buttons, count=count, duration=duration, focus=focus)
+    _get().click(*buttons, count=count, duration=duration, focus=focus, pid=pid)
 
 
-def press(*buttons: MouseButton, focus: bool = True) -> None:
+def press(*buttons: MouseButton, focus: bool = True, pid: int | None = None) -> None:
     """See :meth:`Mouse.press`."""
-    _get().press(*buttons, focus=focus)
+    _get().press(*buttons, focus=focus, pid=pid)
 
 
-def release(*buttons: MouseButton, focus: bool = True) -> None:
+def release(*buttons: MouseButton, focus: bool = True, pid: int | None = None) -> None:
     """See :meth:`Mouse.release`."""
-    _get().release(*buttons, focus=focus)
+    _get().release(*buttons, focus=focus, pid=pid)
 
 
-def scroll(amount: int, *, focus: bool = True) -> None:
+def scroll(amount: int, *, focus: bool = True, pid: int | None = None) -> None:
     """See :meth:`Mouse.scroll`."""
-    _get().scroll(amount, focus=focus)
+    _get().scroll(amount, focus=focus, pid=pid)

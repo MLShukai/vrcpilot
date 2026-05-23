@@ -27,10 +27,23 @@ class SpeakerLoop:
 
     ``chunk_seconds`` is the inter-tick sleep, in seconds.
 
+    Args:
+        callback: Invoked with each ndarray ``Speaker.read`` returns.
+        chunk_seconds: Inter-tick sleep budget; must be ``> 0``.
+        read_timeout: Forwarded to the owned :class:`Speaker`; must be
+            ``> 0``.
+        pid: Target VRChat PID forwarded to :class:`Speaker`. When
+            omitted, :func:`vrcpilot.process.resolve_pid` picks the sole
+            running instance and raises
+            :class:`vrcpilot.process.VRChatMultipleInstancesError` if
+            more than one VRChat process is running.
+
     Raises:
         RuntimeError: The internal :class:`Speaker` cannot start.
         ValueError: ``chunk_seconds`` or ``read_timeout`` is not
             strictly positive.
+        VRChatMultipleInstancesError: ``pid`` omitted and multiple
+            instances are running.
     """
 
     _speaker: Speaker
@@ -48,6 +61,7 @@ class SpeakerLoop:
         *,
         chunk_seconds: float = 0.05,
         read_timeout: float = 2.0,
+        pid: int | None = None,
     ) -> None:
         if chunk_seconds <= 0:
             raise ValueError(f"chunk_seconds must be > 0 (got {chunk_seconds})")
@@ -60,7 +74,7 @@ class SpeakerLoop:
         self._exception = None
         self._lock = threading.Lock()
         # Speaker last so a ValueError above does not leak a backend.
-        self._speaker = Speaker(read_timeout=read_timeout)
+        self._speaker = Speaker(read_timeout=read_timeout, pid=pid)
 
     @property
     def is_running(self) -> bool:

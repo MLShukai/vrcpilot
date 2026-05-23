@@ -99,6 +99,28 @@ For `vrcpilot mic` and the `Mic` Python API on Linux, you also need:
 Then in VRChat's Audio settings, select `Monitor of VRCPilot Virtual Mic`
 as the microphone input.
 
+#### umu-launcher (for direct-spawn launch)
+
+When `vrcpilot launch` runs without `--via-steam` (the default on Linux), it
+direct-spawns VRChat under [umu-launcher](https://github.com/Open-Wine-Components/umu-launcher),
+so `umu-run` must be on `PATH`.
+
+On Debian / Ubuntu, grab the latest `.deb` from the official release page
+<https://github.com/Open-Wine-Components/umu-launcher/releases/latest> (look
+for an asset such as `python3-umu-launcher_*.deb`) and install it:
+
+```bash
+# Debian / Ubuntu — replace <file>.deb with the asset name from the release page
+sudo dpkg -i <file>.deb
+sudo apt-get install -f
+```
+
+For other distributions or building from source, see the official README:
+<https://github.com/Open-Wine-Components/umu-launcher>.
+
+Alternatively, pass `vrcpilot launch --via-steam` to let Steam manage Proton
+itself; in that mode umu-launcher is not required.
+
 ### macOS
 
 Not supported. `import vrcpilot` raises `ImportError` on `sys.platform`

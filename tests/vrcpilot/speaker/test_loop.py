@@ -76,7 +76,20 @@ class TestSpeakerLoop:
         )
         loop = SpeakerLoop(_noop, read_timeout=1.25)
         try:
-            spy.assert_called_once_with(read_timeout=1.25)
+            spy.assert_called_once_with(read_timeout=1.25, pid=None)
+        finally:
+            loop.close()
+
+    def test_forwards_pid_to_speaker(self, mocker: MockerFixture):
+        # Explicit pid pinning must reach the wrapped Speaker so that
+        # multi-instance VRChat setups can target the right process.
+        spy = mocker.patch(
+            "vrcpilot.speaker.loop.Speaker",
+            return_value=FakeSpeaker(),
+        )
+        loop = SpeakerLoop(_noop, pid=12345)
+        try:
+            spy.assert_called_once_with(read_timeout=2.0, pid=12345)
         finally:
             loop.close()
 
