@@ -9,17 +9,15 @@ from __future__ import annotations
 
 import sys
 
-from vrcpilot.process import find_pid
+from vrcpilot import process
+from vrcpilot.process import VRChatMultipleInstancesError, VRChatNotRunningError
 
 if sys.platform == "win32":
 
-    def _get_vrchat_rect_win32() -> tuple[int, int, int, int] | None:
-        """Win32 path: ``find_pid`` -> ``find_vrchat_hwnd`` -> ``get_window_rect``."""
+    def _get_vrchat_rect_win32(*, pid: int) -> tuple[int, int, int, int] | None:
+        """Win32 path: ``find_vrchat_hwnd(pid)`` -> ``get_window_rect``."""
         from vrcpilot.windows import find_vrchat_hwnd, get_window_rect
 
-        pid = find_pid()
-        if pid is None:
-            return None
         hwnd = find_vrchat_hwnd(pid)
         if hwnd is None:
             return None
@@ -28,13 +26,10 @@ if sys.platform == "win32":
 
 if sys.platform == "linux":
 
-    def _get_vrchat_rect_x11() -> tuple[int, int, int, int] | None:
+    def _get_vrchat_rect_x11(*, pid: int) -> tuple[int, int, int, int] | None:
         """X11 path: open display, locate the VRChat window, query geometry."""
         from vrcpilot.linux import find_vrchat_window, get_window_rect, open_x11_display
 
-        pid = find_pid()
-        if pid is None:
-            return None
         display = open_x11_display()
         if display is None:
             return None
@@ -47,18 +42,33 @@ if sys.platform == "linux":
             display.close()
 
 
-def get_vrchat_window_rect() -> tuple[int, int, int, int] | None:
+def get_vrchat_window_rect(
+    *, pid: int | None = None
+) -> tuple[int, int, int, int] | None:
     """Return the VRChat window ``(x, y, width, height)`` in desktop pixels.
 
-    ``None`` when VRChat is not running, the window cannot be located,
-    or the geometry query fails. Raises :class:`NotImplementedError`
-    outside Windows / Linux (rather than returning ``None``) so direct
-    callers without their own platform guard fail loudly.
+    *pid* selects the target instance when multiple VRChat processes are
+    running. When omitted, :func:`vrcpilot.process.resolve_pid` chooses the
+    sole running instance.
+
+    Returns ``None`` when VRChat is not running, the window cannot be located,
+    or the geometry query fails. Raises
+    :class:`vrcpilot.process.VRChatMultipleInstancesError` when *pid* is
+    omitted and multiple VRChat processes are running, so callers can prompt
+    for ``--pid`` rather than silently choosing one. Raises
+    :class:`NotImplementedError` outside Windows / Linux.
     """
+    try:
+        resolved = process.resolve_pid(pid)
+    except VRChatMultipleInstancesError:
+        raise
+    except VRChatNotRunningError:
+        return None
+
     if sys.platform == "win32":
-        return _get_vrchat_rect_win32()
+        return _get_vrchat_rect_win32(pid=resolved)
     if sys.platform == "linux":
-        return _get_vrchat_rect_x11()
+        return _get_vrchat_rect_x11(pid=resolved)
     raise NotImplementedError(
         f"get_vrchat_window_rect() is not supported on {sys.platform}"
     )
