@@ -30,3 +30,18 @@ stash/restore cycle picks them up.
 Also: when CHANGELOG-style edits need to anticipate a concurrent fixer's
 work, write them based on **known plan content** (provided in the
 instruction), not by reading the live working tree mid-flight.
+
+**Edit-tool silent revert under concurrent stash/restore:** A concurrent
+fixer's `pre-commit` (which does `git stash` -> hook run -> `git stash pop`)
+can revert your Edit-tool changes between your Edit call and the next
+inspection — the tool reports success but the file content shown in the
+next system-reminder is the pre-Edit state, and `git diff` shows nothing.
+When you suspect this:
+
+1. Run `git diff <file>` immediately after Edit; an empty diff confirms the
+   revert happened.
+2. Fall back to the Write tool with the full intended file content. Write
+   appears to win the race more reliably than Edit (single-shot full
+   overwrite vs read-modify-write).
+3. Run `git diff` again to confirm the Write took effect, then commit
+   immediately — every minute of delay invites another revert.
