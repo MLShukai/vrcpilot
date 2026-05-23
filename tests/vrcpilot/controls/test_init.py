@@ -1,12 +1,13 @@
 """Tests for :mod:`vrcpilot.controls` public surface.
 
-The subpackage and the top-level package must expose the same core
-symbols: ``ensure_target``, :class:`VRChatNotFocusedError`, and the
-:class:`Key` enum. Wiring them in two places is what lets users write
-either ``vrcpilot.ensure_target`` or ``from vrcpilot.controls import
-ensure_target`` interchangeably; if either re-export drifts away from
-the canonical implementation, tests in other modules that
-``mocker.patch`` one of them would silently miss the other call site.
+The subpackage exposes ``ensure_target``,
+:class:`VRChatNotFocusedError`, and the :class:`Key` enum. Of these,
+:class:`VRChatNotFocusedError` and :class:`Key` are also re-exported at
+the top level (callers commonly ``except vrcpilot.VRChatNotFocusedError``
+and reference key names as ``vrcpilot.Key.A``); ``ensure_target`` is
+the focus-guard primitive used implicitly by the keyboard / mouse /
+clipboard wrappers (``focus=True`` by default) and stays scoped to
+:mod:`vrcpilot.controls` so the top-level namespace stays narrow.
 
 ``VRChatNotRunningError`` is no longer re-exported under
 ``vrcpilot.controls`` -- it lives on :mod:`vrcpilot.process` (where the
@@ -47,8 +48,14 @@ class TestSubpackageSurface:
 
 
 class TestTopLevelReexport:
-    def test_ensure_target_is_same_object(self):
-        assert vrcpilot.ensure_target is vrcpilot.controls.ensure_target
+    def test_ensure_target_not_at_top_level(self):
+        # ``ensure_target`` is the focus-guard primitive used by the
+        # keyboard / mouse / clipboard wrappers (which default to
+        # ``focus=True``). Callers reach it via
+        # ``vrcpilot.controls.ensure_target`` when they need direct
+        # control; it is intentionally kept off the top-level namespace.
+        assert not hasattr(vrcpilot, "ensure_target")
+        assert "ensure_target" not in vrcpilot.__all__
 
     def test_not_focused_error_is_same_object(self):
         assert vrcpilot.VRChatNotFocusedError is vrcpilot.controls.VRChatNotFocusedError

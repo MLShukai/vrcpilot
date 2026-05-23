@@ -121,7 +121,7 @@ ______________________________________________________________________
 
 ## Screen capture
 
-### `vrcpilot.Capture`
+### `vrcpilot.capture.Capture`
 
 ```python
 class Capture:
@@ -444,7 +444,7 @@ ______________________________________________________________________
 
 ## OCR
 
-### `vrcpilot.OCRWord`
+### `vrcpilot.ocr.OCRWord`
 
 ```python
 @dataclass(frozen=True)
@@ -459,7 +459,7 @@ class OCRWord:
     def center(self) -> tuple[float, float]: ...
 ```
 
-### `vrcpilot.OCRResult`
+### `vrcpilot.ocr.OCRResult`
 
 ```python
 @dataclass(frozen=True, eq=False)
@@ -470,7 +470,7 @@ class OCRResult:
 
 Bundles a `Screenshot` with the words detected on it. All `OCRWord.polygon` / `OCRWord.bbox` values are **window-local** (origin at the VRChat window's top-left), which is the same frame `mouse.move()` consumes — no translation step is required.
 
-### `vrcpilot.OCREngine`
+### `vrcpilot.ocr.OCREngine`
 
 ```python
 class OCREngine(ABC):
@@ -480,7 +480,7 @@ class OCREngine(ABC):
 
 Swap in your own backend by implementing this ABC.
 
-### `vrcpilot.RapidOCREngine`
+### `vrcpilot.ocr.RapidOCREngine`
 
 ```python
 class RapidOCREngine(OCREngine):
@@ -509,7 +509,7 @@ ______________________________________________________________________
 
 ## Image-template detection
 
-### `vrcpilot.Detection`
+### `vrcpilot.detect.Detection`
 
 ```python
 @dataclass(frozen=True)
@@ -525,7 +525,7 @@ class Detection:
     def center(self) -> tuple[float, float]: ...
 ```
 
-### `vrcpilot.DetectResult`
+### `vrcpilot.detect.DetectResult`
 
 ```python
 @dataclass(frozen=True, eq=False)
@@ -537,7 +537,7 @@ class DetectResult:
 
 All `Detection.polygon` / `Detection.bbox` values are **window-local**, matching `OCRResult` and the frame `mouse.move()` accepts.
 
-### `vrcpilot.DetectEngine`
+### `vrcpilot.detect.DetectEngine`
 
 ```python
 class DetectEngine(ABC):
@@ -549,7 +549,7 @@ class DetectEngine(ABC):
     ) -> Sequence[Detection]: ...
 ```
 
-### `vrcpilot.TemplateDetectEngine`
+### `vrcpilot.detect.TemplateDetectEngine`
 
 ```python
 class TemplateDetectEngine(DetectEngine):
@@ -634,7 +634,7 @@ def release(*buttons: MouseButton, focus: bool = True) -> None: ...
 
 `press` / `release` are paired half-actions for chord clicks. As with `keyboard.down` / `up`, they are meaningful only within a single Python process.
 
-### `vrcpilot.ensure_target`
+### `vrcpilot.controls.ensure_target`
 
 ```python
 def ensure_target() -> None: ...

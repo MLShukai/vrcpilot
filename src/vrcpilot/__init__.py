@@ -1,10 +1,11 @@
 """Automation toolkit for VRChat.
 
-Pixel capture is split between :class:`Capture` (focus-free streaming for
-video / ML) and :func:`take_screenshot` (one focused shot with on-screen
-geometry, for GUI automation). :func:`ocr` consumes a captured
-:class:`Screenshot` and runs OCR through a swappable :class:`OCREngine`,
-keeping capture and recognition as orthogonal steps.
+Pixel capture is split between :class:`vrcpilot.capture.Capture` (focus-
+free streaming for video / ML) and :func:`take_screenshot` (one focused
+shot with on-screen geometry, for GUI automation). :func:`ocr` consumes
+a captured :class:`Screenshot` and runs OCR through a swappable
+:class:`vrcpilot.ocr.OCREngine`, keeping capture and recognition as
+orthogonal steps.
 """
 
 import sys
@@ -18,68 +19,53 @@ if sys.platform not in ("win32", "linux"):
 from importlib import metadata
 
 from vrcpilot import clipboard
-from vrcpilot.capture import Capture, CaptureLoop
+from vrcpilot.capture import CaptureLoop
 from vrcpilot.controls import (
     Key,
     MouseButton,
     VRChatNotFocusedError,
-    ensure_target,
     keyboard,
     mouse,
 )
-from vrcpilot.detect import (
-    DetectEngine,
-    Detection,
-    DetectResult,
-    TemplateDetectEngine,
-    detect,
-)
+from vrcpilot.detect import detect
 from vrcpilot.mic import Mic, MicDeviceNotFoundError
 
 # Importing ``ocr`` here shadows the ``vrcpilot.ocr`` submodule attribute
 # so ``vrcpilot.ocr(shot)`` calls the function; submodule imports still
 # resolve via ``sys.modules``. Pinned by ``test_init.py``.
-from vrcpilot.ocr import OCREngine, OCRResult, OCRWord, RapidOCREngine, ocr
-from vrcpilot.osc import AvatarParameters, InputController, OscSender
+from vrcpilot.ocr import ocr
+from vrcpilot.osc import OscSender
 from vrcpilot.process import (
     OscConfig,
-    UmuLauncherNotFoundError,
-    VRChatAlreadyRunningError,
-    VRChatDisplayNotAvailableError,
-    VRChatLauncherNotFoundError,
     VRChatMultipleInstancesError,
     VRChatNotRunningError,
     find_pid,
     find_pids,
     launch,
-    resolve_pid,
     terminate,
 )
 from vrcpilot.screenshot import Screenshot, take_screenshot
-from vrcpilot.speaker import AudioCallback, Speaker, SpeakerLoop
-from vrcpilot.steam import SteamNotFoundError, SteamNotRunningError
+from vrcpilot.steam import SteamNotFoundError
 from vrcpilot.window import focus, is_foreground, unfocus
 
 #: Resolved from distribution metadata so it stays in sync with
 #: ``pyproject.toml`` without being hard-coded here.
 __version__ = metadata.version(__name__.replace("_", "-"))
 
+#: Top-level namespace is intentionally narrow: only user-facing entry
+#: points live here. Implementation classes, ABCs, engine backends, and
+#: internal helpers stay on their subpackages
+#: (``vrcpilot.capture.Capture``, ``vrcpilot.ocr.OCREngine``,
+#: ``vrcpilot.osc.InputController``, ``vrcpilot.process.resolve_pid``,
+#: etc.). Pinned by ``tests/vrcpilot/test_init.py``.
 __all__ = [
     "__version__",
-    "AudioCallback",
-    "AvatarParameters",
-    "Capture",
     "CaptureLoop",
     "clipboard",
     "detect",
-    "DetectEngine",
-    "DetectResult",
-    "Detection",
-    "ensure_target",
     "find_pid",
     "find_pids",
     "focus",
-    "InputController",
     "is_foreground",
     "Key",
     "keyboard",
@@ -89,26 +75,13 @@ __all__ = [
     "mouse",
     "MouseButton",
     "ocr",
-    "OCREngine",
-    "OCRResult",
-    "OCRWord",
     "OscConfig",
     "OscSender",
-    "RapidOCREngine",
-    "resolve_pid",
     "Screenshot",
-    "Speaker",
-    "SpeakerLoop",
     "SteamNotFoundError",
-    "SteamNotRunningError",
     "take_screenshot",
-    "TemplateDetectEngine",
     "terminate",
-    "UmuLauncherNotFoundError",
     "unfocus",
-    "VRChatAlreadyRunningError",
-    "VRChatDisplayNotAvailableError",
-    "VRChatLauncherNotFoundError",
     "VRChatMultipleInstancesError",
     "VRChatNotFocusedError",
     "VRChatNotRunningError",

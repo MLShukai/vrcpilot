@@ -28,6 +28,7 @@ from PIL import Image
 
 import vrcpilot
 from vrcpilot import Key, Screenshot, clipboard, keyboard, mouse
+from vrcpilot.detect import Detection
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _helpers  # noqa: E402
@@ -166,7 +167,7 @@ def _open_osc_debug_panel() -> None:
     # Self Receive, etc.) each with its own toggle, so picking the
     # highest-confidence detection is wrong -- match the toggle whose
     # row center is closest to the OSC Debug Panel label.
-    def _row_distance(det: vrcpilot.Detection) -> int:
+    def _row_distance(det: Detection) -> int:
         _tx, ty, _tw, th = det.bbox
         return abs((ty + th // 2) - panel_y)
 

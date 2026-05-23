@@ -20,11 +20,23 @@ class TestOscPackageAll:
 
 
 class TestTopLevelExposure:
-    def test_top_level_exports_osc_classes(self):
-        assert vrcpilot.OscSender is osc_pkg.OscSender
-        assert vrcpilot.InputController is osc_pkg.InputController
-        assert vrcpilot.AvatarParameters is osc_pkg.AvatarParameters
+    """Only ``OscSender`` (the low-level transport) is re-exported.
 
-    def test_classes_listed_in_top_level_all(self):
-        for name in ("OscSender", "InputController", "AvatarParameters"):
-            assert name in vrcpilot.__all__
+    ``InputController`` and ``AvatarParameters`` are higher-level
+    composers built on top of ``OscSender`` and remain accessible via
+    :mod:`vrcpilot.osc` to keep the top-level namespace narrow.
+    """
+
+    def test_top_level_exports_osc_sender(self):
+        assert vrcpilot.OscSender is osc_pkg.OscSender
+
+    def test_osc_sender_listed_in_top_level_all(self):
+        assert "OscSender" in vrcpilot.__all__
+
+    def test_input_controller_not_top_level(self):
+        assert not hasattr(vrcpilot, "InputController")
+        assert "InputController" not in vrcpilot.__all__
+
+    def test_avatar_parameters_not_top_level(self):
+        assert not hasattr(vrcpilot, "AvatarParameters")
+        assert "AvatarParameters" not in vrcpilot.__all__
