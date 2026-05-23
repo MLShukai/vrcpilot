@@ -12,6 +12,7 @@ from vrcpilot.process import (
     VRChatLauncherNotFoundError,
 )
 from vrcpilot.process._executable import (
+    _linux_steam_paths,
     _parse_steam_library_paths,
     find_umu_launcher,
     find_vrchat_launcher,
@@ -42,6 +43,43 @@ class TestParseSteamLibraryPaths:
 
     def test_returns_empty_when_file_missing(self, tmp_path: Path) -> None:
         assert _parse_steam_library_paths(tmp_path / "nope.vdf") == []
+
+
+class TestSteamPathsHelpersReturnRootsOnly:
+    """The platform helpers must enumerate Steam install **roots** only.
+
+    Library expansion via ``libraryfolders.vdf`` is centralised in
+    :func:`find_vrchat_launcher`; the helpers must not perform that
+    expansion themselves, otherwise the responsibility for Steam library
+    discovery would live in two places at once.
+    """
+
+    def test_linux_helper_does_not_expand_vdf(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Make ``~/.steam/steam`` resolve under tmp_path and plant a vdf
+        # that references a library OUTSIDE the returned set. If the helper
+        # were to expand the vdf, that library path would leak into the
+        # returned list.
+        monkeypatch.setenv("HOME", str(tmp_path))
+        steam_root = tmp_path / ".steam" / "steam"
+        vdf = steam_root / "steamapps" / "libraryfolders.vdf"
+        vdf.parent.mkdir(parents=True)
+        library = tmp_path / "external-library"
+        vdf.write_text(
+            f'"libraryfolders" {{ "0" {{ "path" "{library.as_posix()}" }} }}',
+            encoding="utf-8",
+        )
+
+        result = _linux_steam_paths()
+
+        # Roots only — no external library leak from vdf expansion.
+        assert library not in result
+        # And the canonical roots are exactly what the helper returns.
+        assert result == [
+            Path("~/.steam/steam").expanduser(),
+            Path("~/.local/share/Steam").expanduser(),
+        ]
 
 
 class TestFindVrchatLauncher:
@@ -82,6 +120,13 @@ class TestFindVrchatLauncher:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        """``find_vrchat_launcher`` itself expands ``libraryfolders.vdf``.
+
+        Verifies the centralised expansion: the platform helper returns
+        only the Steam *root*, and ``find_vrchat_launcher`` is the one that
+        reads the root's vdf and probes each listed library for
+        ``launch.exe``.
+        """
         library = tmp_path / "lib"
         launch_exe = library / "steamapps" / "common" / "VRChat" / "launch.exe"
         launch_exe.parent.mkdir(parents=True)
@@ -95,6 +140,37 @@ class TestFindVrchatLauncher:
             f'"libraryfolders" {{ "0" {{ "path" "{library.as_posix()}" }} }}',
             encoding="utf-8",
         )
+
+        if sys.platform == "linux":
+            monkeypatch.setattr(
+                "vrcpilot.process._executable._linux_steam_paths",
+                lambda: [steam_root],
+            )
+        else:
+            monkeypatch.setattr(
+                "vrcpilot.process._executable._windows_steam_paths",
+                lambda: [steam_root],
+            )
+        monkeypatch.delenv("VRCHAT_LAUNCHER", raising=False)
+        result = find_vrchat_launcher()
+        assert result == launch_exe
+
+    def test_falls_back_to_root_when_vdf_missing(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Without a vdf the Steam root itself is treated as a library.
+
+        Some installs (fresh, hand-edited, or non-standard layouts) lack
+        a ``libraryfolders.vdf``. In that case ``launch.exe`` is expected
+        directly under the root's ``steamapps/common/VRChat/`` tree.
+        """
+        steam_root = tmp_path / "steam"
+        launch_exe = steam_root / "steamapps" / "common" / "VRChat" / "launch.exe"
+        launch_exe.parent.mkdir(parents=True)
+        launch_exe.write_bytes(b"")
+        # Deliberately do NOT create ``steamapps/libraryfolders.vdf``.
 
         if sys.platform == "linux":
             monkeypatch.setattr(

@@ -41,11 +41,14 @@ def _parse_steam_library_paths(vdf_path: Path) -> list[Path]:
 
 
 def _windows_steam_paths() -> list[Path]:
-    """Return candidate Steam install roots on Windows.
+    """Return candidate Steam install **roots** on Windows.
 
-    Combines registry lookup, libraryfolders.vdf entries, and standard
-    install paths in that priority order. The list may contain
-    duplicates; callers de-duplicate while preserving order.
+    Responsibility is limited to enumerating Steam install roots from
+    ``HKCU\\Software\\Valve\\Steam\\SteamPath`` plus the standard installer
+    paths. Expanding each root's ``steamapps/libraryfolders.vdf`` into the
+    real list of Steam libraries is the caller's job
+    (:func:`find_vrchat_launcher`), so there is exactly one place that
+    knows how Steam library discovery works.
     """
     candidates: list[Path] = []
     # ``sys.platform == "win32"`` narrows so pyright resolves the Windows-only
@@ -64,12 +67,6 @@ def _windows_steam_paths() -> list[Path]:
         except (ImportError, OSError, FileNotFoundError):
             pass
 
-    # Expand via libraryfolders.vdf
-    for root in list(candidates):
-        vdf = root / "steamapps" / "libraryfolders.vdf"
-        if vdf.is_file():
-            candidates.extend(_parse_steam_library_paths(vdf))
-
     candidates.extend(
         [
             Path(r"C:\Program Files (x86)\Steam"),
@@ -80,16 +77,15 @@ def _windows_steam_paths() -> list[Path]:
 
 
 def _linux_steam_paths() -> list[Path]:
-    """Return candidate Steam install roots on Linux."""
-    candidates: list[Path] = [
+    """Return candidate Steam install **roots** on Linux.
+
+    Mirrors :func:`_windows_steam_paths`: only enumerate install roots and
+    leave ``libraryfolders.vdf`` expansion to the caller.
+    """
+    return [
         Path("~/.steam/steam").expanduser(),
         Path("~/.local/share/Steam").expanduser(),
     ]
-    for root in list(candidates):
-        vdf = root / "steamapps" / "libraryfolders.vdf"
-        if vdf.is_file():
-            candidates.extend(_parse_steam_library_paths(vdf))
-    return candidates
 
 
 def find_vrchat_launcher(override: Path | None = None) -> Path:
@@ -135,31 +131,37 @@ def find_vrchat_launcher(override: Path | None = None) -> Path:
     else:
         roots = []
 
-    # ``roots`` are Steam install roots, but each one may also reference
-    # additional library locations through its ``steamapps/libraryfolders.vdf``.
-    # Expand here so callers (and the platform-specific helpers) need not
-    # duplicate the discovery — every reachable Steam library is then probed
-    # for ``steamapps/common/VRChat/launch.exe``.
-    expanded: list[Path] = []
-    seen_roots: set[Path] = set()
+    # Single source of truth for Steam library discovery: each ``root``
+    # returned by the platform helper is a Steam *install root*, and the
+    # real library locations live in ``steamapps/libraryfolders.vdf`` under
+    # that root. The helpers deliberately do **not** expand the vdf so the
+    # expansion happens in exactly one place. If the vdf is missing (fresh
+    # install or non-standard layout) we fall back to ``root`` itself, which
+    # also holds ``steamapps/common/VRChat/launch.exe`` for single-library
+    # setups.
+    seen_libraries: set[Path] = set()
+    libraries: list[Path] = []
+
+    def _add_library(library: Path) -> None:
+        if library in seen_libraries:
+            return
+        seen_libraries.add(library)
+        libraries.append(library)
+
     for root in roots:
-        if root in seen_roots:
-            continue
-        seen_roots.add(root)
-        expanded.append(root)
         vdf = root / "steamapps" / "libraryfolders.vdf"
         if vdf.is_file():
             for library in _parse_steam_library_paths(vdf):
-                if library not in seen_roots:
-                    seen_roots.add(library)
-                    expanded.append(library)
+                _add_library(library)
+        else:
+            _add_library(root)
 
-    seen: set[Path] = set()
-    for root in expanded:
-        candidate = root / _LAUNCHER_RELATIVE
-        if candidate in seen:
+    seen_candidates: set[Path] = set()
+    for library in libraries:
+        candidate = library / _LAUNCHER_RELATIVE
+        if candidate in seen_candidates:
             continue
-        seen.add(candidate)
+        seen_candidates.add(candidate)
         result = _accept(candidate)
         if result is not None:
             return result
