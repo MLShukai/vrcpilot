@@ -1,11 +1,4 @@
-"""VRChat ``launch.exe`` の auto-discovery。
-
-VRChat の起動は EAC ラッパー ``launch.exe`` を経由する必要がある (VRChat.exe を
-直接叩くと offline mode になる)。Steam library にインストールされた
-``steamapps/common/VRChat/launch.exe`` をプラットフォーム別に探す。
-
-Linux 限定の umu-launcher 探索は :mod:`vrcpilot.process.linux` に分離。
-"""
+"""VRChat ``launch.exe`` / Steam library 探索 helper。"""
 
 from __future__ import annotations
 
@@ -24,13 +17,7 @@ _LAUNCHER_ENV_VAR: str = "VRCHAT_LAUNCHER"
 
 
 def parse_steam_library_paths(vdf_path: Path) -> list[Path]:
-    """``libraryfolders.vdf`` から各 library の root path を抽出。
-
-    フル VDF パーサは過剰なので、``"path" "<value>"`` の正規表現抽出だけ行う。
-    値が Windows 形式のバックスラッシュ込みパスでも、Path(...) に渡せば後段の
-    ``is_file()`` で適切に判定される (Linux 上の Path で Windows パスを
-    解釈しようとすると false になり、結果として candidate がスキップされる)。
-    """
+    """Extract path entries from a Steam ``libraryfolders.vdf``."""
     try:
         text = vdf_path.read_text(encoding="utf-8", errors="replace")
     except OSError:
@@ -102,25 +89,21 @@ def find_vrchat_launcher(override: Path | None = None) -> Path:
             ``launch.exe`` file. The message includes the candidates tried so
             the user can pick the right ``--vrchat-launcher`` value.
     """
-    tried: list[Path] = []
-
-    def _accept(candidate: Path) -> Path | None:
-        tried.append(candidate)
-        return candidate if candidate.is_file() else None
-
     if override is not None:
-        result = _accept(override)
-        if result is not None:
-            return result
+        if override.is_file():
+            return override
         raise VRChatLauncherNotFoundError(
             f"VRChat launch.exe not found at override path: {override}"
         )
 
+    tried: list[Path] = []
+
     env_value = os.environ.get(_LAUNCHER_ENV_VAR)
     if env_value:
-        result = _accept(Path(env_value))
-        if result is not None:
-            return result
+        env_path = Path(env_value)
+        tried.append(env_path)
+        if env_path.is_file():
+            return env_path
 
     if sys.platform == "win32":
         roots = windows_steam_paths()
@@ -129,40 +112,20 @@ def find_vrchat_launcher(override: Path | None = None) -> Path:
     else:
         roots = []
 
-    # Single source of truth for Steam library discovery: each ``root``
-    # returned by the platform helper is a Steam *install root*, and the
-    # real library locations live in ``steamapps/libraryfolders.vdf`` under
-    # that root. The helpers deliberately do **not** expand the vdf so the
-    # expansion happens in exactly one place. If the vdf is missing (fresh
-    # install or non-standard layout) we fall back to ``root`` itself, which
-    # also holds ``steamapps/common/VRChat/launch.exe`` for single-library
-    # setups.
-    seen_libraries: set[Path] = set()
+    # Each ``root`` is a Steam install root; the libraries it owns live in
+    # ``steamapps/libraryfolders.vdf``. Centralising the vdf expansion here
+    # keeps Steam library discovery in one place. When the vdf is missing
+    # (fresh install / non-standard layout) we treat the root itself as a
+    # library so single-library setups still resolve.
     libraries: list[Path] = []
-
-    def _add_library(library: Path) -> None:
-        if library in seen_libraries:
-            return
-        seen_libraries.add(library)
-        libraries.append(library)
-
     for root in roots:
         vdf = root / "steamapps" / "libraryfolders.vdf"
-        if vdf.is_file():
-            for library in parse_steam_library_paths(vdf):
-                _add_library(library)
-        else:
-            _add_library(root)
+        libraries.extend(parse_steam_library_paths(vdf) if vdf.is_file() else [root])
 
-    seen_candidates: set[Path] = set()
-    for library in libraries:
-        candidate = library / _LAUNCHER_RELATIVE
-        if candidate in seen_candidates:
-            continue
-        seen_candidates.add(candidate)
-        result = _accept(candidate)
-        if result is not None:
-            return result
+    for candidate in dict.fromkeys(lib / _LAUNCHER_RELATIVE for lib in libraries):
+        tried.append(candidate)
+        if candidate.is_file():
+            return candidate
 
     raise VRChatLauncherNotFoundError(
         "VRChat launch.exe could not be located in any Steam library. "
