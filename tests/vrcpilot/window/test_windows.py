@@ -23,6 +23,14 @@ import pytest
 if sys.platform != "win32":
     pytest.skip("vrcpilot.window.windows is Windows-only", allow_module_level=True)
 
+from tests.helpers import has_working_tkinter  # noqa: E402
+
+if not has_working_tkinter():
+    pytest.skip(
+        "tkinter cannot initialize Tk on this host (broken Tcl/Tk install)",
+        allow_module_level=True,
+    )
+
 import tkinter
 from collections.abc import Iterator
 

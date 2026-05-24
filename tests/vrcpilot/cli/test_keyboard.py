@@ -14,10 +14,24 @@ the e2e suite. Argparse-only assertions through
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 
+from tests.helpers import has_uinput
 from vrcpilot.cli import build_parser, main
 from vrcpilot.controls.keyboard import Key
+
+#: Skip the focus-guard tests when the platform backend cannot be
+#: instantiated. On Linux ``LinuxKeyboard.__init__`` calls
+#: ``inputtino.Keyboard()`` which fails with ``RuntimeError: Permission
+#: denied`` when ``/dev/uinput`` is not writable (typical for default
+#: CI runners). On Windows ``Win32Keyboard`` has no equivalent eager
+#: dependency so the marker is a no-op there.
+_requires_real_backend = pytest.mark.skipif(
+    sys.platform == "linux" and not has_uinput(),
+    reason="LinuxKeyboard needs /dev/uinput write access (inputtino)",
+)
 
 
 class TestKeyboardArgparse:
@@ -63,6 +77,7 @@ class TestKeyboardArgparse:
         assert capsys.readouterr().err != ""
 
 
+@_requires_real_backend
 class TestKeyboardNoVRChat:
     """The focus guard fires when no VRChat is running."""
 

@@ -145,6 +145,40 @@ requires_uinput = pytest.mark.skipif(
     not has_uinput(), reason="/dev/uinput not writable"
 )
 
+
+@functools.lru_cache(maxsize=1)
+def has_working_tkinter() -> bool:
+    """Return ``True`` when ``tkinter.Tk()`` can construct and destroy a root
+    window.
+
+    Probes by attempting a Tk root and capturing ``TclError`` /
+    ``RuntimeError`` (Windows CI runners sometimes ship a broken Tcl/Tk
+    install where ``_tkinter.create`` raises
+    ``invalid command name "tcl_findLibrary"``; Linux without
+    ``DISPLAY`` raises ``couldn't connect to display``). Cached for the
+    same reason as :func:`has_x11_display` -- the probe opens a window
+    on Linux and is non-trivial.
+    """
+    try:
+        import tkinter
+
+        root = tkinter.Tk()
+        root.destroy()
+    except Exception:
+        return False
+    return True
+
+
+#: Skip a test when ``tkinter`` cannot instantiate a Tk root.
+#:
+#: Use on tests that spawn a real Tk window as a stand-in for VRChat's
+#: main window on the appropriate Win32 / X11 backend. When skipped the
+#: integration-real path is no longer exercised; rely on
+#: ``tests/e2e/`` for end-to-end confirmation.
+requires_working_tkinter = pytest.mark.skipif(
+    not has_working_tkinter(), reason="tkinter cannot initialize Tk on this host"
+)
+
 #: Re-exported polling defaults for the e2e ``_helpers`` import surface.
 #: Both constants forward to :mod:`vrcpilot.process` so changing one
 #: place updates the whole project.
