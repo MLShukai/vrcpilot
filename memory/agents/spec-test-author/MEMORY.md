@@ -11,3 +11,5 @@ shared な前提 ([テスト戦略 4 区分と新モック方針](../../feedback
 - [Avoid object-typed fixture parameters](feedback_fixture_typing.md) — mock fixture パラメータに `: object` を付けない (pyright ignore ノイズの原因)
 - [自前 ABC fake は単一消費者でも tests/fakes/ に集約する](feedback_shared_fakes_in_tests_fakes.md) — 自前 ABC は単一消費者でも `tests/fakes/`。3rd-party 表面 fake は新規追加禁止
 - [3rd-party 表面 fake は cleanup target / 自前 ABC fake は使用面のみミラー](feedback_fakes_mirror_production.md) — 3rd-party 表面 fake は新規禁止 + 既存も整理対象。自前 ABC fake は production 呼び出し面のみミラー
+- [unused PID で dispatch + backend を end-to-end 駆動する](feedback_unused_pid_integration_pattern.md) — `pid=99_999_999` で `resolve_pid` short-circuit → 実 backend が走り False/None を返す。internal モック不要
+- [tkinter stub window で X11 / Win32 backend を integration-real テスト](feedback_tkinter_stub_window_pattern.md) — `tkinter.Tk()` を spawn、PID match で find_vrchat\_\* が拾える。FakeXDisplay / mocker.patch 不要
