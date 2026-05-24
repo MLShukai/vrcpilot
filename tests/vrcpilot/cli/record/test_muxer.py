@@ -1,4 +1,28 @@
-"""Tests for :mod:`vrcpilot.cli.record.muxer`."""
+"""Integration-real tests for :mod:`vrcpilot.cli.record.muxer`.
+
+Each muxer subclass owns a real :class:`av.container.OutputContainer`,
+so the test boundary is the muxer's contract with PyAV / ffmpeg. We
+write real frames + audio chunks, then either re-open the file with
+``av.open`` (Mp4 / Wav) or re-parse the byte stream from a
+:class:`io.BytesIO` (Mkv). No mocks: PyAV is exercised end-to-end.
+
+The unifying contract:
+
+* Construction with neither ``video`` nor ``audio`` raises
+  :class:`ValueError` (no muxer should ever emit a zero-stream
+  container).
+* Non-positive ``fps`` raises :class:`ValueError`.
+* ``write_video`` validates shape ``(H, W, 3)`` and dtype ``uint8``.
+* ``write_audio`` validates shape ``(N, CHANNELS)`` and dtype
+  ``float32``.
+* The first video frame locks the size; subsequent frames with a
+  different size raise :class:`ValueError`.
+* ``close`` is idempotent.
+* ``__exit__`` calls ``close``; calls after ``close`` raise
+  ``RuntimeError`` (file muxers).
+* :class:`MkvStdoutMuxer` flushes but never closes a caller-owned
+  ``stream`` (caller owns the lifecycle).
+"""
 
 from __future__ import annotations
 
@@ -39,7 +63,7 @@ def _audio_chunk(*, n: int = 1024) -> NDArray[np.float32]:
 
 
 class TestBaseMuxer:
-    def test_cannot_instantiate_abstract_base(self) -> None:
+    def test_cannot_instantiate_abstract_base(self):
         with pytest.raises(TypeError):
             BaseMuxer()  # type: ignore[abstract]
 
@@ -50,7 +74,7 @@ class TestBaseMuxer:
 
 
 class TestMp4FileMuxer:
-    def test_video_only_writes_one_video_stream(self, tmp_path: Path) -> None:
+    def test_video_only_writes_one_video_stream(self, tmp_path: Path):
         out = tmp_path / "video.mp4"
         with Mp4FileMuxer(out, fps=30.0, video=True, audio=False) as muxer:
             for _ in range(5):
@@ -58,6 +82,9 @@ class TestMp4FileMuxer:
             assert muxer.frame_count == 5
             assert muxer.sample_count == 0
 
+        # Re-open and verify the container actually has the expected
+        # stream layout. Demuxing the bytes is the strongest assertion
+        # we can make about what was written.
         container = av.open(str(out), mode="r")
         try:
             assert len(container.streams.video) == 1
@@ -68,7 +95,7 @@ class TestMp4FileMuxer:
         finally:
             container.close()
 
-    def test_video_plus_audio_writes_two_streams(self, tmp_path: Path) -> None:
+    def test_video_plus_audio_writes_two_streams(self, tmp_path: Path):
         out = tmp_path / "av.mp4"
         with Mp4FileMuxer(out, fps=30.0, video=True, audio=True) as muxer:
             for _ in range(3):
@@ -85,7 +112,7 @@ class TestMp4FileMuxer:
         finally:
             container.close()
 
-    def test_audio_only_mp4_writes_one_audio_stream(self, tmp_path: Path) -> None:
+    def test_audio_only_mp4_writes_one_audio_stream(self, tmp_path: Path):
         out = tmp_path / "audio.mp4"
         with Mp4FileMuxer(out, fps=30.0, video=False, audio=True) as muxer:
             muxer.write_audio(_audio_chunk(n=4096))
@@ -97,16 +124,16 @@ class TestMp4FileMuxer:
         finally:
             container.close()
 
-    def test_video_false_audio_false_raises(self, tmp_path: Path) -> None:
+    def test_video_false_audio_false_raises(self, tmp_path: Path):
         with pytest.raises(ValueError, match="at least one of video or audio"):
             Mp4FileMuxer(tmp_path / "x.mp4", fps=30.0, video=False, audio=False)
 
     @pytest.mark.parametrize("fps", [0.0, -1.0, -30.0])
-    def test_nonpositive_fps_raises(self, tmp_path: Path, fps: float) -> None:
+    def test_nonpositive_fps_raises(self, tmp_path: Path, fps: float):
         with pytest.raises(ValueError, match="fps must be positive"):
             Mp4FileMuxer(tmp_path / "x.mp4", fps=fps, video=True, audio=False)
 
-    def test_video_frame_dtype_must_be_uint8(self, tmp_path: Path) -> None:
+    def test_video_frame_dtype_must_be_uint8(self, tmp_path: Path):
         muxer = Mp4FileMuxer(tmp_path / "v.mp4", fps=30.0, video=True, audio=False)
         try:
             bad = np.zeros((48, 64, 3), dtype=np.float32)
@@ -125,7 +152,7 @@ class TestMp4FileMuxer:
     )
     def test_video_frame_shape_must_be_hxwx3(
         self, tmp_path: Path, shape: tuple[int, ...]
-    ) -> None:
+    ):
         muxer = Mp4FileMuxer(tmp_path / "v.mp4", fps=30.0, video=True, audio=False)
         try:
             bad = np.zeros(shape, dtype=np.uint8)
@@ -134,7 +161,7 @@ class TestMp4FileMuxer:
         finally:
             muxer.close()
 
-    def test_video_frame_size_change_mid_stream_raises(self, tmp_path: Path) -> None:
+    def test_video_frame_size_change_mid_stream_raises(self, tmp_path: Path):
         muxer = Mp4FileMuxer(tmp_path / "v.mp4", fps=30.0, video=True, audio=False)
         try:
             muxer.write_video(_video_frame(height=48, width=64))
@@ -143,7 +170,7 @@ class TestMp4FileMuxer:
         finally:
             muxer.close()
 
-    def test_audio_chunk_dtype_must_be_float32(self, tmp_path: Path) -> None:
+    def test_audio_chunk_dtype_must_be_float32(self, tmp_path: Path):
         muxer = Mp4FileMuxer(tmp_path / "a.mp4", fps=30.0, video=False, audio=True)
         try:
             bad = np.zeros((1024, 2), dtype=np.int16)
@@ -156,13 +183,13 @@ class TestMp4FileMuxer:
         "shape",
         [
             (1024,),  # 1-D, missing channel axis
-            (1024, 1),  # mono — wrong channel count
-            (1024, 3),  # surround — wrong channel count
+            (1024, 1),  # mono -- wrong channel count
+            (1024, 3),  # surround -- wrong channel count
         ],
     )
     def test_audio_chunk_shape_must_be_n_by_channels(
         self, tmp_path: Path, shape: tuple[int, ...]
-    ) -> None:
+    ):
         muxer = Mp4FileMuxer(tmp_path / "a.mp4", fps=30.0, video=False, audio=True)
         try:
             bad = np.zeros(shape, dtype=np.float32)
@@ -171,7 +198,7 @@ class TestMp4FileMuxer:
         finally:
             muxer.close()
 
-    def test_context_manager_closes_on_exit(self, tmp_path: Path) -> None:
+    def test_context_manager_closes_on_exit(self, tmp_path: Path):
         out = tmp_path / "ctx.mp4"
         with Mp4FileMuxer(out, fps=30.0, video=True, audio=False) as muxer:
             muxer.write_video(_video_frame())
@@ -180,14 +207,14 @@ class TestMp4FileMuxer:
         with pytest.raises(RuntimeError, match="closed"):
             muxer.write_video(_video_frame())
 
-    def test_close_is_idempotent(self, tmp_path: Path) -> None:
+    def test_close_is_idempotent(self, tmp_path: Path):
         muxer = Mp4FileMuxer(tmp_path / "idem.mp4", fps=30.0, video=True, audio=False)
         muxer.write_video(_video_frame())
         muxer.close()
         # Second call must be a no-op rather than raising.
         muxer.close()
 
-    def test_write_video_when_video_false_raises(self, tmp_path: Path) -> None:
+    def test_write_video_when_video_false_raises(self, tmp_path: Path):
         muxer = Mp4FileMuxer(tmp_path / "noa.mp4", fps=30.0, video=False, audio=True)
         try:
             with pytest.raises(RuntimeError, match="video=False"):
@@ -195,7 +222,7 @@ class TestMp4FileMuxer:
         finally:
             muxer.close()
 
-    def test_write_audio_when_audio_false_raises(self, tmp_path: Path) -> None:
+    def test_write_audio_when_audio_false_raises(self, tmp_path: Path):
         muxer = Mp4FileMuxer(tmp_path / "nov.mp4", fps=30.0, video=True, audio=False)
         try:
             with pytest.raises(RuntimeError, match="audio=False"):
@@ -210,19 +237,21 @@ class TestMp4FileMuxer:
 
 
 class TestWavFileMuxer:
-    def test_writes_48k_stereo_s16_wav(self, tmp_path: Path) -> None:
+    def test_writes_48k_stereo_s16_wav(self, tmp_path: Path):
         out = tmp_path / "audio.wav"
         with WavFileMuxer(out) as muxer:
             muxer.write_audio(np.zeros((48000, 2), dtype=np.float32))
             assert muxer.sample_count == 48000
 
+        # Re-open via the stdlib wave module; if pcm_s16le 48kHz stereo
+        # is actually what was written, these field reads succeed.
         with wave.open(str(out), "rb") as w:
             assert w.getnchannels() == 2
             assert w.getframerate() == 48000
             assert w.getsampwidth() == 2
             assert w.getnframes() == 48000
 
-    def test_write_video_always_raises(self, tmp_path: Path) -> None:
+    def test_write_video_always_raises(self, tmp_path: Path):
         muxer = WavFileMuxer(tmp_path / "v.wav")
         try:
             with pytest.raises(RuntimeError, match="does not accept video"):
@@ -230,23 +259,23 @@ class TestWavFileMuxer:
         finally:
             muxer.close()
 
-    def test_close_is_idempotent(self, tmp_path: Path) -> None:
+    def test_close_is_idempotent(self, tmp_path: Path):
         muxer = WavFileMuxer(tmp_path / "i.wav")
         muxer.write_audio(_audio_chunk())
         muxer.close()
         muxer.close()
 
-    def test_frame_count_is_always_zero(self, tmp_path: Path) -> None:
+    def test_frame_count_is_always_zero(self, tmp_path: Path):
         with WavFileMuxer(tmp_path / "fc.wav") as muxer:
             muxer.write_audio(_audio_chunk())
             assert muxer.frame_count == 0
 
-    def test_empty_chunk_is_noop(self, tmp_path: Path) -> None:
+    def test_empty_chunk_is_noop(self, tmp_path: Path):
         with WavFileMuxer(tmp_path / "empty.wav") as muxer:
             muxer.write_audio(np.zeros((0, 2), dtype=np.float32))
             assert muxer.sample_count == 0
 
-    def test_audio_validation_rejects_bad_input(self, tmp_path: Path) -> None:
+    def test_audio_validation_rejects_bad_input(self, tmp_path: Path):
         muxer = WavFileMuxer(tmp_path / "bad.wav")
         try:
             with pytest.raises(ValueError, match="shape"):
@@ -270,9 +299,9 @@ _MKV_MAGIC = bytes.fromhex("1A45DFA3")
 class _NonCloseableBytesIO(io.BytesIO):
     """A :class:`BytesIO` that records whether ``close`` was called.
 
-    Used to assert that :class:`MkvStdoutMuxer` does **not** close
-    a stream we hand it — the caller owns the lifecycle of any
-    stream they passed in via ``stream=``.
+    Used to assert that :class:`MkvStdoutMuxer` does NOT close a stream
+    we hand it -- the caller owns the lifecycle of any stream they
+    passed in via ``stream=``.
     """
 
     closed_by_muxer: bool = False
@@ -283,7 +312,7 @@ class _NonCloseableBytesIO(io.BytesIO):
 
 
 class TestMkvStdoutMuxer:
-    def test_av_combination_emits_mkv_magic_to_stream(self) -> None:
+    def test_av_combination_emits_mkv_magic_and_two_streams(self):
         buf = io.BytesIO()
         with MkvStdoutMuxer(fps=30.0, video=True, audio=True, stream=buf) as muxer:
             for _ in range(3):
@@ -294,8 +323,8 @@ class TestMkvStdoutMuxer:
 
         data = buf.getvalue()
         assert data[:4] == _MKV_MAGIC
-        # Re-open as a Matroska container and verify both streams are
-        # present.
+        # Re-open and verify both streams are present in the demuxed
+        # container.
         container = av.open(io.BytesIO(data), mode="r")
         try:
             assert len(container.streams.video) == 1
@@ -303,7 +332,7 @@ class TestMkvStdoutMuxer:
         finally:
             container.close()
 
-    def test_video_only_mkv(self) -> None:
+    def test_video_only_mkv(self):
         buf = io.BytesIO()
         with MkvStdoutMuxer(fps=30.0, video=True, audio=False, stream=buf) as muxer:
             muxer.write_video(_video_frame())
@@ -315,7 +344,7 @@ class TestMkvStdoutMuxer:
         finally:
             container.close()
 
-    def test_audio_only_mkv(self) -> None:
+    def test_audio_only_mkv(self):
         buf = io.BytesIO()
         with MkvStdoutMuxer(fps=30.0, video=False, audio=True, stream=buf) as muxer:
             muxer.write_audio(_audio_chunk(n=2048))
@@ -327,29 +356,29 @@ class TestMkvStdoutMuxer:
         finally:
             container.close()
 
-    def test_default_stream_is_sys_stdout_buffer(self) -> None:
+    def test_default_stream_is_sys_stdout_buffer(self):
         # ``sys.stdout.buffer`` is a readonly descriptor on the live
-        # stdout object so we can't swap it via mocker. Instead, build
+        # stdout object so we cannot swap it via mocker. Instead, build
         # the muxer with no ``stream`` kwarg, inspect the private
         # ``_stream`` slot for identity with the interpreter's binary
-        # stdout, then close without ever writing — so we do not
-        # actually emit mkv bytes to the test runner's stdout.
+        # stdout, then close without ever writing -- so we do not emit
+        # mkv bytes to the test runner's stdout.
         muxer = MkvStdoutMuxer(fps=30.0, video=True, audio=False)
         try:
             assert muxer._stream is sys.stdout.buffer  # noqa: SLF001
         finally:
             muxer.close()
 
-    def test_video_false_audio_false_raises(self) -> None:
+    def test_video_false_audio_false_raises(self):
         with pytest.raises(ValueError, match="at least one of video or audio"):
             MkvStdoutMuxer(fps=30.0, video=False, audio=False)
 
     @pytest.mark.parametrize("fps", [0.0, -1.0])
-    def test_nonpositive_fps_raises(self, fps: float) -> None:
+    def test_nonpositive_fps_raises(self, fps: float):
         with pytest.raises(ValueError, match="fps must be positive"):
             MkvStdoutMuxer(fps=fps, video=True, audio=False)
 
-    def test_stream_is_not_closed_by_muxer(self) -> None:
+    def test_stream_is_not_closed_by_muxer(self):
         buf = _NonCloseableBytesIO()
         with MkvStdoutMuxer(fps=30.0, video=True, audio=False, stream=buf) as muxer:
             muxer.write_video(_video_frame())
@@ -359,13 +388,13 @@ class TestMkvStdoutMuxer:
         assert buf.closed_by_muxer is False
         assert not buf.closed
 
-    def test_close_is_idempotent(self) -> None:
+    def test_close_is_idempotent(self):
         muxer = MkvStdoutMuxer(fps=30.0, video=True, audio=False, stream=io.BytesIO())
         muxer.write_video(_video_frame())
         muxer.close()
         muxer.close()
 
-    def test_video_frame_size_change_mid_stream_raises(self) -> None:
+    def test_video_frame_size_change_mid_stream_raises(self):
         muxer = MkvStdoutMuxer(fps=30.0, video=True, audio=False, stream=io.BytesIO())
         try:
             muxer.write_video(_video_frame(height=48, width=64))
