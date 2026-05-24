@@ -7,6 +7,10 @@ ensures VRChat is killed before and after the run regardless of outcome.
 The CLI exposes machine-readable output (PIDs on their own lines, exit
 code 0 = running / 1 = absent), so this scenario validates the contract
 that shell pipelines depend on (e.g. ``pid=$(vrcpilot launch)``).
+
+Run with::
+
+    just e2e-test cli_launch_terminate
 """
 
 from __future__ import annotations

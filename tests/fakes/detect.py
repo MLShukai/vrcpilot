@@ -1,4 +1,12 @@
-"""Detect-related test doubles."""
+"""Detect-related test doubles.
+
+Stand-in for :class:`vrcpilot.detect.DetectEngine` used by Phase 2C /
+Phase 3 tests where exercising the real OpenCV ``TM_CCOEFF_NORMED``
+backend is irrelevant -- ``FakeDetectEngine`` returns a pre-baked list
+of :class:`Detection` from every :meth:`detect` call regardless of the
+input image, while recording call counts and the last ``image`` /
+``query`` so tests can assert what the engine saw.
+"""
 
 from __future__ import annotations
 

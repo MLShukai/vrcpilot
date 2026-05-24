@@ -3,8 +3,11 @@
 Opens the Launch Pad (Escape), screenshots it, then runs
 :func:`vrcpilot.detect.detect` for every PNG under
 ``tests/e2e/fixtures/detect_icons/``. Fails if any icon goes
-undetected. Run with ``just e2e-test detect``; artifacts are written
-to ``_e2e_artifacts/``.
+undetected; artifacts are written to ``_e2e_artifacts/``.
+
+Run with::
+
+    just e2e-test detect
 """
 
 from __future__ import annotations
