@@ -12,7 +12,6 @@ those branches are e2e-only here.
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
@@ -206,16 +205,27 @@ class TestFindVrchatLauncherNotFound:
         with pytest.raises(VRChatLauncherNotFoundError, match="Tried"):
             find_vrchat_launcher()
 
+    @only_linux
     def test_env_var_pointing_at_missing_file_does_not_short_circuit(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
         # The env var path is best-effort: a missing target must fall
-        # through to library discovery, not abort. Verify by setting a
-        # missing env-var target and an empty HOME (Linux) -- discovery
-        # then completes the chain to the NotFound error.
-        monkeypatch.setenv("VRCHAT_LAUNCHER", str(tmp_path / "nope.exe"))
-        if sys.platform == "linux":
-            monkeypatch.setenv("HOME", str(tmp_path / "empty-home"))
+        # through to library discovery, not abort. Pin HOME at an empty
+        # tmp_path so the real ``linux_steam_paths()`` returns roots
+        # that exist on disk but contain no launcher -- the discovery
+        # chain reaches the NotFound error without any internal helper
+        # being monkeypatched. Windows' registry-based auto-detect has
+        # no HOME-style operation and is covered by e2e instead.
+        monkeypatch.setenv("HOME", str(tmp_path))
+        missing = tmp_path / "nope.exe"
+        monkeypatch.setenv("VRCHAT_LAUNCHER", str(missing))
 
-        with pytest.raises(VRChatLauncherNotFoundError):
+        with pytest.raises(VRChatLauncherNotFoundError) as excinfo:
             find_vrchat_launcher()
+
+        # "fall-through happened" の証拠を pin する: env var の path も
+        # discovery 候補も "Tried" に列挙されること。env var で abort
+        # していたら discovery 候補は現れない。
+        msg = str(excinfo.value)
+        assert str(missing) in msg
+        assert ".steam/steam" in msg
