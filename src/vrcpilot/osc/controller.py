@@ -131,8 +131,10 @@ class InputController:
         self._hold("/input/Run", active)
 
     def hold_voice(self, active: bool = True) -> None:
-        """Press/release ``/input/Voice`` for push-to-mute (vs toggle
-        :meth:`voice`)."""
+        """Press/release ``/input/Voice`` for push-to-mute (cf.
+
+        :meth:`voice`).
+        """
         self._hold("/input/Voice", active)
 
     def move_forward(self, active: bool = True) -> None:

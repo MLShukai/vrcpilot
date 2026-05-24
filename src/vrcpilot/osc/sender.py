@@ -23,14 +23,23 @@ FLOAT_RANGE: tuple[float, float] = (-1.0, 1.0)
 class OscSender:
     """Single-socket OSC client for VRChat.
 
-    Defaults target a local VRChat with factory OSC settings. Inject
-    ``client`` to bypass UDP construction in tests.
+    Defaults target a local VRChat with factory OSC settings.
 
     Typical usage::
 
         sender = vrcpilot.OscSender()
         sender.controller().jump()
         sender.avatar_parameters().send_bool("MyParam", True)
+
+    Args:
+        host: Address VRChat listens on. The default matches VRChat's
+            factory OSC config and rarely needs to change.
+        port: UDP port VRChat listens on. Default ``9000`` matches the
+            factory OSC config.
+        client: Test seam — pass a pre-built ``SimpleUDPClient`` (or a
+            stand-in) to bypass real UDP construction. ``host`` and
+            ``port`` are then only retained for the eponymous
+            properties; they no longer influence delivery.
     """
 
     def __init__(
@@ -77,8 +86,8 @@ class OscSender:
         lo, hi = FLOAT_RANGE
         if not lo <= value <= hi:
             raise ValueError(f"float value must be in [{lo}, {hi}], got {value}")
-        # cast to float so that int callers (subtype of float in PEP 484)
-        # still produce an OSC ``f`` tag rather than ``i``.
+        # ``int`` is a subtype of ``float`` per PEP 484; without this cast an
+        # int caller would land on the OSC ``i`` tag instead of ``f``.
         self._client.send_message(address, float(value))
 
     # -- High-level views (fresh instance per call) ---------------------
