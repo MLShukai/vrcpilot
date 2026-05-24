@@ -1,4 +1,4 @@
-"""Tests for :mod:`vrcpilot.screenshot`.
+"""Unit + integration-real tests for :mod:`vrcpilot.screenshot`.
 
 The autouse ``_no_real_vrchat`` fixture in :mod:`tests.conftest` leaves
 :func:`vrcpilot.process.find_pids` returning ``[]``, so

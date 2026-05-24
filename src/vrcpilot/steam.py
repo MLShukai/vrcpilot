@@ -14,14 +14,12 @@ class SteamNotFoundError(RuntimeError):
 
 
 class SteamNotRunningError(RuntimeError):
-    """Raised when ``launch(via_steam=True)`` is invoked on Linux but the Steam
-    client process is not running.
+    """Linux ``launch(via_steam=True)`` requires a Steam UI already running.
 
-    The Steam ``-applaunch`` route delegates display setup to the
-    already-running Steam desktop client; vrcpilot has no way to spin up the
-    full Steam UI itself (and doing so would be far outside this library's
-    scope). Surface the constraint to the caller so the user knows to start
-    Steam manually.
+    ``-applaunch`` delegates display attachment to the running Steam
+    desktop client; vrcpilot cannot bring the Steam UI up on its own
+    (well outside this library's scope). The error signals to callers
+    that the user must start Steam manually first.
     """
 
 
@@ -34,13 +32,12 @@ _LINUX_STEAM_PROCESS_NAME: str = "steam"
 
 
 def is_steam_running() -> bool:
-    """Return ``True`` when the Steam desktop client is alive on this host.
+    """Report whether the Steam desktop client process is alive on this host.
 
-    Linux is the only platform where vrcpilot actually consults this (the
-    ``via_steam=True`` Linux preflight needs the user's Steam UI to already
-    be up because Steam is what owns the X/Wayland display attachment).
-    The implementation is platform-agnostic — it just enumerates processes
-    via :mod:`psutil` — but on Windows the answer is unused by vrcpilot.
+    Consulted only by the Linux ``via_steam=True`` preflight: Steam
+    owns the X/Wayland display attachment for ``-applaunch``, so a
+    missing UI guarantees launch failure. The probe runs on every
+    platform but Windows callers ignore the result.
     """
     for proc in psutil.process_iter(["name"]):
         if proc.info["name"] == _LINUX_STEAM_PROCESS_NAME:
@@ -92,11 +89,19 @@ def _find_steam_on_linux() -> Path:
 
 
 def find_steam_executable(override: Path | None = None) -> Path:
-    """Return the verified Steam executable path for the current platform.
+    """Resolve a Steam executable path that callers can spawn directly.
 
-    When ``override`` is given it is validated and returned without
-    auto-detection. Raises :class:`SteamNotFoundError` when ``override``
-    does not exist, auto-detection fails, or the platform is unsupported.
+    Args:
+        override: Pre-validated path the caller wants used verbatim
+            (e.g. a non-standard install). Auto-detection is bypassed
+            entirely; the path is only checked for ``is_file()`` so
+            ``launch()`` does not later fail with a confusing
+            ``FileNotFoundError`` from ``subprocess``.
+
+    Raises:
+        SteamNotFoundError: ``override`` was given but does not exist,
+            auto-detection found no Steam install on this host, or the
+            current platform is neither Windows nor Linux.
     """
     if override is not None:
         if override.is_file():

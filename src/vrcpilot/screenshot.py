@@ -62,26 +62,27 @@ class Screenshot:
     captured_at: datetime
 
     def save(self, png_path: Path | None = None) -> str:
-        """Serialise the screenshot to YAML, optionally backed by a PNG file.
+        """Serialise to YAML so the CLI can pipe a screenshot to disk or
+        stdout.
 
-        Round-trippable through :meth:`load`. Two emission modes share
-        one return type so callers can always pipe the result to stdout
-        or a ``.yaml`` file:
+        Round-trippable through :meth:`load`. The single return type
+        covers two emission modes so callers can always tee the result
+        to a ``.yaml`` file or stdout, regardless of whether the PNG
+        sits on disk or travels inline.
 
-        * **path mode** (``png_path`` given): the PNG is written to
-          ``png_path`` and the YAML records the ``resolve()``-d absolute
-          ``path:`` reference. Keys appear in the order ``path``, ``x``,
-          ``y``, ``width``, ``height``, ``monitor_index``,
-          ``captured_at`` — the historical ``vrcpilot screenshot`` CLI
-          contract. The parent directory must already exist (callers do
-          their own ``mkdir(parents=True)``).
-        * **inline mode** (``png_path is None``): no file is touched;
-          the PNG bytes are base64-encoded under ``image:``. To keep
-          the metadata grep-friendly the (potentially very long)
-          ``image`` value is emitted **last**.
+        Args:
+            png_path: When provided, the PNG is written there and the
+                YAML records its ``resolve()``-d absolute path (key
+                order ``path, x, y, width, height, monitor_index,
+                captured_at`` — the historical CLI contract). When
+                omitted, the PNG bytes are base64-encoded under
+                ``image:`` which is emitted **last** so metadata stays
+                grep-friendly.
 
-        Raises :class:`FileNotFoundError` in path mode when ``png_path``'s
-        parent directory does not exist (propagated from PIL).
+        Raises:
+            FileNotFoundError: Path mode only; ``png_path``'s parent
+                directory does not exist. Propagated from PIL — the
+                caller is expected to ``mkdir(parents=True)`` first.
         """
         if png_path is not None:
             Image.fromarray(self.image).save(png_path)
@@ -110,19 +111,21 @@ class Screenshot:
 
     @classmethod
     def load(cls, text: str) -> Screenshot:
-        """Restore a :class:`Screenshot` from YAML text written by ``save``.
+        """Restore a :class:`Screenshot` from YAML produced by :meth:`save`.
 
-        Accepts both shapes emitted by :meth:`save` (``path:`` references
-        a PNG on disk; ``image:`` carries base64 PNG bytes inline).
-        Exactly one of the two keys must be present — both or neither
-        is a :class:`ValueError` so the schema stays unambiguous. The
-        returned ``image`` is a detached ``(H, W, 3)`` ``uint8`` RGB
-        copy, safe to keep after the source file is removed.
+        Accepts both emission shapes. Exactly one of ``path`` / ``image``
+        must be present — both or neither is a :class:`ValueError` so
+        the schema stays unambiguous. The returned ``image`` is detached
+        from any underlying file/buffer, so callers can delete the
+        source PNG immediately.
 
-        :class:`ValueError` is raised for every malformed input: non-
-        mapping payload, missing key, uncoercible field, non-ISO-8601
-        ``captured_at``, base64 / PNG decoding failures, and missing
-        referenced PNGs (the message names the offending file).
+        Raises:
+            ValueError: The payload is malformed — not a mapping,
+                missing a required key, has an uncoercible field, a
+                non-ISO-8601 ``captured_at``, invalid base64, or
+                references a PNG that does not exist / is not a real
+                image. The message names the offending field or file
+                so the user can locate the breakage.
         """
         raw = yaml.safe_load(text)
         if not isinstance(raw, dict):
@@ -193,22 +196,33 @@ def _resolve_monitor_index(
 def take_screenshot(
     *, settle_seconds: float = 0.05, pid: int | None = None
 ) -> Screenshot | None:
-    """Focus VRChat, wait, then grab one window-only screenshot.
+    """Grab one VRChat window screenshot suitable for GUI-automation clicking.
 
-    ``settle_seconds`` is the post-focus sleep that lets the compositor
-    finish raising the window (must be ``>= 0``; the 50 ms default is a
-    generous margin for typical desktops). ``pid`` selects the target
-    VRChat instance when multiple are running; when ``None`` (default)
-    :func:`vrcpilot.process.resolve_pid` resolves the sole running PID
-    (or raises :class:`VRChatMultipleInstancesError` on ambiguity, which
-    is propagated to the caller — unlike the recoverable ``None`` paths).
+    The window is focused first so the captured pixels match what the
+    user sees; for streaming pixels at native framerate use
+    :mod:`vrcpilot.capture` instead.
 
-    Returns ``None`` on recoverable failure (Wayland native, focus
-    refused, window unmapped, ``mss`` error). Wayland native also emits
-    :class:`RuntimeWarning`; this asymmetry with :class:`Capture` (which
-    raises) lets polling callers retry while streaming sessions fail
-    loudly. Raises :class:`ValueError` for negative ``settle_seconds``
-    and :class:`NotImplementedError` outside Windows / Linux.
+    Args:
+        settle_seconds: Post-focus sleep in seconds, giving the
+            compositor time to finish raising the window before the
+            grab. 50 ms is a generous margin for typical desktops.
+        pid: Disambiguates when multiple VRChat instances run. When
+            ``None``, :func:`vrcpilot.process.resolve_pid` picks the
+            sole instance (or raises ``VRChatMultipleInstancesError``).
+
+    Returns:
+        A populated :class:`Screenshot`, or ``None`` on recoverable
+        failure (Wayland native, focus refused, window not yet mapped,
+        ``mss`` error). Returning ``None`` lets polling callers retry
+        without try/except. The Wayland-native path additionally emits
+        :class:`RuntimeWarning`; this asymmetry with
+        :class:`vrcpilot.capture.Capture` (which raises) is deliberate
+        so polling tolerates Wayland while streaming fails loudly.
+
+    Raises:
+        ValueError: ``settle_seconds`` is negative.
+        NotImplementedError: Running on a platform other than Windows
+            or Linux.
     """
     if settle_seconds < 0:
         raise ValueError("settle_seconds must be >= 0")

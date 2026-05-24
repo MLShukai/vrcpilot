@@ -29,7 +29,13 @@ _DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
 
 
 def find_vrchat_hwnd(pid: int) -> int | None:
-    """Return the visible top-level HWND owned by *pid*, or ``None``."""
+    """Locate the visible top-level HWND owned by ``pid`` via ``EnumWindows``.
+
+    Returns:
+        An HWND when one such window exists, otherwise ``None``. Hidden
+        windows (``IsWindowVisible`` False) are skipped because VRChat's
+        splash/tray windows would otherwise outrank the main window.
+    """
     result: list[int] = []
 
     def _callback(hwnd: int, _lparam: int) -> bool:
@@ -47,13 +53,16 @@ def find_vrchat_hwnd(pid: int) -> int | None:
 
 
 def get_window_rect(hwnd: int) -> tuple[int, int, int, int] | None:
-    """Return ``(x, y, width, height)`` of *hwnd* in physical screen pixels.
+    """Report ``hwnd``'s outer rect in physical pixels for capture grabbing.
 
-    Switches the calling thread to per-monitor DPI aware V2 for the
-    duration of the call so ``GetWindowRect`` returns physical pixels
-    matching what :mod:`mss` grabs; thread-local rather than process-
-    wide so no other code is affected. Returns ``None`` when the HWND
-    has been destroyed or the rectangle is degenerate.
+    Switches the calling thread to per-monitor-DPI-aware V2 so
+    ``GetWindowRect`` agrees with :mod:`mss` on physical pixels; the
+    switch is thread-local and restored on exit, so callers and other
+    threads observe their original DPI context.
+
+    Returns:
+        ``(x, y, width, height)``, or ``None`` when the HWND has been
+        destroyed or the rectangle is degenerate (non-positive size).
     """
     set_thread_dpi = ctypes.windll.user32.SetThreadDpiAwarenessContext
     old_ctx = set_thread_dpi(_DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)

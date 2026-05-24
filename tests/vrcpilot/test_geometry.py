@@ -1,4 +1,4 @@
-"""Tests for :mod:`vrcpilot.geometry`.
+"""Integration-real tests for :mod:`vrcpilot.geometry`.
 
 ``get_vrchat_window_rect`` is the public entry point; it resolves the
 PID via :func:`vrcpilot.process.resolve_pid` then dispatches to the

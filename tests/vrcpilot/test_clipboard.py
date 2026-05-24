@@ -1,4 +1,4 @@
-"""Tests for :mod:`vrcpilot.clipboard`.
+"""Integration-real tests for :mod:`vrcpilot.clipboard`.
 
 :func:`vrcpilot.clipboard.paste` is a 4-step pipeline:
 

@@ -17,13 +17,16 @@ from Xlib.xobject.drawable import Window as _XWindow
 
 
 def open_x11_display() -> Xlib.display.Display | None:
-    """Open an X11 display without a context manager.
+    """Open an X11 display for callers that manage the connection lifetime.
 
-    For long-lived connections the caller must eventually call
-    :meth:`Xlib.display.Display.close`. For block-scoped use prefer
-    :func:`x11_display`. Returns ``None`` on connection failure (X
-    server unreachable, ``DISPLAY`` unset, missing/stale
-    ``XAUTHORITY``).
+    The caller owns the returned display and must eventually
+    :meth:`~Xlib.display.Display.close` it; for block-scoped use prefer
+    :func:`x11_display` to avoid leaking on early returns.
+
+    Returns:
+        ``None`` when the X server is unreachable: ``DISPLAY`` unset,
+        no server listening, or a stale ``XAUTHORITY`` (the common SSH
+        symptom). Programming errors still propagate.
     """
     try:
         return Xlib.display.Display()
@@ -38,11 +41,13 @@ def open_x11_display() -> Xlib.display.Display | None:
 
 @contextmanager
 def x11_display() -> Iterator[Xlib.display.Display | None]:
-    """Open an X11 display for the duration of a ``with`` block.
+    """Open an X11 display scoped to a ``with`` block.
 
-    Yields ``None`` on connection failure (see :func:`open_x11_display`
-    for the failure surface — common SSH symptom is a stale
-    ``XAUTHORITY``).
+    Yields:
+        A live display, or ``None`` on connection failure (same surface
+        as :func:`open_x11_display`). Yielding ``None`` rather than
+        raising lets callers handle "no display" as data inside the
+        block.
     """
     display = open_x11_display()
     if display is None:
@@ -55,10 +60,16 @@ def x11_display() -> Iterator[Xlib.display.Display | None]:
 
 
 def find_vrchat_window(display: Xlib.display.Display, pid: int) -> _XWindow | None:
-    """Return the EWMH-managed window owned by *pid*, or ``None``.
+    """Locate the EWMH-managed top-level window owned by ``pid``.
 
-    Scans ``_NET_CLIENT_LIST`` and matches each entry's ``_NET_WM_PID``;
-    windows that disappear mid-iteration (``BadWindow``) are skipped.
+    Only EWMH-compliant WMs are supported because the lookup relies on
+    ``_NET_CLIENT_LIST`` plus ``_NET_WM_PID``. Windows that disappear
+    between the snapshot and the property read are silently skipped
+    (race against the WM during window teardown).
+
+    Returns:
+        The matching window, or ``None`` when no entry in
+        ``_NET_CLIENT_LIST`` advertises that PID.
     """
     root = display.screen().root
     net_client_list = display.intern_atom("_NET_CLIENT_LIST")
@@ -87,13 +98,16 @@ def find_vrchat_window(display: Xlib.display.Display, pid: int) -> _XWindow | No
 def get_window_rect(
     display: Xlib.display.Display, window: _XWindow
 ) -> tuple[int, int, int, int] | None:
-    """Return ``(x, y, width, height)`` of *window* in root screen coords.
+    """Report ``window``'s rectangle in root-screen coordinates for capture.
 
-    The ``translate_coords`` reply's ``x`` / ``y`` are empirically the
-    negation of the window's screen-space origin under python-xlib, so
-    the sign is inverted here (mirrors the prior mss-based behaviour;
-    see commit ``77a6422``). Returns ``None`` when the window has
-    disappeared or has degenerate geometry.
+    Coordinates are sign-inverted from the ``translate_coords`` reply
+    because python-xlib empirically returns the negation of the window
+    origin; this matches the rect the prior mss-based capture grabbed
+    (see commit ``77a6422``).
+
+    Returns:
+        ``(x, y, width, height)``, or ``None`` when the window has been
+        destroyed mid-call or has degenerate (non-positive) geometry.
     """
     try:
         coords = window.translate_coords(display.screen().root, 0, 0)

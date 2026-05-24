@@ -1,4 +1,4 @@
-"""Tests for :mod:`vrcpilot.types`.
+"""Unit tests pinning the runtime shape of :mod:`vrcpilot.types` aliases.
 
 ``vrcpilot.types`` holds shared type aliases used by both
 ``vrcpilot.ocr`` and ``vrcpilot.detect``. The aliases are PEP 695

@@ -1,4 +1,4 @@
-"""Tests for :mod:`vrcpilot.session`.
+"""Unit tests for :mod:`vrcpilot.session`.
 
 ``is_wayland_native`` is pure environment-variable inspection; every
 test uses ``monkeypatch.setenv`` / ``delenv`` to drive the real
