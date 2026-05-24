@@ -6,7 +6,7 @@ Thanks for your interest in contributing! `vrcpilot` automates the desktop clien
 
 `vrcpilot` is intentionally narrow:
 
-- **In scope**: launching / terminating VRChat, window focus, screen capture, OCR, image-template detection, synthetic keyboard / mouse input, clipboard-based text injection.
+- **In scope**: launching / terminating VRChat, window focus, screen and audio capture, OCR, image-template detection, synthetic keyboard / mouse input, clipboard-based text injection, virtual mic output, and OSC (`/input/*`, `/chatbox/*`, `/avatar/parameters/*`).
 - **Out of scope**: anything that requires reverse-engineering the VRChat network protocol, modifying the VRChat client binary, distributing client assets, or automating account-level destructive actions (logout, friend management, avatar uploads, purchases). Please do not file PRs in those directions.
 
 When automating gameplay, **be considerate of other players**. Public instances are shared spaces. The `tests/e2e/` scenarios deliberately stay within non-destructive operations and we expect contributions to follow the same posture.
@@ -118,7 +118,7 @@ The CI matrix runs on Linux and Windows across Python 3.12 / 3.13 / 3.14. New co
 
 ### Tests
 
-- Mirror the source layout: `src/vrcpilot/foo.py` ↔ `tests/vrcpilot/test_foo.py`. Backend-split modules (`window/win32.py`, `window/x11.py`) get split tests too.
+- Mirror the source layout: `src/vrcpilot/foo.py` ↔ `tests/vrcpilot/test_foo.py`. Backend-split modules (`window/windows.py`, `window/linux.py`) get split tests too.
 - Prefer real objects and real I/O; reach for mocks only at true external boundaries (network APIs, hard-to-reproduce kernel features). For ABC-only modules, define a tiny concrete `Impl` in `tests/helpers.py` rather than mocking.
 - For tests that depend on a platform or display, `pytest.skip(..., allow_module_level=True)` at the top of the file (before any imports that would fail at collection time).
 
