@@ -164,21 +164,25 @@
       "Bash(tar -tvf:*)",
       "WebSearch",
       "WebFetch",
-      "Bash(git -C:*)",
       "Bash(git cherry-pick *)",
       "Bash(git worktree *)"
     ],
     "deny": [
+      "Read(~/.ssh/**)",
+      "Edit(~/.ssh/**)",
       "Bash(git reset --hard:*)",
       "Bash(git clean -f:*)",
       "Bash(git push --force:*)",
       "Bash(git push -f:*)",
+      "Bash(git -C *)",
+      "Bash(git checkout .)",
       "Bash(rm -rf:*)",
       "Bash(rm -fr:*)",
       "Bash(sudo:*)"
     ],
     "additionalDirectories": [
-      "/tmp"
+      "/tmp",
+      ".claude/worktrees/**"
     ]
   }
 }

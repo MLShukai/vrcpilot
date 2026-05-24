@@ -1,14 +1,15 @@
 """Tests for :mod:`vrcpilot.detect.detect`.
 
-Integration-with-fakes: :func:`detect` is exercised against the
-in-memory :class:`tests.fakes.detect.FakeDetectEngine`, so no real
-detection engine is built. The function itself takes a
-:class:`Screenshot` directly, so capture is not mocked here.
+Integration-with-fakes: :func:`detect` is exercised against
+:class:`tests.fakes.detect.FakeDetectEngine` (an in-memory
+implementation of the :class:`vrcpilot.detect.DetectEngine` ABC), so
+no real OpenCV matching is run. The function itself takes a
+:class:`Screenshot` directly, so capture is not exercised here.
 
-The submodule reference is fetched via ``sys.modules`` because the
-package binds the ``detect`` *function* under the name
-``vrcpilot.detect.detect``, which would otherwise shadow the
-submodule in attribute-walking patch helpers.
+The detect submodule is accessed via ``sys.modules`` because the
+package binds the ``detect`` *function* under ``vrcpilot.detect.detect``
+which would otherwise shadow the submodule in attribute-walking
+patch helpers.
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 
-import vrcpilot.detect  # noqa: F401  ensures submodule is registered
+import vrcpilot.detect  # noqa: F401 — ensures submodule is registered
 from tests.fakes.detect import FakeDetectEngine
 from vrcpilot.detect import Detection, DetectResult, Polygon, detect
 from vrcpilot.screenshot import Screenshot
@@ -74,14 +75,39 @@ def _make_detection(
 
 @pytest.fixture(autouse=True)
 def _reset_default_engine() -> Iterator[None]:
-    """Reset module-level cache between tests so order is irrelevant."""
+    """Reset the module-level default engine cache between tests.
+
+    The cache is process-wide by design, so without this reset test
+    order would leak engine instances between cases.
+    """
     _detect_module._default_engine = None
     yield
     _detect_module._default_engine = None
 
 
 class TestDetectWithExplicitEngine:
-    def test_returns_detect_result_with_tuple_detections(self):
+    def test_detect_returns_DetectResult_wrapping_the_input_screenshot(self):
+        shot = _make_screenshot()
+        query = _make_query()
+        engine = FakeDetectEngine([_make_detection()])
+
+        result = detect(shot, query, engine=engine)
+
+        assert isinstance(result, DetectResult)
+        assert result.screenshot is shot
+
+    def test_detect_preserves_the_query_reference_on_the_result(self):
+        # The query ndarray is stored by reference (engines do not
+        # mutate); callers can therefore inspect what was searched for.
+        shot = _make_screenshot()
+        query = _make_query()
+        engine = FakeDetectEngine([])
+
+        result = detect(shot, query, engine=engine)
+
+        assert result.query is query
+
+    def test_detections_are_returned_as_immutable_tuple(self):
         shot = _make_screenshot()
         query = _make_query()
         det = _make_detection()
@@ -89,14 +115,10 @@ class TestDetectWithExplicitEngine:
 
         result = detect(shot, query, engine=engine)
 
-        assert isinstance(result, DetectResult)
-        assert result.screenshot is shot
-        assert result.query is query
         assert isinstance(result.detections, tuple)
         assert result.detections == (det,)
-        assert engine.calls == 1
 
-    def test_engine_receives_image_and_query(self):
+    def test_engine_detect_is_called_with_screenshot_image_and_query(self):
         shot = _make_screenshot()
         query = _make_query()
         engine = FakeDetectEngine([])
@@ -107,18 +129,8 @@ class TestDetectWithExplicitEngine:
         assert engine.last_image is shot.image
         assert engine.last_query is query
 
-    def test_screenshot_and_query_passed_positionally(self):
-        shot = _make_screenshot()
-        query = _make_query()
-        engine = FakeDetectEngine([])
-
-        result = detect(shot, query, engine=engine)
-
-        assert result.screenshot is shot
-        assert result.query is query
-
     @pytest.mark.parametrize("count", [0, 1, 3])
-    def test_detection_count_matches_engine_output(self, count: int):
+    def test_detection_count_propagates_from_engine_output(self, count: int):
         shot = _make_screenshot()
         query = _make_query()
         dets = [_make_detection(confidence=0.9 - 0.1 * i) for i in range(count)]
@@ -131,32 +143,51 @@ class TestDetectWithExplicitEngine:
 
 
 class TestDetectDefaultEngineCache:
-    def test_default_engine_is_built_once(self, monkeypatch: pytest.MonkeyPatch):
+    def test_default_engine_is_built_once_across_calls(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        # The default engine is the cached process-wide
+        # TemplateDetectEngine. We swap the class reference in the
+        # detect module with a factory that records construction
+        # counts; the factory still returns an own-ABC implementation
+        # (FakeDetectEngine).
         shot = _make_screenshot()
         query = _make_query()
-        det = _make_detection()
         build_count = {"n": 0}
 
         def _factory() -> FakeDetectEngine:
             build_count["n"] += 1
-            return FakeDetectEngine([det])
+            return FakeDetectEngine([_make_detection()])
 
-        # Patch the TemplateDetectEngine reference inside the detect
-        # submodule so the default-engine path uses our fake.
         monkeypatch.setattr(_detect_module, "TemplateDetectEngine", _factory)
 
-        first = detect(shot, query)
-        second = detect(shot, query)
+        detect(shot, query)
+        detect(shot, query)
+        detect(shot, query)
 
-        assert isinstance(first, DetectResult)
-        assert isinstance(second, DetectResult)
         assert build_count["n"] == 1
+
+    def test_cached_engine_serves_subsequent_calls(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        shot = _make_screenshot()
+        query = _make_query()
+        monkeypatch.setattr(
+            _detect_module,
+            "TemplateDetectEngine",
+            lambda: FakeDetectEngine([_make_detection()]),
+        )
+
+        detect(shot, query)
+        detect(shot, query)
+
         cached = _detect_module._default_engine
-        assert cached is not None
         assert isinstance(cached, FakeDetectEngine)
         assert cached.calls == 2
 
-    def test_resetting_cache_rebuilds_engine(self, monkeypatch: pytest.MonkeyPatch):
+    def test_resetting_cache_to_none_rebuilds_engine_on_next_call(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
         shot = _make_screenshot()
         query = _make_query()
         build_count = {"n": 0}

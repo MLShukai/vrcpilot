@@ -36,7 +36,7 @@ def _scenario() -> None:
     _helpers.log(f"VRChat still alive after warmup (pid={pid_after})")
 
     _helpers.log("terminating VRChat")
-    assert vrcpilot.terminate(), "vrcpilot.terminate() returned False"
+    assert vrcpilot.terminate(), "vrcpilot.terminate() returned [] (no VRChat killed)"
     _helpers.log("VRChat terminated")
 
 

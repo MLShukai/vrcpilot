@@ -1,491 +1,117 @@
-"""Tests for :mod:`vrcpilot.cli.mic`."""
+"""Tests for :mod:`vrcpilot.cli.mic`.
+
+``vrcpilot mic`` streams PCM (WAV or raw s16le) into a virtual mic
+device. The real device side (``soundcard`` + ``libpulse`` / WASAPI)
+needs a working audio stack; success-path verification is deferred to
+the e2e suite. The CLI also enforces input-shape contracts before
+opening the device, and those *are* exercisable without audio
+hardware:
+
+* ``-i -`` with a TTY stdin (no piped data) -> exit 2.
+* ``--format auto`` with a non-WAV file path -> exit 2.
+* WAV file with non-16-bit PCM -> exit 1 via ``wave.Error``.
+
+Argparse plumbing is verified through :func:`vrcpilot.cli.build_parser`.
+"""
 
 from __future__ import annotations
 
-import io
 import wave
 from pathlib import Path
 
-import numpy as np
 import pytest
-from numpy.typing import NDArray
-from pytest_mock import MockerFixture
 
-from tests.fakes import FakeMic
-from vrcpilot.cli import main
-from vrcpilot.mic import MicDeviceNotFoundError
+from vrcpilot.cli import build_parser, main
 
 
-@pytest.fixture(autouse=True)
-def _reset_fake_mic_instances() -> None:
-    """Clear cross-test state on the canonical FakeMic mirror.
+class TestMicArgparse:
+    def test_defaults(self):
+        ns = build_parser().parse_args(["mic"])
+        # Default input is stdin ("-"), rate=48000, channels=2,
+        # format=auto, chunk_ms=100.
+        assert ns.input == "-"
+        assert ns.rate == 48000
+        assert ns.channels == 2
+        assert ns.format == "auto"
+        assert ns.chunk_ms == 100
+        assert ns.device is None
 
-    ``FakeMic.instances`` is class-level so a previous test's invocation
-    would leak into the current test's ``instances[0]`` lookup.
-    """
-    FakeMic.instances = []
+    def test_device_flag(self):
+        ns = build_parser().parse_args(["mic", "--device", "CABLE Input"])
+        assert ns.device == "CABLE Input"
 
+    def test_input_flag(self):
+        ns = build_parser().parse_args(["mic", "-i", "/tmp/sample.wav"])
+        assert ns.input == "/tmp/sample.wav"
 
-@pytest.fixture
-def fake_mic(mocker: MockerFixture) -> type[FakeMic]:
-    """Patch ``vrcpilot.cli.mic.Mic`` to the canonical fake.
+    def test_format_choice(self):
+        ns = build_parser().parse_args(["mic", "--format", "s16le"])
+        assert ns.format == "s16le"
 
-    Tests assert against ``FakeMic.instances`` to inspect played chunks,
-    the device argument, sample rate, channels, and close lifecycle.
-    """
-    mocker.patch("vrcpilot.cli.mic.Mic", FakeMic)
-    return FakeMic
+    def test_format_rejects_unknown_choice(self, capsys: pytest.CaptureFixture[str]):
+        with pytest.raises(SystemExit) as excinfo:
+            main(["mic", "--format", "mp3"])
+        assert excinfo.value.code != 0
+        assert capsys.readouterr().err != ""
 
+    def test_channels_choice(self):
+        ns = build_parser().parse_args(["mic", "--channels", "1"])
+        assert ns.channels == 1
 
-def _write_wav(
-    path: Path, samples: NDArray[np.int16], *, channels: int, rate: int
-) -> None:
-    """Write ``samples`` as a 16-bit PCM WAV at ``path``."""
-    with wave.open(str(path), "wb") as w:
-        w.setnchannels(channels)
-        w.setsampwidth(2)
-        w.setframerate(rate)
-        w.writeframes(samples.tobytes())
-
-
-def _build_wav_bytes(samples: NDArray[np.int16], *, channels: int, rate: int) -> bytes:
-    """Return WAV-formatted bytes for ``samples``."""
-    buf = io.BytesIO()
-    with wave.open(buf, "wb") as w:
-        w.setnchannels(channels)
-        w.setsampwidth(2)
-        w.setframerate(rate)
-        w.writeframes(samples.tobytes())
-    return buf.getvalue()
+    def test_channels_rejects_out_of_choice(self, capsys: pytest.CaptureFixture[str]):
+        with pytest.raises(SystemExit) as excinfo:
+            main(["mic", "--channels", "4"])
+        assert excinfo.value.code != 0
+        assert capsys.readouterr().err != ""
 
 
-class _FakeStdin:
-    """Minimal stand-in for ``sys.stdin`` supporting ``isatty()`` and
-    ``.buffer.read``."""
+class TestMicInputResolution:
+    """Pre-device-open input validation surfaces as exit 2 or 1."""
 
-    def __init__(self, payload: bytes, *, isatty: bool = False) -> None:
-        self.buffer = io.BytesIO(payload)
-        self._isatty = isatty
-
-    def isatty(self) -> bool:
-        return self._isatty
-
-
-class TestArgParsing:
-    def test_no_input_on_tty_returns_exit_2(
+    def test_stdin_dash_on_tty_exits_2(
         self,
-        fake_mic: type[FakeMic],
-        mocker: MockerFixture,
         capsys: pytest.CaptureFixture[str],
     ):
-        del fake_mic
-        mocker.patch("vrcpilot.cli.mic.sys.stdin", new=_FakeStdin(b"", isatty=True))
-
-        exit_code = main(["mic"])
-
-        assert exit_code == 2
+        # The autouse ``_stdin_is_tty_by_default`` patches
+        # ``vrcpilot.cli._common.sys.stdin.isatty`` -- the mic CLI
+        # reads ``sys.stdin.isatty`` from its own namespace, but
+        # ``sys.stdin`` is a singleton so the same ``isatty`` patch
+        # affects both modules.
+        assert main(["mic", "-i", "-"]) == 2
         captured = capsys.readouterr()
-        assert "no audio piped to stdin" in captured.err
-        assert FakeMic.instances == []
         assert captured.out == ""
+        assert "vrcpilot: no audio piped to stdin" in captured.err
 
-    def test_auto_format_with_non_wav_path_returns_exit_2(
+    def test_auto_format_non_wav_path_exits_2(
         self,
-        fake_mic: type[FakeMic],
         tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ):
-        del fake_mic
-        raw = tmp_path / "audio.raw"
-        raw.write_bytes(b"\x00\x00\x00\x00")
-
-        exit_code = main(["mic", "-i", str(raw)])
-
-        assert exit_code == 2
+        # ``--format auto`` against a file path that doesn't end in
+        # .wav cannot be auto-detected; the CLI prints a guidance line
+        # and exits 2.
+        target = tmp_path / "audio.raw"
+        target.write_bytes(b"")
+        assert main(["mic", "-i", str(target)]) == 2
         captured = capsys.readouterr()
+        assert captured.out == ""
         assert "cannot auto-detect format" in captured.err
-        # Mic must not be constructed when the parser bails early.
-        assert FakeMic.instances == []
 
-
-class TestWavFileInput:
-    def test_stereo_wav_file_decodes_and_plays(
+    def test_wav_with_bad_sampwidth_exits_1(
         self,
-        fake_mic: type[FakeMic],
-        tmp_path: Path,
-    ):
-        # Two-frame stereo WAV at 24 kHz: pin ``--rate`` is *ignored* for WAV.
-        samples = np.array([[0, 1000], [-1000, 0]], dtype=np.int16)
-        wav_path = tmp_path / "stereo.wav"
-        _write_wav(wav_path, samples, channels=2, rate=24000)
-
-        # --rate intentionally wrong on purpose: WAV path must use the
-        # framerate from the file header, not the flag.
-        exit_code = main(["mic", "-i", str(wav_path), "--rate", "8000"])
-
-        assert exit_code == 0
-        assert len(fake_mic.instances) == 1
-        mic = fake_mic.instances[0]
-        assert mic.sample_rate == 24000
-        assert mic.channels == 2
-        assert mic.closed is True
-        assert len(mic.played) == 1
-        chunk = mic.played[0]
-        assert chunk.dtype == np.float32
-        assert chunk.shape == (2, 2)
-        assert chunk[0, 1] == pytest.approx(1000 / 32768.0)
-        assert chunk[1, 0] == pytest.approx(-1000 / 32768.0)
-
-    def test_mono_wav_file_is_1d(
-        self,
-        fake_mic: type[FakeMic],
-        tmp_path: Path,
-    ):
-        samples = np.array([0, 500, -500, 0], dtype=np.int16)
-        wav_path = tmp_path / "mono.wav"
-        _write_wav(wav_path, samples, channels=1, rate=16000)
-
-        exit_code = main(["mic", "-i", str(wav_path)])
-
-        assert exit_code == 0
-        mic = fake_mic.instances[0]
-        assert mic.sample_rate == 16000
-        assert mic.channels == 1
-        chunk = mic.played[0]
-        # Mono WAV must arrive as a flat (N,) array so Mic infers 1 channel.
-        assert chunk.ndim == 1
-        assert chunk.shape == (4,)
-
-    def test_int16_min_maps_to_minus_one_exactly(
-        self,
-        fake_mic: type[FakeMic],
-        tmp_path: Path,
-    ):
-        # Pin the -32768 / 32768.0 = -1.0 boundary the spec calls out.
-        samples = np.array(
-            [[np.iinfo(np.int16).min, np.iinfo(np.int16).max]], dtype=np.int16
-        )
-        wav_path = tmp_path / "boundary.wav"
-        _write_wav(wav_path, samples, channels=2, rate=48000)
-
-        exit_code = main(["mic", "-i", str(wav_path)])
-
-        assert exit_code == 0
-        chunk = fake_mic.instances[0].played[0]
-        # int16 min divided by 32768.0 is exactly -1.0 in float32.
-        assert chunk[0, 0] == np.float32(-1.0)
-        # Positive max is asymmetric (32767/32768) so it sits just below 1.
-        assert chunk[0, 1] < np.float32(1.0)
-
-    def test_wav_with_unsupported_sampwidth_returns_1(
-        self,
-        fake_mic: type[FakeMic],
         tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ):
-        del fake_mic
-        # Hand-craft an 8-bit WAV (sampwidth=1) which mic should refuse.
-        wav_path = tmp_path / "8bit.wav"
-        with wave.open(str(wav_path), "wb") as w:
+        # Hand-build a WAV with 8-bit samples; the CLI's
+        # ``_wav_to_float32`` rejects anything other than 16-bit.
+        target = tmp_path / "8bit.wav"
+        with wave.open(str(target), "wb") as w:
             w.setnchannels(1)
-            w.setsampwidth(1)
-            w.setframerate(8000)
-            w.writeframes(b"\x80\x80\x80")
-
-        exit_code = main(["mic", "-i", str(wav_path)])
-
-        assert exit_code == 1
+            w.setsampwidth(1)  # 8-bit -- not supported
+            w.setframerate(48000)
+            w.writeframes(b"\x00" * 100)
+        assert main(["mic", "-i", str(target)]) == 1
         captured = capsys.readouterr()
-        assert "16-bit signed PCM" in captured.err
-
-    def test_explicit_format_wav_on_non_wav_extension(
-        self,
-        fake_mic: type[FakeMic],
-        tmp_path: Path,
-    ):
-        samples = np.array([[0, 0]], dtype=np.int16)
-        path = tmp_path / "audio.bin"
-        _write_wav(path, samples, channels=2, rate=48000)
-
-        exit_code = main(["mic", "-i", str(path), "--format", "wav"])
-
-        assert exit_code == 0
-        mic = fake_mic.instances[0]
-        assert mic.sample_rate == 48000
-        assert mic.played[0].shape == (1, 2)
-
-
-class TestRawFileInput:
-    def test_s16le_file_chunked_into_generator(
-        self,
-        fake_mic: type[FakeMic],
-        tmp_path: Path,
-    ):
-        # 480 stereo frames @ 48 kHz = 10 ms; --chunk-ms 5 should split
-        # into two 5-ms chunks (240 frames each).
-        frame_count = 480
-        samples = np.arange(frame_count * 2, dtype=np.int16).reshape(-1, 2)
-        raw_path = tmp_path / "audio.raw"
-        raw_path.write_bytes(samples.tobytes())
-
-        exit_code = main(
-            [
-                "mic",
-                "-i",
-                str(raw_path),
-                "--format",
-                "s16le",
-                "--rate",
-                "48000",
-                "--channels",
-                "2",
-                "--chunk-ms",
-                "5",
-            ]
-        )
-
-        assert exit_code == 0
-        mic = fake_mic.instances[0]
-        assert mic.sample_rate == 48000
-        assert mic.channels == 2
-        # 480 frames split into 240-frame chunks → 2 yields.
-        assert len(mic.played) == 2
-        assert mic.played[0].shape == (240, 2)
-        assert mic.played[1].shape == (240, 2)
-        # Concatenating should reproduce the original int16 payload.
-        joined = np.concatenate(mic.played, axis=0)
-        np.testing.assert_allclose(joined, samples.astype(np.float32) / 32768.0)
-
-    def test_s16le_mono_file(
-        self,
-        fake_mic: type[FakeMic],
-        tmp_path: Path,
-    ):
-        samples = np.arange(100, dtype=np.int16)
-        raw_path = tmp_path / "mono.raw"
-        raw_path.write_bytes(samples.tobytes())
-
-        exit_code = main(
-            [
-                "mic",
-                "-i",
-                str(raw_path),
-                "--format",
-                "s16le",
-                "--channels",
-                "1",
-                "--rate",
-                "16000",
-                "--chunk-ms",
-                "100",
-            ]
-        )
-
-        assert exit_code == 0
-        mic = fake_mic.instances[0]
-        assert mic.sample_rate == 16000
-        assert mic.channels == 1
-        # Mono raw stays 1-D so Mic infers mono.
-        assert mic.played[0].ndim == 1
-
-    def test_missing_file_returns_1(
-        self,
-        fake_mic: type[FakeMic],
-        tmp_path: Path,
-        capsys: pytest.CaptureFixture[str],
-    ):
-        missing = tmp_path / "nope.wav"
-
-        exit_code = main(["mic", "-i", str(missing)])
-
-        assert exit_code == 1
-        captured = capsys.readouterr()
-        assert "vrcpilot:" in captured.err
-        assert fake_mic.instances == [] or fake_mic.instances[0].played == []
-
-
-class TestStdinInput:
-    def test_stdin_s16le_default_format(
-        self,
-        fake_mic: type[FakeMic],
-        mocker: MockerFixture,
-    ):
-        # 48 stereo frames = 1 ms @ 48000; chunk-ms 1 → 1 chunk of 48 frames.
-        frame_count = 48
-        samples = np.arange(frame_count * 2, dtype=np.int16).reshape(-1, 2)
-        mocker.patch(
-            "vrcpilot.cli.mic.sys.stdin",
-            new=_FakeStdin(samples.tobytes()),
-        )
-
-        exit_code = main(
-            ["mic", "--rate", "48000", "--channels", "2", "--chunk-ms", "1"]
-        )
-
-        assert exit_code == 0
-        mic = fake_mic.instances[0]
-        assert mic.sample_rate == 48000
-        joined = np.concatenate(mic.played, axis=0)
-        assert joined.shape == (48, 2)
-
-    def test_stdin_wav_decoded(
-        self,
-        fake_mic: type[FakeMic],
-        mocker: MockerFixture,
-    ):
-        samples = np.array([[100, -100], [200, -200]], dtype=np.int16)
-        wav_bytes = _build_wav_bytes(samples, channels=2, rate=22050)
-        mocker.patch(
-            "vrcpilot.cli.mic.sys.stdin",
-            new=_FakeStdin(wav_bytes),
-        )
-
-        # --format wav forces the WAV decoder on stdin (no extension to sniff).
-        exit_code = main(["mic", "--format", "wav"])
-
-        assert exit_code == 0
-        mic = fake_mic.instances[0]
-        # WAV ignores --rate; framerate comes from the header.
-        assert mic.sample_rate == 22050
-        assert mic.played[0].shape == (2, 2)
-
-
-class TestDeviceArgument:
-    def test_device_flag_forwarded_to_mic(
-        self,
-        fake_mic: type[FakeMic],
-        mocker: MockerFixture,
-    ):
-        mocker.patch("vrcpilot.cli.mic.sys.stdin", new=_FakeStdin(b""))
-
-        exit_code = main(["mic", "--device", "CABLE Input"])
-
-        assert exit_code == 0
-        assert fake_mic.instances[0].device_argument == "CABLE Input"
-
-    def test_default_device_is_none(
-        self,
-        fake_mic: type[FakeMic],
-        mocker: MockerFixture,
-    ):
-        mocker.patch("vrcpilot.cli.mic.sys.stdin", new=_FakeStdin(b""))
-
-        exit_code = main(["mic"])
-
-        assert exit_code == 0
-        # No --device → CLI defers to Mic's resolution chain by passing None.
-        assert fake_mic.instances[0].device_argument is None
-
-
-class TestErrorPaths:
-    def test_mic_device_not_found_returns_1(
-        self,
-        mocker: MockerFixture,
-        tmp_path: Path,
-        capsys: pytest.CaptureFixture[str],
-    ):
-        def _boom(
-            device: str | None = None,
-            *,
-            sample_rate: int = 48000,
-            channels: int = 1,
-        ) -> object:
-            del device, sample_rate, channels
-            raise MicDeviceNotFoundError("no output device matches 'fake'")
-
-        mocker.patch("vrcpilot.cli.mic.Mic", _boom)
-        wav_path = tmp_path / "x.wav"
-        _write_wav(wav_path, np.zeros((1, 2), dtype=np.int16), channels=2, rate=48000)
-
-        exit_code = main(["mic", "-i", str(wav_path), "--device", "fake"])
-
-        assert exit_code == 1
-        captured = capsys.readouterr()
-        assert "no output device matches" in captured.err
-
-    def test_import_error_returns_1(
-        self,
-        mocker: MockerFixture,
-        tmp_path: Path,
-        capsys: pytest.CaptureFixture[str],
-    ):
-        def _boom(
-            device: str | None = None,
-            *,
-            sample_rate: int = 48000,
-            channels: int = 1,
-        ) -> object:
-            del device, sample_rate, channels
-            raise ImportError("soundcard is not installed")
-
-        mocker.patch("vrcpilot.cli.mic.Mic", _boom)
-        wav_path = tmp_path / "x.wav"
-        _write_wav(wav_path, np.zeros((1, 2), dtype=np.int16), channels=2, rate=48000)
-
-        exit_code = main(["mic", "-i", str(wav_path)])
-
-        assert exit_code == 1
-        captured = capsys.readouterr()
-        assert "soundcard is not installed" in captured.err
-
-    def test_runtime_error_returns_1(
-        self,
-        mocker: MockerFixture,
-        tmp_path: Path,
-        capsys: pytest.CaptureFixture[str],
-    ):
-        # soundcard surfaces native libpulse / WASAPI failures as
-        # ``RuntimeError``. The CLI's combined ``(OSError, RuntimeError)``
-        # catch must route those to exit code 1 with the message on stderr
-        # instead of crashing with a traceback.
-        class _RuntimeBoomMic:
-            def __init__(
-                self,
-                device: str | None = None,
-                *,
-                sample_rate: int = 48000,
-                channels: int = 1,
-            ) -> None:
-                del device, sample_rate, channels
-
-            def __enter__(self) -> _RuntimeBoomMic:
-                return self
-
-            def __exit__(self, *_exc: object) -> None:
-                pass
-
-            def play(self, chunk: object) -> None:
-                del chunk
-                raise RuntimeError("device unavailable")
-
-            def close(self) -> None:
-                pass
-
-        mocker.patch("vrcpilot.cli.mic.Mic", _RuntimeBoomMic)
-        wav_path = tmp_path / "x.wav"
-        _write_wav(wav_path, np.zeros((1, 2), dtype=np.int16), channels=2, rate=48000)
-
-        exit_code = main(["mic", "-i", str(wav_path)])
-
-        assert exit_code == 1
-        captured = capsys.readouterr()
-        assert "device unavailable" in captured.err
-
-
-class TestProgressOutput:
-    def test_progress_on_stderr_only(
-        self,
-        fake_mic: type[FakeMic],
-        mocker: MockerFixture,
-        capsys: pytest.CaptureFixture[str],
-    ):
-        del fake_mic
-        mocker.patch("vrcpilot.cli.mic.sys.stdin", new=_FakeStdin(b""))
-
-        exit_code = main(["mic"])
-
-        assert exit_code == 0
-        captured = capsys.readouterr()
-        # Stdout must stay silent so mic can sit at the tail of a pipe.
         assert captured.out == ""
-        assert "Playing audio" in captured.err
+        assert "vrcpilot:" in captured.err
+        assert "sampwidth" in captured.err

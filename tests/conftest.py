@@ -1,16 +1,25 @@
 """Project-wide pytest fixtures.
 
-The autouse fixture here is a *safety valve*: it isolates the test
-suite from a real VRChat process that may happen to be running on a
-developer's local machine. Without it, a `find_pid()` call in the
-production code path would observe the live PID and tests that assume
-"no VRChat" would behave inconsistently between CI and local runs.
+This module contains the **single, deliberate exception** to the
+project rule that test code MUST NOT patch 3rd-party library surfaces
+(`.claude/skills/vrcpilot-testing/SKILL.md`).
 
-Tests that need ``find_pid`` to return a specific PID can override the
-autouse default by patching ``vrcpilot.process.pid.psutil.process_iter``
-inside the test (e.g. via ``mocker.patch``); the explicit patch
-shadows the autouse monkeypatch and is unwound first when the test
-ends.
+The autouse :func:`_no_real_vrchat` fixture patches
+``vrcpilot.process.pid.psutil.process_iter`` *for environment
+isolation*, not for behavioural mocking. A developer machine that
+happens to be running VRChat would otherwise leak that PID into every
+test through :func:`vrcpilot.find_pid`, producing different results
+between CI (no VRChat) and local runs (VRChat present). This is
+infrastructure isolation, equivalent in spirit to ``tmp_path`` or
+``Xvfb`` -- not a per-test mock.
+
+This exception is **scoped to this conftest only**. Per-test files
+under ``tests/vrcpilot/`` MUST NOT patch ``psutil.process_iter``,
+``psutil.Process``, or any other 3rd-party surface for behavioural
+verification. Tests that need to exercise :func:`vrcpilot.find_pid`
+against a specific process state should spawn a real subprocess and
+verify the observable behaviour, or escalate to the orchestrator
+when no real-resource path exists.
 """
 
 from __future__ import annotations
@@ -24,10 +33,10 @@ import pytest
 def _no_real_vrchat(monkeypatch: pytest.MonkeyPatch) -> None:
     """Default ``psutil.process_iter`` to an empty iterator for every test.
 
-    Ensures :func:`vrcpilot.find_pid` returns ``None`` and
-    :func:`vrcpilot.terminate` is a no-op unless a test deliberately
-    populates the iterator. Local development environments where
-    VRChat is running should not pollute test outcomes.
+    Environment isolation -- see the module docstring for why this is
+    the one place ``psutil`` patching is permitted. The patch is autouse
+    so a local VRChat process cannot pollute test outcomes; it does
+    NOT exist to let individual tests substitute a different iterator.
     """
 
     def _empty(*_args: object, **_kwargs: object) -> Iterator[object]:

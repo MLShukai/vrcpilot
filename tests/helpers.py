@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import functools
 import sys
-from collections.abc import Sequence
 from typing import override
 
 import numpy as np
@@ -20,7 +19,6 @@ from numpy.typing import NDArray
 from vrcpilot import process
 from vrcpilot.controls.keyboard import Key, Keyboard
 from vrcpilot.controls.mouse import Mouse, MouseButton
-from vrcpilot.detect import DetectEngine, Detection
 from vrcpilot.speaker.base import CHANNELS, SpeakerBackend
 
 #: Skip a test on non-Windows platforms.
@@ -75,6 +73,110 @@ def has_x11_display() -> bool:
 #: ``tests.fakes.x11`` doubles do not need this marker.
 requires_x11_display = pytest.mark.skipif(
     not has_x11_display(), reason="X11 display unavailable"
+)
+
+
+@functools.lru_cache(maxsize=1)
+def has_pipewire() -> bool:
+    """Return ``True`` when a PipeWire daemon is reachable on this host.
+
+    Probes by invoking ``pw-cli info 0`` which queries the running
+    PipeWire core; any non-zero exit or missing binary means the daemon
+    is not available. Cached for the same reason as
+    :func:`has_x11_display` -- the daemon's presence does not change
+    during a pytest run.
+
+    Returns ``False`` on non-Linux platforms unconditionally; PipeWire
+    is a Linux-only resource in this project.
+    """
+    if not sys.platform.startswith("linux"):
+        return False
+    import shutil
+    import subprocess
+
+    if shutil.which("pw-cli") is None:
+        return False
+    try:
+        result = subprocess.run(
+            ["pw-cli", "info", "0"],
+            capture_output=True,
+            timeout=2.0,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+    return result.returncode == 0
+
+
+#: Skip a test when no PipeWire daemon is reachable.
+#:
+#: Use on tests that spawn ``pw-cli`` / ``pw-record`` or load PipeWire
+#: modules (e.g. ``module-null-sink``). When skipped the behaviour
+#: should be covered by a ``tests/e2e/`` scenario instead.
+requires_pipewire = pytest.mark.skipif(
+    not has_pipewire(), reason="PipeWire daemon unavailable"
+)
+
+
+@functools.lru_cache(maxsize=1)
+def has_uinput() -> bool:
+    """Return ``True`` when ``/dev/uinput`` is writable by this process.
+
+    ``inputtino`` requires write access to ``/dev/uinput`` to synthesise
+    input events. On most Linux desktops this needs either the
+    ``input`` group membership or a udev rule; CI without those will
+    fail before reaching the test body.
+
+    Returns ``False`` on non-Linux platforms unconditionally.
+    """
+    if not sys.platform.startswith("linux"):
+        return False
+    import os
+
+    return os.access("/dev/uinput", os.W_OK)
+
+
+#: Skip a test when ``/dev/uinput`` is not writable.
+#:
+#: Use on tests that drive the real ``inputtino`` backend (keyboard
+#: down/up, mouse move/click). When skipped the behaviour should be
+#: covered by a ``tests/e2e/`` scenario instead.
+requires_uinput = pytest.mark.skipif(
+    not has_uinput(), reason="/dev/uinput not writable"
+)
+
+
+@functools.lru_cache(maxsize=1)
+def has_working_tkinter() -> bool:
+    """Return ``True`` when ``tkinter.Tk()`` can construct and destroy a root
+    window.
+
+    Probes by attempting a Tk root and capturing ``TclError`` /
+    ``RuntimeError`` (Windows CI runners sometimes ship a broken Tcl/Tk
+    install where ``_tkinter.create`` raises
+    ``invalid command name "tcl_findLibrary"``; Linux without
+    ``DISPLAY`` raises ``couldn't connect to display``). Cached for the
+    same reason as :func:`has_x11_display` -- the probe opens a window
+    on Linux and is non-trivial.
+    """
+    try:
+        import tkinter
+
+        root = tkinter.Tk()
+        root.destroy()
+    except Exception:
+        return False
+    return True
+
+
+#: Skip a test when ``tkinter`` cannot instantiate a Tk root.
+#:
+#: Use on tests that spawn a real Tk window as a stand-in for VRChat's
+#: main window on the appropriate Win32 / X11 backend. When skipped the
+#: integration-real path is no longer exercised; rely on
+#: ``tests/e2e/`` for end-to-end confirmation.
+requires_working_tkinter = pytest.mark.skipif(
+    not has_working_tkinter(), reason="tkinter cannot initialize Tk on this host"
 )
 
 #: Re-exported polling defaults for the e2e ``_helpers`` import surface.
@@ -186,27 +288,3 @@ class ImplSpeakerBackend(SpeakerBackend):
         # Intentionally a no-op: the ABC only requires idempotence,
         # which a no-op trivially satisfies.
         return None
-
-
-class ImplDetectEngine(DetectEngine):
-    """Concrete :class:`DetectEngine` for ABC tests.
-
-    Records every ``detect`` invocation in :attr:`calls` as
-    ``(image, query)`` ndarray pairs and returns whatever sequence is
-    set on :attr:`result`. Tests use this in place of a mock so the
-    real ABC plumbing is exercised end-to-end -- per the project rule
-    that ABC tests use a real impl rather than ``mocker.Mock``.
-    """
-
-    def __init__(self, result: Sequence[Detection] = ()) -> None:
-        self.calls: list[tuple[NDArray[np.uint8], NDArray[np.uint8]]] = []
-        self.result: Sequence[Detection] = result
-
-    @override
-    def detect(
-        self,
-        image: NDArray[np.uint8],
-        query: NDArray[np.uint8],
-    ) -> Sequence[Detection]:
-        self.calls.append((image, query))
-        return self.result

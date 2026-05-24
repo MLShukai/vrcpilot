@@ -1,16 +1,16 @@
 """Tests for :mod:`vrcpilot.ocr.recognize`.
 
-Integration-with-fakes: :func:`ocr` is exercised against the in-memory
-:class:`tests.fakes.ocr.FakeOCREngine`, so no rapidocr model download
-is triggered. The function itself takes a :class:`Screenshot`
-directly, so capture is no longer mocked here.
+Integration-with-fakes: :func:`ocr` is exercised against
+:class:`tests.fakes.ocr.FakeOCREngine` (an in-memory implementation
+of the :class:`vrcpilot.ocr.OCREngine` ABC), so no rapidocr model
+download is triggered. Capture is the caller's responsibility, so the
+test passes a hand-built :class:`Screenshot` directly.
 
-The submodule reference is fetched via ``sys.modules`` because the
+The recognize submodule is accessed via ``sys.modules`` because the
 top-level package re-exports the ``ocr`` *function* as
-``vrcpilot.ocr``, which shadows the submodule attribute on the
-``vrcpilot`` package. Submodule access via ``sys.modules`` is the
-unaffected path; see ``tests/vrcpilot/test_init.py`` for the
-regression that pins this invariant.
+``vrcpilot.ocr``, which shadows the submodule attribute. The
+``sys.modules`` lookup is the unaffected path; see
+``tests/vrcpilot/test_init.py`` for the regression that pins this.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 
-import vrcpilot.ocr  # noqa: F401  ensures submodule is registered
+import vrcpilot.ocr  # noqa: F401 — ensures submodule is registered
 from tests.fakes.ocr import FakeOCREngine
 from vrcpilot.ocr import OCRResult, OCRWord, Polygon, ocr
 from vrcpilot.screenshot import Screenshot
@@ -66,27 +66,37 @@ def _make_word(
 
 @pytest.fixture(autouse=True)
 def _reset_default_engine() -> Iterator[None]:
-    """Reset module-level cache between tests so order is irrelevant."""
+    """Reset the module-level default engine cache between tests.
+
+    The cache is process-wide by design, so without this reset test
+    order would leak engine instances between cases.
+    """
     _recognize_module._default_engine = None
     yield
     _recognize_module._default_engine = None
 
 
 class TestOcrWithExplicitEngine:
-    def test_returns_ocr_result_with_tuple_words(self):
+    def test_ocr_returns_OCRResult_wrapping_the_input_screenshot(self):
+        shot = _make_screenshot()
+        engine = FakeOCREngine([_make_word()])
+
+        result = ocr(shot, engine=engine)
+
+        assert isinstance(result, OCRResult)
+        assert result.screenshot is shot
+
+    def test_words_are_returned_as_immutable_tuple(self):
         shot = _make_screenshot()
         word = _make_word()
         engine = FakeOCREngine([word])
 
         result = ocr(shot, engine=engine)
 
-        assert isinstance(result, OCRResult)
-        assert result.screenshot is shot
         assert isinstance(result.words, tuple)
         assert result.words == (word,)
-        assert engine.calls == 1
 
-    def test_engine_receives_image(self):
+    def test_engine_recognize_is_called_with_screenshot_image(self):
         shot = _make_screenshot()
         engine = FakeOCREngine([])
 
@@ -95,41 +105,62 @@ class TestOcrWithExplicitEngine:
         assert engine.calls == 1
         assert engine.last_image is shot.image
 
-    def test_screenshot_passed_positionally(self):
+    def test_each_ocr_call_invokes_engine_once(self):
         shot = _make_screenshot()
-        engine = FakeOCREngine([])
+        engine = FakeOCREngine([_make_word()])
 
-        result = ocr(shot, engine=engine)
+        ocr(shot, engine=engine)
+        ocr(shot, engine=engine)
+        ocr(shot, engine=engine)
 
-        assert result.screenshot is shot
+        assert engine.calls == 3
 
 
 class TestOcrDefaultEngineCache:
-    def test_default_engine_is_built_once(self, monkeypatch: pytest.MonkeyPatch):
+    def test_default_engine_is_built_once_across_calls(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        # The default engine is the cached process-wide RapidOCREngine.
+        # We swap the class reference in the recognize module with a
+        # factory that records construction counts; the factory still
+        # returns an own-ABC implementation (FakeOCREngine).
         shot = _make_screenshot()
-        word = _make_word()
         build_count = {"n": 0}
 
         def _factory() -> FakeOCREngine:
             build_count["n"] += 1
-            return FakeOCREngine([word])
+            return FakeOCREngine([_make_word()])
 
-        # Patch the RapidOCREngine reference inside the recognize
-        # submodule so the default-engine path uses our fake.
         monkeypatch.setattr(_recognize_module, "RapidOCREngine", _factory)
 
-        first = ocr(shot)
-        second = ocr(shot)
+        ocr(shot)
+        ocr(shot)
+        ocr(shot)
 
-        assert isinstance(first, OCRResult)
-        assert isinstance(second, OCRResult)
         assert build_count["n"] == 1
+
+    def test_cached_engine_serves_subsequent_calls(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        shot = _make_screenshot()
+        monkeypatch.setattr(
+            _recognize_module,
+            "RapidOCREngine",
+            lambda: FakeOCREngine([_make_word()]),
+        )
+
+        ocr(shot)
+        ocr(shot)
+
         cached = _recognize_module._default_engine
-        assert cached is not None
         assert isinstance(cached, FakeOCREngine)
         assert cached.calls == 2
 
-    def test_resetting_cache_rebuilds_engine(self, monkeypatch: pytest.MonkeyPatch):
+    def test_resetting_cache_to_none_rebuilds_engine_on_next_call(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        # Documented escape hatch: tests can null out the cache to
+        # force a rebuild. This is the contract test for that.
         shot = _make_screenshot()
         build_count = {"n": 0}
 

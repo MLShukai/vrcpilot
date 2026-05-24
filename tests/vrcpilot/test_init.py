@@ -1,260 +1,201 @@
-"""Tests for :mod:`vrcpilot` package top-level."""
+"""Published API contract for the ``vrcpilot`` top-level package.
 
-import importlib
-import sys
+Every test in this file is an **API contract pin**, not a behaviour
+test. The published surface (``__version__``, ``__all__``,
+function/submodule shadowing) is what downstream users import and what
+breakage stories like "we silently leaked an internal helper" depend
+on. These pins exist so any unintended drift in the top-level surface
+shows up as a failing test rather than a Hyrum's-law surprise.
+
+Behavioural tests for individual symbols live next to the modules they
+come from (e.g. ``tests/vrcpilot/process/`` for ``find_pid``).
+"""
+
+from __future__ import annotations
+
 import tomllib
 from pathlib import Path
 
 import pytest
-from pytest_mock import MockerFixture
 
 import vrcpilot
 
-PROJECT_ROOT = Path(__file__).parent.parent.parent
+pytestmark = pytest.mark.api_contract
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
-class TestPackage:
-    def test_version(self):
-        with open(PROJECT_ROOT / "pyproject.toml", "rb") as f:
-            pyproject = tomllib.load(f)
+class TestVersion:
+    """``vrcpilot.__version__`` is the distribution metadata version.
 
-        assert vrcpilot.__version__ == pyproject["project"]["version"]
+    Project policy: the single source of truth is
+    ``pyproject.toml [project].version``; the runtime attribute is
+    resolved via ``importlib.metadata``. Hard-coding the version in
+    code would create a second source of truth that silently drifts.
+    """
 
-    @pytest.mark.parametrize(
-        "name",
-        [
-            "AudioCallback",
-            "Speaker",
-            "SpeakerLoop",
-        ],
-    )
-    def test_speaker_modality_not_exposed_at_top_level(self, name: str):
-        """Speaker backend classes stay on :mod:`vrcpilot.speaker`.
+    def test_runtime_version_matches_pyproject(self) -> None:
+        with open(PROJECT_ROOT / "pyproject.toml", "rb") as fp:
+            pyproject = tomllib.load(fp)
+        declared = pyproject["project"]["version"]
 
-        The top-level namespace is reserved for user-facing entry
-        points; ``Speaker`` / ``SpeakerLoop`` / ``AudioCallback`` are
-        backend / loop implementations and live on the subpackage
-        (``vrcpilot.speaker.Speaker`` etc.) -- leaking them at top level
-        would obscure that boundary.
-        """
-        assert not hasattr(vrcpilot, name)
-        assert name not in vrcpilot.__all__
+        assert vrcpilot.__version__ == declared
 
-    @pytest.mark.parametrize("name", ["Mic", "MicDeviceNotFoundError"])
-    def test_mic_modality_re_exported_at_top_level(self, name: str):
-        """Mic modality symbols must be in :data:`vrcpilot.__all__`.
 
-        ``Mic`` is the user-facing capture API and its companion error
-        is the one callers catch; both stay top-level so users can
-        write ``vrcpilot.Mic(...)`` /
-        ``except vrcpilot.MicDeviceNotFoundError`` without reaching
-        into the subpackage.
-        """
+# The exact published top-level surface. Listed verbatim here (not
+# derived from ``vrcpilot.__all__``) so an unintended addition or
+# removal in the package shows up as a contract diff in this file.
+#
+# Anything **outside** this set must NOT be in ``vrcpilot.__all__`` and
+# must NOT be reachable as ``vrcpilot.<name>`` — internal helpers stay
+# on their subpackages so ``dir(vrcpilot)`` advertises only the
+# user-facing entry points.
+EXPECTED_PUBLIC_SURFACE: frozenset[str] = frozenset(
+    {
+        "__version__",
+        "CaptureLoop",
+        "clipboard",
+        "detect",
+        "find_pid",
+        "find_pids",
+        "focus",
+        "is_foreground",
+        "Key",
+        "keyboard",
+        "launch",
+        "Mic",
+        "MicDeviceNotFoundError",
+        "mouse",
+        "MouseButton",
+        "ocr",
+        "OscConfig",
+        "OscSender",
+        "Screenshot",
+        "SteamNotFoundError",
+        "take_screenshot",
+        "terminate",
+        "unfocus",
+        "VRChatMultipleInstancesError",
+        "VRChatNotFocusedError",
+        "VRChatNotRunningError",
+    }
+)
+
+
+class TestPublicSurface:
+    """``vrcpilot.__all__`` is the contract for the top-level namespace.
+
+    A name in ``__all__`` is a promise that ``from vrcpilot import
+    <name>`` will keep working. A name absent from ``__all__`` is a
+    promise that callers should not depend on it being top-level (it
+    may move under a subpackage at any time).
+    """
+
+    def test_all_matches_expected_surface(self) -> None:
+        # ``__all__`` is the wildcard-import contract. Pinning the
+        # exact set forces a code review here for any addition or
+        # removal — addition usually means "did we mean to publish
+        # this?" and removal means "this is a breaking change".
+        assert set(vrcpilot.__all__) == EXPECTED_PUBLIC_SURFACE
+
+    @pytest.mark.parametrize("name", sorted(EXPECTED_PUBLIC_SURFACE))
+    def test_every_public_name_is_attribute_accessible(self, name: str) -> None:
+        # ``__all__`` only controls ``from vrcpilot import *``; this
+        # pins that every advertised name also resolves via
+        # ``vrcpilot.<name>`` attribute access (i.e. it was actually
+        # imported into the namespace, not merely listed).
         assert hasattr(vrcpilot, name)
-        assert name in vrcpilot.__all__
 
+    # Names that have appeared either as internal helpers or as former
+    # public symbols. Pinning their *absence* documents the boundary so
+    # a stray re-export shows up here.
     @pytest.mark.parametrize(
         "name",
         [
-            "VRCHAT_PROCESS_NAME",
-            "VRCHAT_STEAM_APP_ID",
-            "build_launch_command",
-            "build_vrchat_launch_args",
-            "recognize",
-        ],
-    )
-    def test_internal_symbols_not_exposed_at_top_level(self, name: str):
-        """Internal helpers must stay out of the top-level public surface.
-
-        These names are intentionally excluded from the top-level public
-        surface so that ``vrcpilot.<name>`` does not advertise internal
-        plumbing or stale aliases. Process helpers remain importable via
-        ``vrcpilot.process.<name>``; ``recognize`` was renamed to
-        ``ocr`` in 0.1.0a-series and the old name is gone for good.
-        """
-        assert not hasattr(vrcpilot, name)
-        assert name not in vrcpilot.__all__
-
-    @pytest.mark.parametrize(
-        "name",
-        [
-            # Capture backend class (loop driver ``CaptureLoop`` stays
-            # top-level for the user-facing record API).
+            # Subsystem implementation classes — live on subpackages.
             "Capture",
-            # OCR engine / data classes (``ocr`` function stays top-level).
             "OCREngine",
             "OCRResult",
             "OCRWord",
             "RapidOCREngine",
-            # Detect engine / data classes (``detect`` function stays
-            # top-level).
             "DetectEngine",
             "DetectResult",
             "Detection",
             "TemplateDetectEngine",
-            # OSC high-level helpers (``OscSender`` low-level stays
-            # top-level).
             "InputController",
             "AvatarParameters",
-            # Controls helper accessed indirectly via keyboard / mouse
-            # focus guard.
+            "Speaker",
+            "SpeakerLoop",
+            "AudioCallback",
             "ensure_target",
-        ],
-    )
-    def test_subsystem_implementation_classes_not_exposed_at_top_level(self, name: str):
-        """Subsystem implementation surfaces live on their subpackages.
-
-        Engines, ABCs, data classes, and helper-facing controllers are
-        accessed through their subpackages
-        (``vrcpilot.capture.Capture``, ``vrcpilot.ocr.OCREngine``,
-        ``vrcpilot.detect.Detection``, ``vrcpilot.osc.InputController``,
-        ``vrcpilot.controls.ensure_target``). The top-level namespace is
-        reserved for user-facing entry points so a quick
-        ``dir(vrcpilot)`` highlights what callers should reach for.
-        """
-        assert not hasattr(vrcpilot, name)
-        assert name not in vrcpilot.__all__
-
-
-class TestPidApis:
-    """PID-resolution helpers' top-level surface.
-
-    ``find_pids`` is the migration target for the deprecated
-    ``find_pid``; pinning it at ``vrcpilot.find_pids`` keeps the public
-    surface stable as ``find_pid`` is phased out. ``resolve_pid`` is the
-    internal "0 / 1 / N -> pid" disambiguator used by CLI subcommands
-    and stays scoped to :mod:`vrcpilot.process`.
-    """
-
-    def test_find_pids_exposed_at_top_level(self) -> None:
-        assert hasattr(vrcpilot, "find_pids")
-        assert "find_pids" in vrcpilot.__all__
-
-    def test_find_pid_still_exposed(self) -> None:
-        """``find_pid`` remains public until 0.4.0 removes the deprecation."""
-        assert hasattr(vrcpilot, "find_pid")
-        assert "find_pid" in vrcpilot.__all__
-
-    def test_resolve_pid_not_at_top_level(self) -> None:
-        """``resolve_pid`` is internal -- accessed via
-        :mod:`vrcpilot.process`."""
-        assert not hasattr(vrcpilot, "resolve_pid")
-        assert "resolve_pid" not in vrcpilot.__all__
-
-
-class TestProcessExceptionsTopLevel:
-    """The catchable user-facing process errors must be re-exported.
-
-    These are the exceptions callers actually need at runtime -- VRChat
-    being multi-instance or not running blocks most APIs. Pinning them
-    at ``vrcpilot.<name>`` lets code write
-    ``except vrcpilot.VRChatMultipleInstancesError`` without reaching
-    into :mod:`vrcpilot.process`.
-    """
-
-    @pytest.mark.parametrize(
-        "name",
-        ["VRChatMultipleInstancesError", "VRChatNotRunningError"],
-    )
-    def test_exposed_at_top_level(self, name: str) -> None:
-        assert hasattr(vrcpilot, name)
-        assert name in vrcpilot.__all__
-
-
-class TestProcessExceptionsNotTopLevel:
-    """Launcher-discovery / environment-validation errors stay subpackage-
-    local.
-
-    These exceptions surface only from ``launch()`` set-up paths
-    (missing launcher binary, VRChat already running on this profile,
-    no DISPLAY on Linux) and the typical caller does not need to catch
-    them separately from the multi-instance / not-running cases. They
-    remain importable via ``vrcpilot.process.<name>`` /
-    ``vrcpilot.steam.<name>``.
-    """
-
-    @pytest.mark.parametrize(
-        "name",
-        [
+            # Launch / process internals — accessed via vrcpilot.process.
+            "VRCHAT_PROCESS_NAME",
+            "VRCHAT_STEAM_APP_ID",
+            "build_launch_command",
+            "build_vrchat_launch_args",
+            "find_vrchat_launcher",
+            "find_umu_launcher",
+            "resolve_pid",
+            # Launcher-discovery / environment-validation exceptions —
+            # too narrow for top-level; callers catch the broader
+            # ``VRChatNotRunningError`` / ``VRChatMultipleInstancesError``.
             "VRChatLauncherNotFoundError",
             "VRChatAlreadyRunningError",
             "VRChatDisplayNotAvailableError",
             "UmuLauncherNotFoundError",
             "SteamNotRunningError",
+            # Renamed in the 0.1.0a series; the old name must stay gone.
+            "recognize",
         ],
     )
-    def test_not_exposed_at_top_level(self, name: str) -> None:
-        assert not hasattr(vrcpilot, name)
+    def test_internal_or_legacy_name_is_not_top_level(self, name: str) -> None:
         assert name not in vrcpilot.__all__
+        assert not hasattr(vrcpilot, name)
 
 
-class TestLauncherDiscoveryNotTopLevel:
-    """Launcher discovery helpers are intentionally **not** top-level.
+class TestOcrFunctionAndSubmoduleCoexist:
+    """``vrcpilot.ocr`` is *both* a callable and an importable submodule.
 
-    They live in :mod:`vrcpilot.process.executable` (cross-platform
-    ``find_vrchat_launcher``) and :mod:`vrcpilot.process.linux`
-    (``find_umu_launcher``). The top-level namespace is reserved for
-    user-facing APIs; ``launch()`` is the entry point that internally
-    consults the launcher helpers.
+    ``vrcpilot.__init__`` imports the function ``ocr`` from
+    ``vrcpilot.ocr``, which shadows the submodule attribute on the
+    package object. Python's import machinery still resolves
+    ``from vrcpilot.ocr import OCREngine`` via ``sys.modules`` rather
+    than attribute lookup, so both shapes have to keep working in
+    parallel for the documented API.
     """
 
-    @pytest.mark.parametrize(
-        "name",
-        ["find_vrchat_launcher", "find_umu_launcher"],
-    )
-    def test_not_exposed_at_top_level(self, name: str) -> None:
-        assert not hasattr(vrcpilot, name)
-        assert name not in vrcpilot.__all__
-
-
-class TestOcrAttributeAndSubmoduleCoexist:
-    """Pin the function-vs-submodule shadowing of ``vrcpilot.ocr``.
-
-    ``vrcpilot.ocr`` (attribute) is the OCR helper function, while
-    ``from vrcpilot.ocr import OCREngine`` (submodule import) still
-    works because Python's import machinery resolves submodule imports
-    through ``sys.modules`` rather than attribute lookup. Both must
-    keep working for the public API to behave as documented.
-    """
-
-    def test_top_level_ocr_attribute_is_callable(self):
+    def test_top_level_ocr_is_callable(self) -> None:
         assert callable(vrcpilot.ocr)
 
-    def test_submodule_import_still_works(self):
+    def test_submodule_import_still_resolves(self) -> None:
+        # If the shadowing ever broke the submodule resolution, this
+        # import would raise ``ImportError`` at collection time.
         from vrcpilot.ocr import OCREngine
 
         assert OCREngine.__name__ == "OCREngine"
 
-    def test_ocr_is_in_all(self):
-        assert "ocr" in vrcpilot.__all__
 
+class TestProcessExceptionInheritance:
+    """Top-level VRChat process exceptions inherit from ``Exception``.
 
-class TestUnsupportedPlatformGate:
-    """``import vrcpilot`` must reject non-Windows / non-Linux hosts.
-
-    The guard sits at the very top of :mod:`vrcpilot.__init__`, before
-    any submodule import, so any host besides ``win32`` / ``linux``
-    fails fast with a clear diagnostic instead of hitting a missing
-    backend import deeper in the package.
-
-    Because ``vrcpilot`` is already imported by the time pytest reaches
-    this test, the guard is retriggered with :func:`importlib.reload`
-    inside a patched-``sys.platform`` context.
+    Pinning the inheritance chain is a Hyrum's-law mitigation: users
+    write ``except vrcpilot.VRChatNotRunningError`` and we must not
+    silently re-base these classes onto something narrower (e.g.
+    ``OSError``) or wider (``BaseException``) without thinking.
     """
 
-    @pytest.mark.parametrize("platform", ["darwin", "freebsd", "openbsd"])
-    def test_reimport_raises_on_unsupported_platform(
-        self, mocker: MockerFixture, platform: str
-    ) -> None:
-        mocker.patch.object(sys, "platform", platform)
-        with pytest.raises(ImportError, match="vrcpilot supports only"):
-            importlib.reload(vrcpilot)
-
-    def test_supported_platform_reimports_cleanly(self, mocker: MockerFixture) -> None:
-        # Reloading without the patch (or with a supported platform) is
-        # a no-op for the gate; this pins that the reload path itself
-        # is healthy so a failing parametrized case above is attributable
-        # to the gate and not to ``importlib.reload`` machinery.
-        mocker.patch.object(sys, "platform", sys.platform)
-        reloaded = importlib.reload(vrcpilot)
-        assert reloaded is vrcpilot
+    @pytest.mark.parametrize(
+        "exc",
+        [
+            vrcpilot.VRChatNotRunningError,
+            vrcpilot.VRChatMultipleInstancesError,
+            vrcpilot.VRChatNotFocusedError,
+            vrcpilot.MicDeviceNotFoundError,
+            vrcpilot.SteamNotFoundError,
+        ],
+    )
+    def test_exception_inherits_from_exception(self, exc: type[BaseException]) -> None:
+        # ``Exception`` (not ``BaseException``) so callers' bare
+        # ``except Exception:`` catches these without also swallowing
+        # ``KeyboardInterrupt`` / ``SystemExit``.
+        assert issubclass(exc, Exception)

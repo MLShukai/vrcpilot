@@ -4,102 +4,33 @@ Tests must NOT define their own ad-hoc ``_Fake*`` classes for shared
 collaborators. Instead, import a fake from this package so the
 behaviour and surface are consistent across the suite.
 
-Usage:
-
-    from tests.fakes import FakeCapture, FakePopen
-
-When a fake's surface needs extending, modify the canonical class
-here so every test benefits — do not subclass ad-hoc inside a test
-file. (Per-test class-level state isolation is provided by helper
-fixtures next to each fake; see :mod:`tests.fakes.capture`.)
+Per the testing policy (``.claude/skills/vrcpilot-testing/SKILL.md``),
+this package only re-exports fakes that stand in for **vrcpilot's own
+ABCs** -- 3rd-party library surfaces must never be faked here; tests
+that need them belong in the integration-real tier (real PipeWire,
+real Xvfb, real subprocess, loopback UDP, etc.).
 """
 
 from __future__ import annotations
 
-from .audio import (
-    FakeMic,
-    FakeProcessAudioCapture,
-    FakePulse,
-    FakePulseEventInfo,
-    FakePulseModuleInfo,
-    FakePulseRegistry,
-    FakePwRecordProcess,
-    FakeSoundCard,
-    FakeSoundCardMicrophone,
-    FakeSoundCardPlayer,
-    FakeSoundCardPlayerCM,
-    FakeSoundCardRecorder,
-    FakeSoundCardRecorderCM,
-    FakeSoundCardSpeaker,
-    FakeSpeaker,
-    FakeSpeakerLoop,
-)
-from .capture import (
-    FakeCapture,
-    FakeCaptureLoop,
-    FakeWindowsCapture,
-    FakeWindowsCaptureControl,
-    FakeWindowsFrame,
-    make_fresh_windows_capture_subclass,
-)
-from .inputtino import FakeInputtinoKeyboard, FakeInputtinoMouse, FakeMouseButton
+from .audio import FakeMic, FakeSpeaker, FakeSpeakerLoop
+from .capture import FakeCapture, FakeCaptureLoop
+from .detect import FakeDetectEngine
 from .ocr import FakeOCREngine
-from .osc import FakeUDPClient
-from .process import FakePopen, FakeProcess
-from .pydirectinput import FakePyDirectInput
 from .record_muxer import FakeMkvStdoutMuxer, FakeMp4FileMuxer, FakeWavFileMuxer
 from .screenshot import patch_stdin_with_screenshot, write_screenshot_payload
-from .x11 import (
-    FakePixmap,
-    FakePixmapImage,
-    FakeXDisplay,
-    FakeXGeometry,
-    FakeXWindow,
-    fake_x11_display_cm,
-    make_xerror_subclass,
-)
 
 __all__ = [
     "FakeCapture",
     "FakeCaptureLoop",
-    "FakeInputtinoKeyboard",
-    "FakeInputtinoMouse",
+    "FakeDetectEngine",
     "FakeMic",
     "FakeMkvStdoutMuxer",
-    "FakeMouseButton",
     "FakeMp4FileMuxer",
     "FakeOCREngine",
-    "FakePixmap",
-    "FakePixmapImage",
-    "FakePopen",
-    "FakeProcess",
-    "FakeProcessAudioCapture",
-    "FakePulse",
-    "FakePulseEventInfo",
-    "FakePulseModuleInfo",
-    "FakePulseRegistry",
-    "FakePwRecordProcess",
-    "FakePyDirectInput",
-    "FakeSoundCard",
-    "FakeSoundCardMicrophone",
-    "FakeSoundCardPlayer",
-    "FakeSoundCardPlayerCM",
-    "FakeSoundCardRecorder",
-    "FakeSoundCardRecorderCM",
-    "FakeSoundCardSpeaker",
     "FakeSpeaker",
     "FakeSpeakerLoop",
-    "FakeUDPClient",
     "FakeWavFileMuxer",
-    "FakeWindowsCapture",
-    "FakeWindowsCaptureControl",
-    "FakeWindowsFrame",
-    "FakeXDisplay",
-    "FakeXGeometry",
-    "FakeXWindow",
-    "fake_x11_display_cm",
-    "make_fresh_windows_capture_subclass",
-    "make_xerror_subclass",
     "patch_stdin_with_screenshot",
     "write_screenshot_payload",
 ]
