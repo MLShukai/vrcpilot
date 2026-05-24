@@ -20,8 +20,8 @@ from tests.helpers import only_linux
 from vrcpilot.process import VRChatLauncherNotFoundError
 from vrcpilot.process.executable import (
     find_vrchat_launcher,
-    linux_steam_paths,
     parse_steam_library_paths,
+    steam_paths,
 )
 
 _VDF_WITH_TWO_LIBRARIES = """"libraryfolders"
@@ -64,8 +64,8 @@ class TestParseSteamLibraryPaths:
         assert parse_steam_library_paths(tmp_path / "nope.vdf") == []
 
 
-class TestLinuxSteamPathsReturnsRootsOnly:
-    """``linux_steam_paths`` enumerates *install roots*, not libraries.
+class TestSteamPathsReturnsRootsOnly:
+    """``steam_paths`` enumerates *install roots*, not libraries.
 
     Library expansion via ``libraryfolders.vdf`` is centralised in
     :func:`find_vrchat_launcher`. If this helper expanded the vdf
@@ -89,7 +89,7 @@ class TestLinuxSteamPathsReturnsRootsOnly:
             encoding="utf-8",
         )
 
-        result = linux_steam_paths()
+        result = steam_paths()
 
         assert external not in result
         assert result == [
@@ -129,7 +129,7 @@ class TestFindVrchatLauncherDiscoveryLinux:
     """Linux discovery chain driven by real ``HOME`` manipulation.
 
     Both canonical roots (``~/.steam/steam`` and ``~/.local/share/Steam``)
-    resolve under ``tmp_path`` so the real ``linux_steam_paths()`` /
+    resolve under ``tmp_path`` so the real ``steam_paths()`` /
     ``find_vrchat_launcher`` chain runs end-to-end against fixtures we
     control -- no monkeypatching of vrcpilot's own helpers required.
     """
@@ -211,7 +211,7 @@ class TestFindVrchatLauncherNotFound:
     ):
         # The env var path is best-effort: a missing target must fall
         # through to library discovery, not abort. Pin HOME at an empty
-        # tmp_path so the real ``linux_steam_paths()`` returns roots
+        # tmp_path so the real ``steam_paths()`` returns roots
         # that exist on disk but contain no launcher -- the discovery
         # chain reaches the NotFound error without any internal helper
         # being monkeypatched. Windows' registry-based auto-detect has
