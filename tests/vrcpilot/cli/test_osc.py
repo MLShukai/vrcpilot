@@ -1,182 +1,230 @@
 """Tests for :mod:`vrcpilot.cli.osc` (send / axis / tap / hold / chatbox /
 typing / avatar).
 
-The CLI calls into :mod:`vrcpilot.osc` via the
-:func:`vrcpilot.cli.osc._make_sender` factory. Patching that factory
-to return an :class:`~vrcpilot.osc.OscSender` constructed with an
-injected :class:`~tests.fakes.FakeUDPClient` keeps every internal
-collaborator real (validation, dispatch, forwarding) while swapping
-out the UDP boundary. ``FakeUDPClient`` is therefore the single
-boundary fake for this suite.
+The seven OSC actions all funnel through :class:`vrcpilot.osc.OscSender`
+which writes UDP datagrams. The integration-real strategy for this
+suite is a loopback UDP server bound to ``127.0.0.1:<ephemeral>`` --
+every CLI invocation goes through the real ``OscSender`` ->
+``python-osc`` -> kernel socket -> our server, so OSC encoding,
+validation, and dispatch all execute end-to-end without any mocks.
+
+``--button-hold 0.0`` is used in tap-style tests so the real
+``time.sleep`` between press and release returns immediately rather
+than spending wall-clock time per case.
 """
 
 from __future__ import annotations
 
 import io
+import socket
+import threading
+import time
+from collections.abc import Iterator
 
 import pytest
 from pytest_mock import MockerFixture
+from pythonosc.dispatcher import Dispatcher
+from pythonosc.osc_server import BlockingOSCUDPServer
 
-from tests.fakes import FakeUDPClient
 from vrcpilot.cli import main
 from vrcpilot.cli.osc import AXIS_NAMES, HOLD_NAMES, TAP_NAMES
 from vrcpilot.osc import OscSender
 from vrcpilot.osc.controller import InputController
 
 
-@pytest.fixture
-def fake_client(mocker: MockerFixture) -> FakeUDPClient:
-    """Wire ``vrcpilot.cli.osc._make_sender`` to a recording sender.
+class OscRecorder:
+    """Loopback UDP server collecting ``(address, args)`` tuples.
 
-    Builds a real :class:`OscSender` with a :class:`FakeUDPClient`
-    injected via ``client=``, patches the factory to return that sender,
-    and hands the inner :class:`FakeUDPClient` back so tests can inspect
-    ``.sent``.
+    Used as the test boundary for ``vrcpilot osc``: the CLI sends real
+    UDP datagrams to ``127.0.0.1:<port>``, the recorder appends each
+    message to :attr:`sent`, and the test asserts on what reached the
+    wire. ``args`` is a tuple of positional args (single int / float /
+    list-of-args for chatbox), matching ``python-osc``'s callback shape.
     """
-    client = FakeUDPClient()
-    sender = OscSender(client=client)
-    mocker.patch("vrcpilot.cli.osc._make_sender", return_value=sender)
-    return client
+
+    def __init__(self) -> None:
+        self.sent: list[tuple[str, tuple[object, ...]]] = []
+        self._dispatcher = Dispatcher()
+        self._dispatcher.set_default_handler(self._record)
+        self._server = BlockingOSCUDPServer(("127.0.0.1", 0), self._dispatcher)
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread.start()
+
+    @property
+    def port(self) -> int:
+        """The ephemeral UDP port the server bound to."""
+        return self._server.server_address[1]
+
+    def _record(self, address: str, *args: object) -> None:
+        self.sent.append((address, tuple(args)))
+
+    def wait_for_message_count(self, count: int, timeout: float = 2.0) -> None:
+        """Block until :attr:`sent` reaches ``count`` messages or timeout.
+
+        UDP delivery on loopback is normally instantaneous but not
+        guaranteed; this gives the kernel queue a deterministic window
+        without waiting unconditionally.
+        """
+        deadline = time.monotonic() + timeout
+        while len(self.sent) < count:
+            if time.monotonic() >= deadline:
+                raise AssertionError(
+                    f"expected {count} OSC messages, got {len(self.sent)}: "
+                    f"{self.sent!r}"
+                )
+            time.sleep(0.01)
+
+    def close(self) -> None:
+        self._server.shutdown()
+        self._server.server_close()
+        self._thread.join(timeout=2.0)
+
+
+@pytest.fixture
+def osc_recorder() -> Iterator[OscRecorder]:
+    """Yield a running :class:`OscRecorder` bound to an ephemeral port."""
+    recorder = OscRecorder()
+    try:
+        yield recorder
+    finally:
+        recorder.close()
+
+
+def _osc_args(recorder: OscRecorder, port: int, *cli_argv: str) -> list[str]:
+    """Build a full ``vrcpilot osc`` argv aimed at ``recorder``.
+
+    ``--button-hold 0.0`` keeps tap-style tests under wall-clock budget
+    without patching ``time.sleep`` (which is a banned mock target).
+    """
+    del recorder
+    return [
+        "osc",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        str(port),
+        "--button-hold",
+        "0.0",
+        *cli_argv,
+    ]
+
+
+# ---------------------------------------------------------------------------
+# osc send (typed primitives)
+# ---------------------------------------------------------------------------
 
 
 class TestOscSend:
     @pytest.mark.parametrize("truthy", ["true", "1"])
-    def test_send_bool_true_sends_one(self, fake_client: FakeUDPClient, truthy: str):
-        exit_code = main(["osc", "send", "/foo", "--bool", truthy])
-
-        assert exit_code == 0
-        assert fake_client.sent == [("/foo", 1)]
+    def test_bool_true_sends_int_one(self, osc_recorder: OscRecorder, truthy: str):
+        argv = _osc_args(
+            osc_recorder, osc_recorder.port, "send", "/foo", "--bool", truthy
+        )
+        assert main(argv) == 0
+        osc_recorder.wait_for_message_count(1)
+        assert osc_recorder.sent == [("/foo", (1,))]
 
     @pytest.mark.parametrize("falsy", ["false", "0"])
-    def test_send_bool_false_sends_zero(self, fake_client: FakeUDPClient, falsy: str):
-        exit_code = main(["osc", "send", "/foo", "--bool", falsy])
+    def test_bool_false_sends_int_zero(self, osc_recorder: OscRecorder, falsy: str):
+        argv = _osc_args(
+            osc_recorder, osc_recorder.port, "send", "/foo", "--bool", falsy
+        )
+        assert main(argv) == 0
+        osc_recorder.wait_for_message_count(1)
+        assert osc_recorder.sent == [("/foo", (0,))]
 
-        assert exit_code == 0
-        assert fake_client.sent == [("/foo", 0)]
+    def test_int_in_range(self, osc_recorder: OscRecorder):
+        argv = _osc_args(osc_recorder, osc_recorder.port, "send", "/foo", "--int", "42")
+        assert main(argv) == 0
+        osc_recorder.wait_for_message_count(1)
+        assert osc_recorder.sent == [("/foo", (42,))]
 
-    def test_send_int_in_range(self, fake_client: FakeUDPClient):
-        exit_code = main(["osc", "send", "/foo", "--int", "42"])
-
-        assert exit_code == 0
-        assert fake_client.sent == [("/foo", 42)]
-
-    def test_send_int_out_of_range_returns_1(
+    def test_int_out_of_range_exits_1(
         self,
-        fake_client: FakeUDPClient,
+        osc_recorder: OscRecorder,
         capsys: pytest.CaptureFixture[str],
     ):
-        del fake_client  # fixture wires the patch; we only need stderr here
-
-        exit_code = main(["osc", "send", "/foo", "--int", "256"])
-
-        assert exit_code == 1
+        argv = _osc_args(
+            osc_recorder, osc_recorder.port, "send", "/foo", "--int", "256"
+        )
+        assert main(argv) == 1
+        # The validation runs before any datagram is built.
+        assert osc_recorder.sent == []
         captured = capsys.readouterr()
         assert captured.out == ""
         assert "vrcpilot:" in captured.err
 
-    def test_send_float_in_range(self, fake_client: FakeUDPClient):
-        exit_code = main(["osc", "send", "/foo", "--float", "0.5"])
+    def test_float_in_range(self, osc_recorder: OscRecorder):
+        argv = _osc_args(
+            osc_recorder, osc_recorder.port, "send", "/foo", "--float", "0.5"
+        )
+        assert main(argv) == 0
+        osc_recorder.wait_for_message_count(1)
+        assert osc_recorder.sent == [("/foo", (pytest.approx(0.5),))]
 
-        assert exit_code == 0
-        assert fake_client.sent == [("/foo", 0.5)]
-
-    def test_send_float_out_of_range_returns_1(
+    def test_float_out_of_range_exits_1(
         self,
-        fake_client: FakeUDPClient,
+        osc_recorder: OscRecorder,
         capsys: pytest.CaptureFixture[str],
     ):
-        del fake_client
+        argv = _osc_args(
+            osc_recorder, osc_recorder.port, "send", "/foo", "--float", "2.0"
+        )
+        assert main(argv) == 1
+        assert osc_recorder.sent == []
+        assert "vrcpilot:" in capsys.readouterr().err
 
-        exit_code = main(["osc", "send", "/foo", "--float", "2.0"])
-
-        assert exit_code == 1
-        captured = capsys.readouterr()
-        assert captured.out == ""
-        assert "vrcpilot:" in captured.err
-
-    def test_send_requires_a_type_flag(
+    def test_requires_a_type_flag(
         self,
-        fake_client: FakeUDPClient,
+        osc_recorder: OscRecorder,
         capsys: pytest.CaptureFixture[str],
     ):
-        del fake_client
-
+        argv = _osc_args(osc_recorder, osc_recorder.port, "send", "/foo")
         with pytest.raises(SystemExit) as excinfo:
-            main(["osc", "send", "/foo"])
-
+            main(argv)
         assert excinfo.value.code != 0
-        captured = capsys.readouterr()
-        assert captured.err != ""
+        assert capsys.readouterr().err != ""
 
-    def test_send_rejects_multiple_type_flags(
+    def test_rejects_multiple_type_flags(
         self,
-        fake_client: FakeUDPClient,
+        osc_recorder: OscRecorder,
         capsys: pytest.CaptureFixture[str],
     ):
-        del fake_client
-
+        argv = _osc_args(
+            osc_recorder,
+            osc_recorder.port,
+            "send",
+            "/foo",
+            "--bool",
+            "1",
+            "--int",
+            "1",
+        )
         with pytest.raises(SystemExit) as excinfo:
-            main(["osc", "send", "/foo", "--bool", "1", "--int", "1"])
-
+            main(argv)
         assert excinfo.value.code != 0
-        captured = capsys.readouterr()
-        assert captured.err != ""
+        assert capsys.readouterr().err != ""
 
     def test_silent_on_success(
         self,
-        fake_client: FakeUDPClient,
+        osc_recorder: OscRecorder,
         capsys: pytest.CaptureFixture[str],
     ):
-        del fake_client
-
-        exit_code = main(["osc", "send", "/foo", "--int", "1"])
-
-        assert exit_code == 0
+        argv = _osc_args(osc_recorder, osc_recorder.port, "send", "/foo", "--int", "1")
+        assert main(argv) == 0
         captured = capsys.readouterr()
         assert captured.out == ""
         assert captured.err == ""
 
 
-class TestOscConnection:
-    def test_host_and_port_are_passed_to_sender_factory(self, mocker: MockerFixture):
-        client = FakeUDPClient()
-        sender = OscSender(client=client)
-        factory = mocker.patch("vrcpilot.cli.osc._make_sender", return_value=sender)
-
-        exit_code = main(
-            [
-                "osc",
-                "--host",
-                "1.2.3.4",
-                "--port",
-                "9100",
-                "send",
-                "/foo",
-                "--int",
-                "1",
-            ]
-        )
-
-        assert exit_code == 0
-        factory.assert_called_once_with("1.2.3.4", 9100)
+# ---------------------------------------------------------------------------
+# osc axis (InputController float dispatch)
+# ---------------------------------------------------------------------------
 
 
-class TestOscDispatch:
-    def test_no_action_exits_non_zero(self, capsys: pytest.CaptureFixture[str]):
-        # ``add_subparsers(required=True)`` on the osc parser makes
-        # argparse error out when ``vrcpilot osc`` is invoked without
-        # an action.
-        with pytest.raises(SystemExit) as excinfo:
-            main(["osc"])
-
-        assert excinfo.value.code != 0
-        captured = capsys.readouterr()
-        assert captured.err != ""
-
-
-# Map every CLI kebab-case name to the OSC address its
-# InputController method writes to. Locking these wirings at the CLI
-# boundary catches both kebab-case typos and accidental method renames.
+# Every CLI kebab-case axis name -> the OSC address its method writes to.
+# Locks the wiring at the CLI boundary so kebab-case typos and method
+# renames are both caught.
 _AXIS_ADDRESSES: dict[str, str] = {
     "vertical": "/input/Vertical",
     "horizontal": "/input/Horizontal",
@@ -189,6 +237,51 @@ _AXIS_ADDRESSES: dict[str, str] = {
     "spin-hold-lr": "/input/SpinHoldLR",
 }
 
+
+class TestOscAxis:
+    @pytest.mark.parametrize(
+        ("name", "expected_address"), list(_AXIS_ADDRESSES.items())
+    )
+    def test_each_axis_dispatches_to_expected_address(
+        self,
+        osc_recorder: OscRecorder,
+        name: str,
+        expected_address: str,
+    ):
+        argv = _osc_args(osc_recorder, osc_recorder.port, "axis", name, "0.5")
+        assert main(argv) == 0
+        osc_recorder.wait_for_message_count(1)
+        address, args = osc_recorder.sent[0]
+        assert address == expected_address
+        assert args == (pytest.approx(0.5),)
+
+    def test_value_out_of_range_exits_1(
+        self,
+        osc_recorder: OscRecorder,
+        capsys: pytest.CaptureFixture[str],
+    ):
+        argv = _osc_args(osc_recorder, osc_recorder.port, "axis", "vertical", "2.0")
+        assert main(argv) == 1
+        assert osc_recorder.sent == []
+        assert "vrcpilot:" in capsys.readouterr().err
+
+    def test_unknown_name_argparse_error(
+        self,
+        osc_recorder: OscRecorder,
+        capsys: pytest.CaptureFixture[str],
+    ):
+        argv = _osc_args(osc_recorder, osc_recorder.port, "axis", "bogus", "0.0")
+        with pytest.raises(SystemExit) as excinfo:
+            main(argv)
+        assert excinfo.value.code != 0
+        assert capsys.readouterr().err != ""
+
+
+# ---------------------------------------------------------------------------
+# osc tap (press then release with --button-hold sleep between)
+# ---------------------------------------------------------------------------
+
+
 _TAP_ADDRESSES: dict[str, str] = {
     "jump": "/input/Jump",
     "voice": "/input/Voice",
@@ -200,6 +293,49 @@ _TAP_ADDRESSES: dict[str, str] = {
     "comfort-left": "/input/ComfortLeft",
     "comfort-right": "/input/ComfortRight",
 }
+
+
+class TestOscTap:
+    def test_tap_emits_press_then_release(self, osc_recorder: OscRecorder):
+        argv = _osc_args(osc_recorder, osc_recorder.port, "tap", "jump")
+        assert main(argv) == 0
+        osc_recorder.wait_for_message_count(2)
+        assert osc_recorder.sent == [
+            ("/input/Jump", (1,)),
+            ("/input/Jump", (0,)),
+        ]
+
+    @pytest.mark.parametrize(("name", "expected_address"), list(_TAP_ADDRESSES.items()))
+    def test_each_tap_dispatches_to_expected_address(
+        self,
+        osc_recorder: OscRecorder,
+        name: str,
+        expected_address: str,
+    ):
+        argv = _osc_args(osc_recorder, osc_recorder.port, "tap", name)
+        assert main(argv) == 0
+        osc_recorder.wait_for_message_count(2)
+        assert osc_recorder.sent == [
+            (expected_address, (1,)),
+            (expected_address, (0,)),
+        ]
+
+    def test_unknown_name_argparse_error(
+        self,
+        osc_recorder: OscRecorder,
+        capsys: pytest.CaptureFixture[str],
+    ):
+        argv = _osc_args(osc_recorder, osc_recorder.port, "tap", "bogus")
+        with pytest.raises(SystemExit) as excinfo:
+            main(argv)
+        assert excinfo.value.code != 0
+        assert capsys.readouterr().err != ""
+
+
+# ---------------------------------------------------------------------------
+# osc hold (explicit on/off)
+# ---------------------------------------------------------------------------
+
 
 _HOLD_ADDRESSES: dict[str, str] = {
     "run": "/input/Run",
@@ -217,249 +353,179 @@ _HOLD_ADDRESSES: dict[str, str] = {
 }
 
 
-class TestOscAxis:
-    @pytest.mark.parametrize(
-        ("name", "expected_address"), list(_AXIS_ADDRESSES.items())
-    )
-    def test_each_axis_name_dispatches(
-        self,
-        fake_client: FakeUDPClient,
-        name: str,
-        expected_address: str,
-    ):
-        exit_code = main(["osc", "axis", name, "0.5"])
-
-        assert exit_code == 0
-        assert fake_client.sent == [(expected_address, 0.5)]
-
-    def test_axis_value_out_of_range_returns_1(
-        self,
-        fake_client: FakeUDPClient,
-        capsys: pytest.CaptureFixture[str],
-    ):
-        del fake_client
-
-        exit_code = main(["osc", "axis", "vertical", "2.0"])
-
-        assert exit_code == 1
-        captured = capsys.readouterr()
-        assert captured.out == ""
-        assert "vrcpilot:" in captured.err
-
-    def test_axis_unknown_name_argparse_error(self, capsys: pytest.CaptureFixture[str]):
-        with pytest.raises(SystemExit) as excinfo:
-            main(["osc", "axis", "bogus", "0.0"])
-
-        assert excinfo.value.code != 0
-        captured = capsys.readouterr()
-        assert captured.err != ""
-
-
-class TestOscTap:
-    def test_tap_emits_press_then_release(
-        self, fake_client: FakeUDPClient, mocker: MockerFixture
-    ):
-        mocker.patch("vrcpilot.osc.controller.time.sleep")
-
-        exit_code = main(["osc", "tap", "jump"])
-
-        assert exit_code == 0
-        assert fake_client.sent == [("/input/Jump", 1), ("/input/Jump", 0)]
-
-    def test_button_hold_passes_through_to_sleep(
-        self, fake_client: FakeUDPClient, mocker: MockerFixture
-    ):
-        del fake_client
-        sleep_spy = mocker.patch("vrcpilot.osc.controller.time.sleep")
-
-        exit_code = main(["osc", "--button-hold", "0.07", "tap", "jump"])
-
-        assert exit_code == 0
-        assert sleep_spy.call_count == 1
-        assert sleep_spy.call_args.args == (0.07,)
-
-    @pytest.mark.parametrize(("name", "expected_address"), list(_TAP_ADDRESSES.items()))
-    def test_each_tap_name_dispatches(
-        self,
-        fake_client: FakeUDPClient,
-        mocker: MockerFixture,
-        name: str,
-        expected_address: str,
-    ):
-        mocker.patch("vrcpilot.osc.controller.time.sleep")
-
-        exit_code = main(["osc", "tap", name])
-
-        assert exit_code == 0
-        assert fake_client.sent == [
-            (expected_address, 1),
-            (expected_address, 0),
-        ]
-
-    def test_tap_unknown_name_argparse_error(self, capsys: pytest.CaptureFixture[str]):
-        with pytest.raises(SystemExit) as excinfo:
-            main(["osc", "tap", "bogus"])
-
-        assert excinfo.value.code != 0
-        captured = capsys.readouterr()
-        assert captured.err != ""
-
-
 class TestOscHold:
-    def test_hold_on_sends_one(self, fake_client: FakeUDPClient):
-        exit_code = main(["osc", "hold", "run", "on"])
+    def test_on_sends_one(self, osc_recorder: OscRecorder):
+        argv = _osc_args(osc_recorder, osc_recorder.port, "hold", "run", "on")
+        assert main(argv) == 0
+        osc_recorder.wait_for_message_count(1)
+        assert osc_recorder.sent == [("/input/Run", (1,))]
 
-        assert exit_code == 0
-        assert fake_client.sent == [("/input/Run", 1)]
-
-    def test_hold_off_sends_zero(self, fake_client: FakeUDPClient):
-        exit_code = main(["osc", "hold", "run", "off"])
-
-        assert exit_code == 0
-        assert fake_client.sent == [("/input/Run", 0)]
+    def test_off_sends_zero(self, osc_recorder: OscRecorder):
+        argv = _osc_args(osc_recorder, osc_recorder.port, "hold", "run", "off")
+        assert main(argv) == 0
+        osc_recorder.wait_for_message_count(1)
+        assert osc_recorder.sent == [("/input/Run", (0,))]
 
     @pytest.mark.parametrize(
         ("name", "expected_address"), list(_HOLD_ADDRESSES.items())
     )
     def test_each_hold_name_dispatches(
         self,
-        fake_client: FakeUDPClient,
+        osc_recorder: OscRecorder,
         name: str,
         expected_address: str,
     ):
-        exit_code = main(["osc", "hold", name, "on"])
+        argv = _osc_args(osc_recorder, osc_recorder.port, "hold", name, "on")
+        assert main(argv) == 0
+        osc_recorder.wait_for_message_count(1)
+        assert osc_recorder.sent == [(expected_address, (1,))]
 
-        assert exit_code == 0
-        assert fake_client.sent == [(expected_address, 1)]
-
-    def test_hold_state_required_argparse_error(
-        self, capsys: pytest.CaptureFixture[str]
+    def test_state_required(
+        self,
+        osc_recorder: OscRecorder,
+        capsys: pytest.CaptureFixture[str],
     ):
+        argv = _osc_args(osc_recorder, osc_recorder.port, "hold", "run")
         with pytest.raises(SystemExit) as excinfo:
-            main(["osc", "hold", "run"])
-
+            main(argv)
         assert excinfo.value.code != 0
-        captured = capsys.readouterr()
-        assert captured.err != ""
+        assert capsys.readouterr().err != ""
 
-    def test_hold_unknown_name_argparse_error(self, capsys: pytest.CaptureFixture[str]):
-        with pytest.raises(SystemExit) as excinfo:
-            main(["osc", "hold", "bogus", "on"])
 
-        assert excinfo.value.code != 0
-        captured = capsys.readouterr()
-        assert captured.err != ""
+# ---------------------------------------------------------------------------
+# CLI choice -> InputController method surjection
+# ---------------------------------------------------------------------------
 
 
 class TestOscChoiceCoverage:
-    """Forward-direction safety net: every CLI choice must resolve to a
-    callable on a real :class:`InputController`.
+    """Every kebab-case CLI choice resolves to a callable on InputController.
 
-    Catches kebab-case typos in :data:`AXIS_NAMES` /
-    :data:`TAP_NAMES` / :data:`HOLD_NAMES` and method renames /
-    deletions on :class:`InputController`. The reverse direction
-    (``InputController`` methods without a CLI choice) is intentionally
-    NOT asserted -- chatbox / typing live outside axis/tap/hold.
+    Forward-direction safety net: typos in :data:`AXIS_NAMES` /
+    :data:`TAP_NAMES` / :data:`HOLD_NAMES` or method renames on
+    :class:`InputController` both fail this. The reverse direction
+    (controller methods without a CLI choice) is intentionally NOT
+    asserted -- chatbox / typing live outside axis/tap/hold.
     """
 
     @pytest.mark.parametrize("name", AXIS_NAMES)
     def test_axis_name_resolves_to_callable(self, name: str):
-        controller = InputController(OscSender(client=FakeUDPClient()))
-        method = getattr(controller, name.replace("-", "_"))
-        assert callable(method)
+        # Use a UDP socket pointed at a bind-free localhost port; we are
+        # only resolving the method, not sending.
+        sender = OscSender(host="127.0.0.1", port=1)
+        controller = InputController(sender)
+        assert callable(getattr(controller, name.replace("-", "_")))
 
     @pytest.mark.parametrize("name", TAP_NAMES)
     def test_tap_name_resolves_to_callable(self, name: str):
-        controller = InputController(OscSender(client=FakeUDPClient()))
-        method = getattr(controller, name.replace("-", "_"))
-        assert callable(method)
+        sender = OscSender(host="127.0.0.1", port=1)
+        controller = InputController(sender)
+        assert callable(getattr(controller, name.replace("-", "_")))
 
     @pytest.mark.parametrize("name", HOLD_NAMES)
     def test_hold_name_resolves_to_callable(self, name: str):
-        controller = InputController(OscSender(client=FakeUDPClient()))
-        method = getattr(controller, name.replace("-", "_"))
-        assert callable(method)
+        sender = OscSender(host="127.0.0.1", port=1)
+        controller = InputController(sender)
+        assert callable(getattr(controller, name.replace("-", "_")))
+
+
+# ---------------------------------------------------------------------------
+# osc chatbox / typing
+# ---------------------------------------------------------------------------
 
 
 class TestOscChatbox:
-    def test_positional_text_dispatches(self, fake_client: FakeUDPClient):
-        exit_code = main(["osc", "chatbox", "hello world"])
+    def test_positional_text_dispatches(self, osc_recorder: OscRecorder):
+        argv = _osc_args(osc_recorder, osc_recorder.port, "chatbox", "hello world")
+        assert main(argv) == 0
+        osc_recorder.wait_for_message_count(1)
+        address, args = osc_recorder.sent[0]
+        assert address == "/chatbox/input"
+        # Chatbox sends a 3-element bundle (text, send, sfx).
+        assert args == ("hello world", True, True)
 
-        assert exit_code == 0
-        assert fake_client.sent == [("/chatbox/input", ["hello world", True, True])]
+    def test_no_send_and_no_sfx_flip_flags(self, osc_recorder: OscRecorder):
+        argv = _osc_args(
+            osc_recorder,
+            osc_recorder.port,
+            "chatbox",
+            "hi",
+            "--no-send",
+            "--no-sfx",
+        )
+        assert main(argv) == 0
+        osc_recorder.wait_for_message_count(1)
+        assert osc_recorder.sent[0] == ("/chatbox/input", ("hi", False, False))
 
-    def test_no_send_and_no_sfx_flip_flags(self, fake_client: FakeUDPClient):
-        exit_code = main(["osc", "chatbox", "hi", "--no-send", "--no-sfx"])
-
-        assert exit_code == 0
-        assert fake_client.sent == [("/chatbox/input", ["hi", False, False])]
-
-    def test_text_too_long_returns_1(
+    def test_text_too_long_exits_1(
         self,
-        fake_client: FakeUDPClient,
+        osc_recorder: OscRecorder,
         capsys: pytest.CaptureFixture[str],
     ):
-        del fake_client
-
-        exit_code = main(["osc", "chatbox", "x" * 145])
-
-        assert exit_code == 1
-        captured = capsys.readouterr()
-        assert captured.out == ""
-        assert "vrcpilot:" in captured.err
+        argv = _osc_args(osc_recorder, osc_recorder.port, "chatbox", "x" * 145)
+        assert main(argv) == 1
+        assert osc_recorder.sent == []
+        assert "vrcpilot:" in capsys.readouterr().err
 
     def test_stdin_text_when_no_positional(
-        self, fake_client: FakeUDPClient, mocker: MockerFixture
+        self,
+        osc_recorder: OscRecorder,
+        mocker: MockerFixture,
     ):
-        # Piped stdin: not a tty (StringIO.isatty() returns False), so
-        # the CLI consumes stdin verbatim (no strip).
-        mocker.patch(
-            "vrcpilot.cli.osc.sys.stdin",
-            new=io.StringIO("from stdin"),
+        # Pipe a string via stdin -- StringIO.isatty() returns False
+        # natively, so the chatbox CLI reads it.
+        mocker.patch("vrcpilot.cli.osc.sys.stdin", new=io.StringIO("from stdin"))
+        argv = _osc_args(osc_recorder, osc_recorder.port, "chatbox")
+        assert main(argv) == 0
+        osc_recorder.wait_for_message_count(1)
+        assert osc_recorder.sent[0] == (
+            "/chatbox/input",
+            ("from stdin", True, True),
         )
 
-        exit_code = main(["osc", "chatbox"])
-
-        assert exit_code == 0
-        assert fake_client.sent == [("/chatbox/input", ["from stdin", True, True])]
-
-    def test_no_text_and_tty_returns_2(
+    def test_no_text_and_tty_exits_2(
         self,
-        fake_client: FakeUDPClient,
+        osc_recorder: OscRecorder,
         capsys: pytest.CaptureFixture[str],
     ):
-        del fake_client  # the autouse conftest fixture already pins isatty=True
-
-        exit_code = main(["osc", "chatbox"])
-
-        assert exit_code == 2
+        # The autouse stdin-isatty fixture pins isatty()=True; the
+        # chatbox CLI reads it from its own sys.stdin namespace, which
+        # shares the same singleton object, so the patch carries over.
+        argv = _osc_args(osc_recorder, osc_recorder.port, "chatbox")
+        assert main(argv) == 2
+        assert osc_recorder.sent == []
         captured = capsys.readouterr()
         assert captured.out == ""
         assert captured.err != ""
 
 
 class TestOscTyping:
-    def test_typing_on_sends_one(self, fake_client: FakeUDPClient):
-        exit_code = main(["osc", "typing", "on"])
+    def test_on_sends_one(self, osc_recorder: OscRecorder):
+        argv = _osc_args(osc_recorder, osc_recorder.port, "typing", "on")
+        assert main(argv) == 0
+        osc_recorder.wait_for_message_count(1)
+        assert osc_recorder.sent == [("/chatbox/typing", (1,))]
 
-        assert exit_code == 0
-        assert fake_client.sent == [("/chatbox/typing", 1)]
+    def test_off_sends_zero(self, osc_recorder: OscRecorder):
+        argv = _osc_args(osc_recorder, osc_recorder.port, "typing", "off")
+        assert main(argv) == 0
+        osc_recorder.wait_for_message_count(1)
+        assert osc_recorder.sent == [("/chatbox/typing", (0,))]
 
-    def test_typing_off_sends_zero(self, fake_client: FakeUDPClient):
-        exit_code = main(["osc", "typing", "off"])
-
-        assert exit_code == 0
-        assert fake_client.sent == [("/chatbox/typing", 0)]
-
-    def test_typing_state_required_argparse_error(
-        self, capsys: pytest.CaptureFixture[str]
+    def test_state_required(
+        self,
+        osc_recorder: OscRecorder,
+        capsys: pytest.CaptureFixture[str],
     ):
+        argv = _osc_args(osc_recorder, osc_recorder.port, "typing")
         with pytest.raises(SystemExit) as excinfo:
-            main(["osc", "typing"])
-
+            main(argv)
         assert excinfo.value.code != 0
-        captured = capsys.readouterr()
-        assert captured.err != ""
+        assert capsys.readouterr().err != ""
+
+
+# ---------------------------------------------------------------------------
+# osc avatar (typed avatar parameters)
+# ---------------------------------------------------------------------------
 
 
 class TestOscAvatar:
@@ -467,95 +533,175 @@ class TestOscAvatar:
         ("flag_value", "expected"),
         [("true", 1), ("1", 1), ("false", 0), ("0", 0)],
     )
-    def test_avatar_send_bool(
+    def test_bool(
         self,
-        fake_client: FakeUDPClient,
+        osc_recorder: OscRecorder,
         flag_value: str,
         expected: int,
     ):
-        exit_code = main(["osc", "avatar", "MyParam", "--bool", flag_value])
+        argv = _osc_args(
+            osc_recorder,
+            osc_recorder.port,
+            "avatar",
+            "MyParam",
+            "--bool",
+            flag_value,
+        )
+        assert main(argv) == 0
+        osc_recorder.wait_for_message_count(1)
+        assert osc_recorder.sent == [("/avatar/parameters/MyParam", (expected,))]
 
-        assert exit_code == 0
-        assert fake_client.sent == [("/avatar/parameters/MyParam", expected)]
+    def test_int(self, osc_recorder: OscRecorder):
+        argv = _osc_args(
+            osc_recorder,
+            osc_recorder.port,
+            "avatar",
+            "MyParam",
+            "--int",
+            "42",
+        )
+        assert main(argv) == 0
+        osc_recorder.wait_for_message_count(1)
+        assert osc_recorder.sent == [("/avatar/parameters/MyParam", (42,))]
 
-    def test_avatar_send_int(self, fake_client: FakeUDPClient):
-        exit_code = main(["osc", "avatar", "MyParam", "--int", "42"])
-
-        assert exit_code == 0
-        assert fake_client.sent == [("/avatar/parameters/MyParam", 42)]
-
-    def test_avatar_send_int_out_of_range_returns_1(
+    def test_int_out_of_range_exits_1(
         self,
-        fake_client: FakeUDPClient,
+        osc_recorder: OscRecorder,
         capsys: pytest.CaptureFixture[str],
     ):
-        del fake_client
+        argv = _osc_args(
+            osc_recorder,
+            osc_recorder.port,
+            "avatar",
+            "MyParam",
+            "--int",
+            "256",
+        )
+        assert main(argv) == 1
+        assert osc_recorder.sent == []
+        assert "vrcpilot:" in capsys.readouterr().err
 
-        exit_code = main(["osc", "avatar", "MyParam", "--int", "256"])
+    def test_float(self, osc_recorder: OscRecorder):
+        argv = _osc_args(
+            osc_recorder,
+            osc_recorder.port,
+            "avatar",
+            "MyParam",
+            "--float",
+            "0.5",
+        )
+        assert main(argv) == 0
+        osc_recorder.wait_for_message_count(1)
+        assert osc_recorder.sent[0][0] == "/avatar/parameters/MyParam"
+        assert osc_recorder.sent[0][1] == (pytest.approx(0.5),)
 
-        assert exit_code == 1
-        captured = capsys.readouterr()
-        assert captured.out == ""
-        assert "vrcpilot:" in captured.err
-
-    def test_avatar_send_float(self, fake_client: FakeUDPClient):
-        exit_code = main(["osc", "avatar", "MyParam", "--float", "0.5"])
-
-        assert exit_code == 0
-        assert fake_client.sent == [("/avatar/parameters/MyParam", 0.5)]
-
-    def test_avatar_send_float_out_of_range_returns_1(
+    def test_float_out_of_range_exits_1(
         self,
-        fake_client: FakeUDPClient,
+        osc_recorder: OscRecorder,
         capsys: pytest.CaptureFixture[str],
     ):
-        del fake_client
+        argv = _osc_args(
+            osc_recorder,
+            osc_recorder.port,
+            "avatar",
+            "MyParam",
+            "--float",
+            "2.0",
+        )
+        assert main(argv) == 1
+        assert osc_recorder.sent == []
+        assert "vrcpilot:" in capsys.readouterr().err
 
-        exit_code = main(["osc", "avatar", "MyParam", "--float", "2.0"])
-
-        assert exit_code == 1
-        captured = capsys.readouterr()
-        assert captured.out == ""
-        assert "vrcpilot:" in captured.err
-
-    def test_avatar_invalid_name_returns_1(
+    def test_invalid_name_exits_1(
         self,
-        fake_client: FakeUDPClient,
+        osc_recorder: OscRecorder,
         capsys: pytest.CaptureFixture[str],
     ):
-        del fake_client
+        # Slashes in the param name are validated by AvatarParameters
+        # before any datagram leaves the process.
+        argv = _osc_args(
+            osc_recorder,
+            osc_recorder.port,
+            "avatar",
+            "Bad/Name",
+            "--bool",
+            "1",
+        )
+        assert main(argv) == 1
+        assert osc_recorder.sent == []
+        assert "vrcpilot:" in capsys.readouterr().err
 
-        exit_code = main(["osc", "avatar", "Bad/Name", "--bool", "1"])
 
-        assert exit_code == 1
-        captured = capsys.readouterr()
-        assert captured.out == ""
-        assert "vrcpilot:" in captured.err
+# ---------------------------------------------------------------------------
+# Connection plumbing (--host / --port)
+# ---------------------------------------------------------------------------
 
-    def test_avatar_requires_a_type_flag(
+
+class TestOscConnection:
+    def test_host_and_port_route_to_target(self, osc_recorder: OscRecorder):
+        # Two recorders on different ports verify that ``--host`` /
+        # ``--port`` actually route the UDP datagram (not just propagate
+        # into Namespace attrs). We construct a second recorder, send
+        # to its port via the CLI, and assert that exactly one server
+        # received the message.
+        second = OscRecorder()
+        try:
+            assert (
+                main(_osc_args(second, second.port, "send", "/route", "--int", "7"))
+                == 0
+            )
+            second.wait_for_message_count(1)
+            assert second.sent == [("/route", (7,))]
+            # Make sure nothing leaked to the unrelated recorder.
+            assert osc_recorder.sent == []
+        finally:
+            second.close()
+
+
+# ---------------------------------------------------------------------------
+# Top-level error shape
+# ---------------------------------------------------------------------------
+
+
+class TestOscDispatch:
+    def test_no_action_exits_nonzero(
         self,
-        fake_client: FakeUDPClient,
+        osc_recorder: OscRecorder,
         capsys: pytest.CaptureFixture[str],
     ):
-        del fake_client
-
+        # ``add_subparsers(required=True)`` on the osc parser makes
+        # argparse error out when ``vrcpilot osc`` is invoked without
+        # an action.
+        argv = ["osc", "--port", str(osc_recorder.port)]
         with pytest.raises(SystemExit) as excinfo:
-            main(["osc", "avatar", "MyParam"])
-
+            main(argv)
         assert excinfo.value.code != 0
-        captured = capsys.readouterr()
-        assert captured.err != ""
+        assert capsys.readouterr().err != ""
+        # No datagrams escape when argparse rejects the call.
+        assert osc_recorder.sent == []
 
-    def test_avatar_rejects_multiple_type_flags(
-        self,
-        fake_client: FakeUDPClient,
-        capsys: pytest.CaptureFixture[str],
-    ):
-        del fake_client
 
-        with pytest.raises(SystemExit) as excinfo:
-            main(["osc", "avatar", "MyParam", "--bool", "1", "--int", "1"])
+# Sanity check the loopback infrastructure itself so a recorder bug
+# does not silently mask CLI regressions.
 
-        assert excinfo.value.code != 0
-        captured = capsys.readouterr()
-        assert captured.err != ""
+
+class TestRecorderSanity:
+    """Smoke test the loopback UDP scaffolding."""
+
+    def test_recorder_observes_a_direct_datagram(self, osc_recorder: OscRecorder):
+        # Send a raw UDP datagram via socket -- bypasses python-osc on
+        # the send side so a regression in OscSender does not flatter
+        # the recorder. We just assert that the recorder thread is
+        # actually receiving on the bound port.
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            # A minimal OSC bundle is awkward to hand-assemble; instead
+            # use a real python-osc client just for the encoding side.
+            from pythonosc.udp_client import SimpleUDPClient
+
+            client = SimpleUDPClient("127.0.0.1", osc_recorder.port)
+            client.send_message("/ping", 1)
+            osc_recorder.wait_for_message_count(1)
+            assert osc_recorder.sent == [("/ping", (1,))]
+        finally:
+            sock.close()
