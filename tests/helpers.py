@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import functools
 import sys
-from collections.abc import Sequence
 from typing import override
 
 import numpy as np
@@ -20,7 +19,6 @@ from numpy.typing import NDArray
 from vrcpilot import process
 from vrcpilot.controls.keyboard import Key, Keyboard
 from vrcpilot.controls.mouse import Mouse, MouseButton
-from vrcpilot.detect import DetectEngine, Detection
 from vrcpilot.speaker.base import CHANNELS, SpeakerBackend
 
 #: Skip a test on non-Windows platforms.
@@ -256,27 +254,3 @@ class ImplSpeakerBackend(SpeakerBackend):
         # Intentionally a no-op: the ABC only requires idempotence,
         # which a no-op trivially satisfies.
         return None
-
-
-class ImplDetectEngine(DetectEngine):
-    """Concrete :class:`DetectEngine` for ABC tests.
-
-    Records every ``detect`` invocation in :attr:`calls` as
-    ``(image, query)`` ndarray pairs and returns whatever sequence is
-    set on :attr:`result`. Tests use this in place of a mock so the
-    real ABC plumbing is exercised end-to-end -- per the project rule
-    that ABC tests use a real impl rather than ``mocker.Mock``.
-    """
-
-    def __init__(self, result: Sequence[Detection] = ()) -> None:
-        self.calls: list[tuple[NDArray[np.uint8], NDArray[np.uint8]]] = []
-        self.result: Sequence[Detection] = result
-
-    @override
-    def detect(
-        self,
-        image: NDArray[np.uint8],
-        query: NDArray[np.uint8],
-    ) -> Sequence[Detection]:
-        self.calls.append((image, query))
-        return self.result
