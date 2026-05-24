@@ -41,7 +41,7 @@ _VIZ_DEFAULT: object = object()
 
 
 def register(subparsers: SubParsersAction) -> None:
-    """Register the ``detect`` subparser."""
+    """Wire the ``detect`` subparser into the top-level CLI."""
     parser = subparsers.add_parser(
         "detect",
         help="Detect a query image inside the running VRChat window.",
@@ -96,10 +96,10 @@ def register(subparsers: SubParsersAction) -> None:
 
 
 def _resolve_viz_path(arg: object, *, now: datetime) -> Path | None:
-    """Resolve ``args.viz`` to an output path.
+    """Resolve ``args.viz`` to an output path; ``None`` propagates.
 
-    ``None`` propagates (no visualization requested). The default
-    filename uses *now* so tests can pin the timestamp.
+    ``now`` is injected so tests pin the default filename's timestamp
+    deterministically instead of racing the wall clock.
     """
     if arg is None:
         return None
@@ -131,10 +131,13 @@ def _build_engine(*, threshold: float | None) -> DetectEngine | None:
 
 
 def run(args: argparse.Namespace) -> int:
-    """Run ``detect``; exit 1 on screenshot or query-image failure.
+    """Detect ``--query`` inside the resolved screenshot; emit YAML on stdout.
 
-    Failure modes write a single ``vrcpilot: ...`` line to stderr and
-    leave stdout empty.
+    Detection coordinates in the payload are VRChat window-local so
+    they feed straight into ``vrcpilot mouse move``. Exit 1 with
+    ``vrcpilot: ...`` on stderr when the screenshot input cannot be
+    resolved or the query image cannot be read by OpenCV; stdout is
+    left empty on every failure mode.
     """
     shot = resolve_screenshot(args)
     if shot is None:

@@ -1,9 +1,12 @@
-"""``vrcpilot keyboard`` subcommand (``press`` only).
+"""``vrcpilot keyboard`` subcommand: synthetic key input into VRChat.
 
-Only ``press`` is exposed because each CLI invocation owns its own
-``/dev/uinput`` device on Linux and the kernel auto-releases all
-held keys when that device closes — so a separate ``down`` / ``up``
-across processes cannot keep a key held.
+Only ``press`` is exposed. A separate ``down`` / ``up`` across CLI
+invocations cannot keep a key held because each invocation owns its
+own ``/dev/uinput`` device on Linux and the kernel auto-releases all
+held keys when that device closes.
+
+Tests bind fakes by patching :data:`keyboard_api`; preserve that
+import alias when refactoring.
 """
 
 from __future__ import annotations
@@ -22,7 +25,8 @@ from ._common import SubParsersAction, add_pid_arg, handle_multi_instance_error
 
 
 def register(subparsers: SubParsersAction) -> None:
-    """Add the ``keyboard`` subparser plus the ``press`` sub-subcommand."""
+    """Wire the ``keyboard`` subparser and its ``press`` action into the
+    CLI."""
     parser = subparsers.add_parser(
         "keyboard",
         help="Synthetic keyboard input (press only; held-state across "
@@ -51,10 +55,14 @@ def register(subparsers: SubParsersAction) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
-    """Run ``keyboard press``; silent on success, exit 1 on guard failure.
+    """Tap the requested keys simultaneously; silent on success.
 
-    All keys are pressed simultaneously: down left-to-right, single
-    ``duration`` sleep, up right-to-left.
+    Press order is deterministic: down left-to-right, single
+    ``duration`` sleep, then up right-to-left — matching the order
+    VRChat / Unity expect for modifier-first chords.
+
+    Exit 1 with ``vrcpilot: ...`` on stderr when the focus guard fires
+    or the multi-instance case triggers without ``--pid``.
     """
     keys: list[Key] = args.keys
     duration: float = args.duration

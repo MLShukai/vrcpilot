@@ -2,7 +2,8 @@
 """Entry point for the ``vrcpilot`` console script and ``python -m vrcpilot``.
 
 Each subcommand module exposes a ``register(subparsers)`` /
-``run(args) -> int`` pair; this module just wires them together.
+``run(args) -> int`` pair; this module wires them together and routes
+the parsed namespace back to the matching ``run``.
 """
 
 from __future__ import annotations
@@ -42,10 +43,9 @@ _COMMANDS: dict[str, ModuleType] = {
     "mic": mic,
 }
 
-# ``linux-mic`` is registered between ``mic`` and ``mouse`` only on
-# Linux. Inserting it here (rather than appending) preserves the
-# original ``vrcpilot --help`` ordering -- argcomplete and the help
-# text iterate ``_COMMANDS`` in insertion order.
+# ``linux-mic`` slots between ``mic`` and ``mouse`` on Linux so the
+# original help ordering is preserved; argcomplete and ``--help`` both
+# iterate ``_COMMANDS`` in insertion order.
 if sys.platform == "linux":
     from . import linux_mic
 
@@ -64,10 +64,10 @@ _COMMANDS.update(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Return the fully-configured top-level parser.
+    """Build the top-level parser with every subcommand pre-registered.
 
-    Public so tests and ``argcomplete`` can obtain it without running
-    a command.
+    Exposed so tests and ``argcomplete`` can inspect the parser
+    without executing any command.
     """
     parser = argparse.ArgumentParser(
         prog="vrcpilot",
@@ -85,10 +85,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run the ``vrcpilot`` CLI and return its exit code.
+    """Parse ``argv`` and dispatch to the matching subcommand's ``run``.
 
-    Returns the code rather than calling :func:`sys.exit` so tests can
-    drive ``main`` directly.
+    Returns the subcommand's exit code instead of calling
+    :func:`sys.exit` so tests can drive ``main`` in-process.
     """
     parser = build_parser()
     argcomplete.autocomplete(parser)

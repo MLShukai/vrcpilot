@@ -1,4 +1,9 @@
-"""``vrcpilot unfocus`` subcommand."""
+"""``vrcpilot unfocus`` subcommand: drop the VRChat window in the z-order.
+
+Thin shell over :func:`vrcpilot.window.unfocus`. The same failure
+surface as ``focus`` (no VRChat, no window, native Wayland) collapses
+to a single user-visible diagnostic.
+"""
 
 from __future__ import annotations
 
@@ -12,7 +17,7 @@ from ._common import SubParsersAction, add_pid_arg, handle_multi_instance_error
 
 
 def register(subparsers: SubParsersAction) -> None:
-    """Add the ``unfocus`` subparser to the top-level subparsers."""
+    """Wire the ``unfocus`` subparser into the top-level CLI."""
     parser = subparsers.add_parser(
         "unfocus",
         help="Send the running VRChat window to the bottom of the z-order.",
@@ -21,11 +26,14 @@ def register(subparsers: SubParsersAction) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
-    """Run ``unfocus``; silent on success, exit 1 on any failure.
+    """Drop the VRChat window in z-order; silent on success.
 
-    Failures (VRChat not running, no window, native Wayland) print one
-    ``vrcpilot: ...`` line to stderr. With multiple VRChat processes
-    running and no ``--pid``, exits 1 with the multi-instance diagnostic.
+    Exit codes:
+
+    * 0: window was sent to the bottom
+    * 1: any failure (no VRChat, no window, native Wayland, or the
+      multi-instance case without ``--pid``); a single
+      ``vrcpilot: ...`` line is written to stderr.
     """
     try:
         if unfocus(pid=args.pid):

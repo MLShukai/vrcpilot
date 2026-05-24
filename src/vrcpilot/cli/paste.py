@@ -1,9 +1,13 @@
 """``vrcpilot paste`` subcommand: clipboard + Ctrl+V into VRChat.
 
-Text comes from the positional arg or piped stdin (the stdin fallback
-avoids shell-quoting hassles for multi-line text). Exit codes: 0 ok, 1
-guard or clipboard backend failure, 2 no text supplied (positional
-omitted and stdin is a tty, where reading would block forever).
+Routing text through the clipboard sidesteps the scancode keyboard's
+ASCII-only limitation, so non-ASCII (Japanese, emoji, multi-line)
+all paste reliably. Text comes from the positional arg or piped
+stdin (the latter avoids shell-quoting hassles for multi-line text).
+
+Exit codes: 0 ok, 1 focus-guard or clipboard backend failure, 2 no
+text supplied (positional omitted and stdin is a tty — where reading
+would block forever).
 """
 
 from __future__ import annotations
@@ -21,7 +25,7 @@ from ._common import SubParsersAction, add_pid_arg, handle_multi_instance_error
 
 
 def register(subparsers: SubParsersAction) -> None:
-    """Add the ``paste`` subparser to the top-level subparsers."""
+    """Wire the ``paste`` subparser into the top-level CLI."""
     parser = subparsers.add_parser(
         "paste",
         help=(
@@ -43,7 +47,7 @@ def register(subparsers: SubParsersAction) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
-    """Execute the ``paste`` subcommand; see module docstring for exits."""
+    """Paste the resolved text into VRChat; see module docstring for exits."""
     raw: str | None = args.text
     if raw is None:
         if sys.stdin.isatty():

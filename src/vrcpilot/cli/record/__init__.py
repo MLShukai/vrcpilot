@@ -1,9 +1,11 @@
-"""``vrcpilot record`` subcommand: unified video/audio recorder.
+"""``vrcpilot record`` subcommand: unified video / audio recorder.
 
 Mode is derived from ``--video`` / ``--audio``: both unset (or both
 set) means ``"both"``; otherwise the single flag wins. Muxer choice
 follows the output: ``.mp4`` (file, with video), ``.wav`` (file,
-audio-only), or Matroska over stdout when ``-o`` is omitted.
+audio-only), or Matroska over stdout when ``-o`` is omitted —
+Matroska is required for pipe mode because MP4 needs to seek back to
+patch ``moov`` on close, which a pipe forbids.
 """
 
 from __future__ import annotations
@@ -35,13 +37,11 @@ from .muxer import BaseMuxer, MkvStdoutMuxer, Mp4FileMuxer, WavFileMuxer
 #: rely on a stable target frame rate when none is specified.
 _DEFAULT_FPS: float = 30.0
 
-#: Internal mode discriminator. ``"both"`` means an interleaved
-#: video+audio recording; the other two are single-modality.
 type _Mode = Literal["both", "video", "audio"]
 
 
 def register(subparsers: SubParsersAction) -> None:
-    """Add the ``record`` subparser to the top-level subparsers."""
+    """Wire the ``record`` subparser into the top-level CLI."""
     record_parser = subparsers.add_parser(
         "record",
         help="Record VRChat video and/or audio to a file or stdout pipe.",
@@ -125,8 +125,8 @@ def _default_filename(mode: _Mode, *, now: datetime) -> str:
 def _resolve_output(arg: Path | None, *, mode: _Mode, now: datetime) -> Path | None:
     """Resolve ``args.output``; ``None`` signals stdout pipe mode.
 
-    A directory argument is expanded with the mode-aware default
-    filename; ``now`` is injected so tests can pin the timestamp.
+    A directory argument expands to the mode-aware default filename;
+    ``now`` is injected so tests pin the timestamp deterministically.
     """
     if arg is None:
         return None
@@ -166,14 +166,21 @@ def _build_stdout_muxer(mode: _Mode, fps: float) -> BaseMuxer:
 
 
 def run(args: argparse.Namespace) -> int:
-    """Run ``record`` to a file or stdout pipe.
+    """Record VRChat video and/or audio to a file or stdout pipe.
 
     File mode prints the saved absolute path to stdout; pipe mode
-    writes the raw MKV byte stream there. Progress chatter always goes
-    to stderr so stdout stays parseable / pipe-clean. Exit codes:
-    0 ok, 1 runtime failure (VRChat down, no data captured, refused
-    TTY pipe), 2 argument-shape mismatch (extension / ``--fps`` with
-    audio-only).
+    writes the raw MKV byte stream there. Progress chatter always
+    goes to stderr so stdout stays parseable in file mode and
+    byte-clean in pipe mode.
+
+    Exit codes:
+
+    * 0: recording completed and at least one frame or sample reached
+      the muxer
+    * 1: runtime failure (VRChat down, no data captured, refused to
+      stream MKV to a TTY)
+    * 2: argument-shape mismatch (output extension does not match
+      mode, or ``--fps`` combined with audio-only)
     """
     mode = _resolve_mode(video=args.video, audio=args.audio)
     fps_arg: float | None = args.fps

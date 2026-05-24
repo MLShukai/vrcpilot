@@ -3,9 +3,13 @@
 Seven actions (``send`` / ``axis`` / ``tap`` / ``hold`` / ``chatbox`` /
 ``typing`` / ``avatar``); see ``docs/cli.md`` for the full table.
 
-Unlike ``mouse`` / ``keyboard`` there is no shared device, so
-``hold <name> on`` followed by a later ``hold <name> off`` from a fresh
-invocation works — every OSC action is fire-and-forget UDP.
+Unlike ``mouse`` / ``keyboard`` there is no shared device per
+invocation, so ``hold <name> on`` followed by a later
+``hold <name> off`` from a fresh process works — every OSC action is
+fire-and-forget UDP.
+
+Tests bind fakes by patching :func:`_make_sender`; preserve that
+factory shape when refactoring.
 """
 
 from __future__ import annotations
@@ -75,13 +79,12 @@ def _to_method(name: str) -> str:
 
 
 def _parse_bool_str(value: str) -> bool:
-    """Convert one of :data:`_BOOL_CHOICES` to a ``bool`` (``send`` /
-    ``avatar``)."""
+    """Convert one of :data:`_BOOL_CHOICES` to a ``bool``."""
     return value in ("true", "1")
 
 
 def _make_sender(host: str, port: int) -> OscSender:
-    """Construct the :class:`OscSender` that ``run()`` dispatches through.
+    """Build the :class:`OscSender` ``run()`` dispatches through.
 
     Stable patch target so tests can swap in a fake UDP client while
     still exercising the real validation path.
@@ -95,11 +98,12 @@ def _make_controller(args: argparse.Namespace) -> InputController:
 
 
 def register(subparsers: SubParsersAction) -> None:
-    """Wire ``osc`` and its seven action sub-subcommands into the CLI.
+    """Wire ``osc`` plus its seven action sub-subcommands into the CLI.
 
-    Choices for ``axis`` / ``tap`` / ``hold`` come from
-    :data:`AXIS_NAMES` / :data:`TAP_NAMES` / :data:`HOLD_NAMES` — those
-    tuples are the single source of truth.
+    The choice tuples (:data:`AXIS_NAMES` / :data:`TAP_NAMES` /
+    :data:`HOLD_NAMES`) are the single source of truth: argparse
+    ``choices=`` and the ``getattr(controller, _to_method(name))(...)``
+    dispatch both read from them.
     """
     parser = subparsers.add_parser(
         "osc",
@@ -271,11 +275,17 @@ def register(subparsers: SubParsersAction) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
-    """Dispatch ``osc <action>``.
+    """Dispatch ``osc <action>``; silent on success.
 
-    Validation errors from the underlying senders collapse to exit 1.
-    ``chatbox`` with no text and a tty stdin exits 2 (same shape as
-    :mod:`vrcpilot.cli.paste`).
+    Exit codes:
+
+    * 0: datagram sent
+    * 1: validation rejected the value (out-of-range int / float,
+      invalid avatar parameter name, chatbox text too long); the
+      sender writes ``vrcpilot: <message>`` to stderr and no datagram
+      reaches the wire
+    * 2: ``chatbox`` invoked with no positional text and a tty stdin
+      (same shape as :mod:`vrcpilot.cli.paste`)
     """
     try:
         match args.osc_action:

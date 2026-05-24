@@ -26,7 +26,7 @@ from ._common import (
 
 
 def register(subparsers: SubParsersAction) -> None:
-    """Add the ``screenshot`` subparser to the top-level subparsers."""
+    """Wire the ``screenshot`` subparser into the top-level CLI."""
     screenshot_parser = subparsers.add_parser(
         "screenshot",
         help="Capture a screenshot of the running VRChat window.",
@@ -50,7 +50,12 @@ def register(subparsers: SubParsersAction) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
-    """Run ``screenshot``; exit 1 (empty stdout) when capture fails."""
+    """Capture the VRChat window and emit YAML on stdout.
+
+    Exit 1 with ``vrcpilot: ...`` on stderr (empty stdout) when
+    :func:`vrcpilot.screenshot.take_screenshot` cannot produce a frame
+    or the multi-instance guard fires without ``--pid``.
+    """
     output: Path | None = args.output
     try:
         shot = take_screenshot(pid=args.pid)

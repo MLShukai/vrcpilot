@@ -1,9 +1,13 @@
-"""``vrcpilot mouse`` subcommand (``move`` / ``click`` / ``scroll``).
+"""``vrcpilot mouse`` subcommand: synthetic mouse input into VRChat.
 
-``press`` / ``release`` are intentionally not exposed: each CLI
-invocation owns its own ``/dev/uinput`` device on Linux and the kernel
-auto-releases held buttons when that device closes, so cross-process
-holds cannot work (same trade-off as :mod:`vrcpilot.cli.keyboard`).
+Exposes ``move`` / ``click`` / ``scroll``. ``press`` / ``release``
+are intentionally not exposed because each CLI invocation owns its
+own ``/dev/uinput`` device on Linux and the kernel auto-releases held
+buttons when that device closes — so a held button cannot survive
+across processes (same trade-off as :mod:`vrcpilot.cli.keyboard`).
+
+Tests bind fakes by patching :data:`mouse_api`; preserve that import
+alias when refactoring.
 """
 
 from __future__ import annotations
@@ -22,7 +26,7 @@ from ._common import SubParsersAction, add_pid_arg, handle_multi_instance_error
 
 
 def register(subparsers: SubParsersAction) -> None:
-    """Add the ``mouse`` subparser plus its three action sub-subcommands."""
+    """Wire ``mouse`` plus its three action sub-subcommands into the CLI."""
     parser = subparsers.add_parser(
         "mouse",
         help="Synthetic mouse input (move / click / scroll; press/release "
@@ -83,7 +87,12 @@ def register(subparsers: SubParsersAction) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
-    """Dispatch ``mouse {move,click,scroll}``; exit 1 on guard failure."""
+    """Dispatch ``mouse {move,click,scroll}``; silent on success.
+
+    Exit 1 with ``vrcpilot: ...`` on stderr when the focus guard fires
+    (VRChat not running / not focused) or the multi-instance case
+    triggers without ``--pid``.
+    """
     try:
         match args.mouse_action:
             case "move":

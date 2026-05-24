@@ -1,4 +1,9 @@
-"""``vrcpilot pid`` subcommand."""
+"""``vrcpilot pid`` subcommand: enumerate live VRChat PIDs.
+
+The state-dependent exit code (1 when no VRChat is running) is the
+useful signal — shells branch with
+``if vrcpilot pid >/dev/null; then ...`` rather than parsing stdout.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +15,7 @@ from ._common import SubParsersAction
 
 
 def register(subparsers: SubParsersAction) -> None:
-    """Add the ``pid`` subparser to the top-level subparsers."""
+    """Wire the ``pid`` subparser into the top-level CLI."""
     subparsers.add_parser(
         "pid",
         help="Print PIDs of running VRChat processes (one per line).",
@@ -18,10 +23,10 @@ def register(subparsers: SubParsersAction) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
-    """Print live VRChat PIDs; exit 1 (with empty stdout) when none run.
+    """List live VRChat PIDs (one per line); exit 1 when none are running.
 
-    State-dependent exit lets shells branch with
-    ``if vrcpilot pid >/dev/null; then ...``.
+    The "no VRChat" path is intentionally silent on both stdout and
+    stderr so the exit code remains the sole signal callers branch on.
     """
     del args
     pids = find_pids()
