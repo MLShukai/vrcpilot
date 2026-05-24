@@ -1,4 +1,4 @@
-"""VRChat ``launch.exe`` / Steam library 探索 helper。"""
+"""VRChat ``launch.exe`` / Steam library 探索 helper。."""
 
 from __future__ import annotations
 
@@ -25,21 +25,17 @@ def parse_steam_library_paths(vdf_path: Path) -> list[Path]:
     return [Path(p) for p in re.findall(r'"path"\s+"([^"]+)"', text)]
 
 
-def windows_steam_paths() -> list[Path]:
-    """Return candidate Steam install **roots** on Windows.
+if sys.platform == "win32":
 
-    Responsibility is limited to enumerating Steam install roots from
-    ``HKCU\\Software\\Valve\\Steam\\SteamPath`` plus the standard installer
-    paths. Expanding each root's ``steamapps/libraryfolders.vdf`` into the
-    real list of Steam libraries is the caller's job
-    (:func:`find_vrchat_launcher`), so there is exactly one place that
-    knows how Steam library discovery works.
-    """
-    candidates: list[Path] = []
-    # ``sys.platform == "win32"`` narrows so pyright resolves the Windows-only
-    # ``winreg`` stubs from typeshed; without the guard the import is unknown
-    # on POSIX type-check runs.
-    if sys.platform == "win32":
+    def _windows_steam_paths() -> list[Path]:
+        """Return candidate Steam install **roots** on Windows.
+
+        Enumerates ``HKCU\\Software\\Valve\\Steam\\SteamPath`` plus the
+        standard installer paths. Expanding each root's
+        ``steamapps/libraryfolders.vdf`` into the real list of Steam
+        libraries is the caller's job (:func:`find_vrchat_launcher`).
+        """
+        candidates: list[Path] = []
         try:
             import winreg
 
@@ -52,25 +48,43 @@ def windows_steam_paths() -> list[Path]:
         except (ImportError, OSError, FileNotFoundError):
             pass
 
-    candidates.extend(
-        [
-            Path(r"C:\Program Files (x86)\Steam"),
-            Path(r"C:\Program Files\Steam"),
+        candidates.extend(
+            [
+                Path(r"C:\Program Files (x86)\Steam"),
+                Path(r"C:\Program Files\Steam"),
+            ]
+        )
+        return candidates
+
+
+if sys.platform == "linux":
+
+    def _linux_steam_paths() -> list[Path]:
+        """Return candidate Steam install **roots** on Linux.
+
+        Mirrors :func:`_windows_steam_paths`: only enumerate install roots
+        and leave ``libraryfolders.vdf`` expansion to the caller.
+        """
+        return [
+            Path("~/.steam/steam").expanduser(),
+            Path("~/.local/share/Steam").expanduser(),
         ]
-    )
-    return candidates
 
 
-def linux_steam_paths() -> list[Path]:
-    """Return candidate Steam install **roots** on Linux.
+def steam_paths() -> list[Path]:
+    """Return candidate Steam install **roots** for the current OS.
 
-    Mirrors :func:`windows_steam_paths`: only enumerate install roots and
-    leave ``libraryfolders.vdf`` expansion to the caller.
+    Single public entry point — platform-specific implementations are
+    private helpers (``_windows_steam_paths`` / ``_linux_steam_paths``)
+    that only exist on their respective OS. Library expansion via
+    ``libraryfolders.vdf`` is centralised in :func:`find_vrchat_launcher`,
+    so this helper returns *roots* only.
     """
-    return [
-        Path("~/.steam/steam").expanduser(),
-        Path("~/.local/share/Steam").expanduser(),
-    ]
+    if sys.platform == "win32":
+        return _windows_steam_paths()
+    if sys.platform == "linux":
+        return _linux_steam_paths()
+    raise NotImplementedError(f"Steam discovery is not implemented on {sys.platform}")
 
 
 def find_vrchat_launcher(override: Path | None = None) -> Path:
@@ -105,12 +119,7 @@ def find_vrchat_launcher(override: Path | None = None) -> Path:
         if env_path.is_file():
             return env_path
 
-    if sys.platform == "win32":
-        roots = windows_steam_paths()
-    elif sys.platform == "linux":
-        roots = linux_steam_paths()
-    else:
-        roots = []
+    roots = steam_paths()
 
     # Each ``root`` is a Steam install root; the libraries it owns live in
     # ``steamapps/libraryfolders.vdf``. Centralising the vdf expansion here
