@@ -1,4 +1,4 @@
-"""VRChat ``launch.exe`` / Steam library 探索 helper。."""
+"""Discovery helpers for VRChat's ``launch.exe`` across Steam libraries."""
 
 from __future__ import annotations
 
@@ -9,15 +9,20 @@ from pathlib import Path
 
 from .errors import VRChatLauncherNotFoundError
 
-#: launch.exe の Steam 配下相対パス。
+#: Path of ``launch.exe`` relative to any Steam library root.
 _LAUNCHER_RELATIVE: Path = Path("steamapps/common/VRChat/launch.exe")
 
-#: $VRCHAT_LAUNCHER 環境変数名。
+#: Environment variable callers can set to short-circuit auto-discovery.
 _LAUNCHER_ENV_VAR: str = "VRCHAT_LAUNCHER"
 
 
 def parse_steam_library_paths(vdf_path: Path) -> list[Path]:
-    """Extract path entries from a Steam ``libraryfolders.vdf``."""
+    """Extract every ``"path"`` entry from a Steam ``libraryfolders.vdf``.
+
+    A missing or unreadable file yields ``[]`` so callers can treat
+    "no vdf" the same as "no extra libraries listed" and fall back to
+    probing the install root directly.
+    """
     try:
         text = vdf_path.read_text(encoding="utf-8", errors="replace")
     except OSError:
@@ -88,20 +93,22 @@ def steam_paths() -> list[Path]:
 
 
 def find_vrchat_launcher(override: Path | None = None) -> Path:
-    """Return the verified ``launch.exe`` path.
+    """Resolve VRChat's ``launch.exe`` to an existing file on disk.
 
-    Resolution order:
+    Resolution order (each candidate validated via ``Path.is_file()``):
 
-    1. ``override`` argument (CLI ``--vrchat-launcher``, API ``vrchat_launcher=``).
-    2. ``$VRCHAT_LAUNCHER`` environment variable.
-    3. Steam library discovery via ``libraryfolders.vdf`` + standard paths.
-
-    Each candidate is validated with ``Path.is_file()`` before being returned.
+    1. ``override`` (CLI ``--vrchat-launcher`` / API ``vrchat_launcher=``).
+    2. ``$VRCHAT_LAUNCHER`` environment variable. A *missing* file here
+       does **not** short-circuit — discovery falls through to step 3 so
+       a stale env var cannot mask a working install.
+    3. Steam library walk via :func:`steam_paths` +
+       ``libraryfolders.vdf``. Roots without a vdf are still probed
+       directly (covers fresh installs and non-standard layouts).
 
     Raises:
-        VRChatLauncherNotFoundError: No candidate resolves to an existing
-            ``launch.exe`` file. The message includes the candidates tried so
-            the user can pick the right ``--vrchat-launcher`` value.
+        VRChatLauncherNotFoundError: All candidates were exhausted. The
+            message lists every path tried so the caller can pick the
+            right ``--vrchat-launcher`` value without guessing.
     """
     if override is not None:
         if override.is_file():

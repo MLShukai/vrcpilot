@@ -49,18 +49,15 @@ def find_pid() -> int | None:
 def find_pids() -> list[int]:
     """Return PIDs of every running VRChat process, newest first.
 
-    Sorted by ``psutil.Process.create_time()`` in **descending** order so the
-    most-recently-started VRChat appears first. Useful when multiple instances
-    run and the caller wants the freshly launched one.
+    Sorted by ``create_time()`` descending so the most-recently-started
+    instance is index 0 — what a fresh :func:`launch` typically wants.
 
-    Processes whose ``create_time()`` raises ``psutil.NoSuchProcess`` or
-    ``psutil.AccessDenied`` are silently skipped. ``AccessDenied`` is the
-    common failure mode for cross-session VRChat instances on Windows (e.g.
-    one started by another user), so a skipped process is not a hard error
-    here. The downstream consequence is that if the *only* running VRChat is
-    in that state, :func:`resolve_pid` (called with ``pid=None``) will report
-    it as not running and raise :class:`VRChatNotRunningError`. Returns an
-    empty list when no VRChat instance is running.
+    Processes whose ``create_time()`` raises ``NoSuchProcess`` /
+    ``AccessDenied`` are silently dropped. ``AccessDenied`` is normal on
+    Windows for VRChat instances owned by another user session; treating
+    it as an error would make cross-session enumeration explode. The
+    downstream cost: if the *only* running VRChat is hidden behind
+    ``AccessDenied``, :func:`resolve_pid` will report "not running".
     """
     pairs: list[tuple[float, int]] = []
     for proc in psutil.process_iter(["name"]):
