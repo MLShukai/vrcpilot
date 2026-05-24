@@ -79,6 +79,6 @@ class OCREngine(ABC):
     def recognize(self, image: NDArray[np.uint8]) -> Sequence[OCRWord]:
         """Recognize text in an ``(H, W, 3)`` uint8 RGB image.
 
-        Returned :class:`OCRWord` coordinates are image-local; mapping
-        them to desktop coordinates is the caller's responsibility.
+        Returned :class:`OCRWord` coordinates are image-local —
+        translation to desktop coordinates is the caller's job.
         """
