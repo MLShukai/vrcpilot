@@ -33,7 +33,7 @@ from __future__ import annotations
 import pytest
 
 from tests.helpers import ImplMouse
-from vrcpilot.controls.mouse.base import MouseButton
+from vrcpilot.controls.mouse.base import Mouse, MouseButton
 from vrcpilot.process import VRChatNotRunningError
 
 # --- MouseButton enum contract --------------------------------------------
@@ -159,6 +159,145 @@ class TestMouseClickCount:
         impl.click(MouseButton.LEFT, count=0, focus=False)
 
         assert impl.calls == []
+
+
+class TestMouseClickInterval:
+    """``interval`` inserts a real sleep *between* click cycles.
+
+    The default is ``0.0`` (no sleep, full backwards compatibility with
+    callers that omit the keyword). When ``interval > 0`` and
+    ``count > 1`` the press of cycle *n+1* must wait at least
+    ``interval`` seconds after the release of cycle *n*; intra-cycle
+    ``press -> release`` is unaffected and the final cycle's release is
+    not followed by another sleep. ``count <= 1`` makes ``interval``
+    moot -- no cycle transitions exist -- so the call returns promptly
+    even with a large ``interval``.
+
+    Verified by stamping :func:`time.monotonic` inside ``_do_press`` /
+    ``_do_release`` (a local :class:`Mouse` subclass, mirroring
+    ``TestKeyboardPressDefaultDuration`` over in ``keyboard/``) and
+    asserting the gap is at least roughly half the requested
+    ``interval`` -- a loose lower bound that survives scheduler noise
+    while still catching a regression to "no sleep at all". Upper
+    bounds on real sleeps are avoided because they flake under CI host
+    jitter; the "no sleep happened" tests instead bound the *whole*
+    call's wall-clock to something much smaller than the would-be
+    interval.
+    """
+
+    def test_interval_inserts_gap_between_cycles_only(self) -> None:
+        import time
+        from typing import override
+
+        timestamps: list[tuple[str, float]] = []
+
+        class TimingMouse(Mouse):
+            @override
+            def _do_press(self, button: MouseButton) -> None:
+                del button
+                timestamps.append(("press", time.monotonic()))
+
+            @override
+            def _do_release(self, button: MouseButton) -> None:
+                del button
+                timestamps.append(("release", time.monotonic()))
+
+            @override
+            def _do_move(self, x: int, y: int, *, relative: bool) -> None:
+                del x, y, relative
+
+            @override
+            def _do_scroll(self, amount: int) -> None:
+                del amount
+
+        TimingMouse().click(count=3, interval=0.05, focus=False)
+
+        # Three cycles: press/release/press/release/press/release.
+        assert [kind for kind, _ in timestamps] == [
+            "press",
+            "release",
+            "press",
+            "release",
+            "press",
+            "release",
+        ]
+
+        # Inter-cycle gaps (release[i] -> press[i+1]) must each meet the
+        # loose lower bound (~half the requested interval).
+        gap_1 = timestamps[2][1] - timestamps[1][1]  # cycle 1 -> 2
+        gap_2 = timestamps[4][1] - timestamps[3][1]  # cycle 2 -> 3
+        assert gap_1 >= 0.025
+        assert gap_2 >= 0.025
+
+        # Intra-cycle press->release is *not* affected by ``interval``;
+        # duration defaulted to 0.0 so each cycle should be near-zero.
+        intra_1 = timestamps[1][1] - timestamps[0][1]
+        intra_2 = timestamps[3][1] - timestamps[2][1]
+        intra_3 = timestamps[5][1] - timestamps[4][1]
+        assert intra_1 < 0.025
+        assert intra_2 < 0.025
+        assert intra_3 < 0.025
+
+    def test_interval_default_inserts_no_sleep(self) -> None:
+        import time
+
+        impl = ImplMouse()
+
+        start = time.monotonic()
+        impl.click(count=3, focus=False)  # interval defaults to 0.0
+        elapsed = time.monotonic() - start
+
+        # Three cycles with no interval and zero duration must finish
+        # essentially instantly. A real sleep would push past 0.05s.
+        assert elapsed < 0.05
+        # Sanity: three full cycles were emitted.
+        assert len(impl.calls) == 6
+
+    def test_count_one_ignores_interval(self) -> None:
+        import time
+
+        impl = ImplMouse()
+
+        # A 1-second interval would dominate the elapsed time if the
+        # implementation ever slept; with ``count=1`` there are no
+        # cycle transitions, so no sleep should happen.
+        start = time.monotonic()
+        impl.click(count=1, interval=1.0, focus=False)
+        elapsed = time.monotonic() - start
+
+        assert elapsed < 0.05
+        assert impl.calls == [
+            ("_do_press", {"button": MouseButton.LEFT}),
+            ("_do_release", {"button": MouseButton.LEFT}),
+        ]
+
+    def test_count_zero_ignores_interval(self) -> None:
+        import time
+
+        impl = ImplMouse()
+
+        start = time.monotonic()
+        impl.click(count=0, interval=1.0, focus=False)
+        elapsed = time.monotonic() - start
+
+        # ``count=0`` already means "emit nothing"; pairing it with a
+        # large ``interval`` must not introduce any sleep either.
+        assert elapsed < 0.05
+        assert impl.calls == []
+
+    def test_non_positive_interval_inserts_no_sleep(self) -> None:
+        import time
+
+        impl = ImplMouse()
+
+        # Negative / zero intervals are treated as no-op, mirroring the
+        # documented "interval <= 0 is no-op" semantics.
+        start = time.monotonic()
+        impl.click(count=3, interval=-0.5, focus=False)
+        elapsed = time.monotonic() - start
+
+        assert elapsed < 0.05
+        assert len(impl.calls) == 6
 
 
 # --- Mouse ABC -- press / release / scroll --------------------------------

@@ -113,23 +113,29 @@ class Mouse(ABC):
         *buttons: MouseButton,
         count: int = 1,
         duration: float = 0.0,
+        interval: float = 0.0,
         focus: bool = True,
         pid: int | None = None,
     ) -> None:
         """Click ``buttons`` simultaneously, repeated ``count`` times.
 
         ``duration`` is the per-cycle hold in seconds; use 0.02 – 0.05
-        when VRChat / Unity drops zero-length presses. Cycles run
-        back-to-back with no inter-cycle delay. Empty ``buttons``
-        defaults to :attr:`MouseButton.LEFT`. ``pid`` selects the
-        target VRChat instance when multiple are running;
-        ``focus=False`` skips every PID lookup (hot-loop fast path).
+        when VRChat / Unity drops zero-length presses. ``interval`` is
+        the inter-cycle gap in seconds (default 0.0 = back-to-back
+        cycles); use 0.02 – 0.05 on Linux (inputtino + Wine) where
+        VRChat silently coalesces zero-gap repeats into a single click,
+        defeating double-click recognition. Empty ``buttons`` defaults
+        to :attr:`MouseButton.LEFT`. ``pid`` selects the target VRChat
+        instance when multiple are running; ``focus=False`` skips every
+        PID lookup (hot-loop fast path).
         """
         if focus:
             ensure_target(pid=pid)
         if not buttons:
             buttons = (MouseButton.LEFT,)
-        for _ in range(count):
+        for i in range(count):
+            if i > 0 and interval > 0:
+                time.sleep(interval)
             for b in buttons:
                 self._do_press(b)
             if duration > 0:
