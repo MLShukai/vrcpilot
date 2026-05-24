@@ -42,11 +42,9 @@ from .capture import (
     FakeWindowsFrame,
     make_fresh_windows_capture_subclass,
 )
-from .inputtino import FakeInputtinoKeyboard, FakeInputtinoMouse, FakeMouseButton
 from .ocr import FakeOCREngine
 from .osc import FakeUDPClient
 from .process import FakePopen, FakeProcess
-from .pydirectinput import FakePyDirectInput
 from .record_muxer import FakeMkvStdoutMuxer, FakeMp4FileMuxer, FakeWavFileMuxer
 from .screenshot import patch_stdin_with_screenshot, write_screenshot_payload
 from .x11 import (
@@ -62,11 +60,8 @@ from .x11 import (
 __all__ = [
     "FakeCapture",
     "FakeCaptureLoop",
-    "FakeInputtinoKeyboard",
-    "FakeInputtinoMouse",
     "FakeMic",
     "FakeMkvStdoutMuxer",
-    "FakeMouseButton",
     "FakeMp4FileMuxer",
     "FakeOCREngine",
     "FakePixmap",
@@ -79,7 +74,6 @@ __all__ = [
     "FakePulseModuleInfo",
     "FakePulseRegistry",
     "FakePwRecordProcess",
-    "FakePyDirectInput",
     "FakeSoundCard",
     "FakeSoundCardMicrophone",
     "FakeSoundCardPlayer",
