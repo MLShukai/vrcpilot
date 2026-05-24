@@ -186,8 +186,10 @@ def launch(
       ourselves. On Windows that is a plain ``subprocess.Popen``; on Linux
       it goes through ``umu-run`` (auto-discovered from PATH) so Proton's
       Wine prefix hosts the binary. The process is detached
-      (``CREATE_NEW_PROCESS_GROUP`` / ``start_new_session=True``) so the
-      caller can exit without taking VRChat down.
+      (``CREATE_NEW_PROCESS_GROUP`` / ``start_new_session=True``) and its
+      stdin/stdout/stderr are redirected to ``DEVNULL`` so the caller can
+      exit (and any pipes the caller installed are released) without
+      taking VRChat down.
     * **Via-Steam (``via_steam=True``)**: hand off to
       ``steam.exe -applaunch <app_id>``. Refuses to run if any VRChat
       process is already up — Steam silently refocuses the existing
@@ -329,10 +331,20 @@ def launch(
         {**os.environ, **env_overrides} if env_overrides else None
     )
 
+    # stdout/stderr are routed to DEVNULL so the grandchild (umu-run / Wine /
+    # launch.exe) does not inherit whatever fds the caller of ``vrcpilot
+    # launch`` happened to install. The concrete failure this avoids: a parent
+    # using ``subprocess.run(..., capture_output=True)`` hands the CLI a
+    # pipe; the CLI exits after printing the PID but ``umu-run`` keeps the
+    # pipe's write end open and chatters Wine logs into it, so the parent's
+    # ``subprocess.run`` blocks on EOF forever (observed by the e2e harness
+    # in cli_launch_terminate.py on 2026-05-24).
     if sys.platform == "win32":
         subprocess.Popen(
             argv,
             stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             env=popen_env,
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
         )
@@ -340,6 +352,8 @@ def launch(
         subprocess.Popen(
             argv,
             stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             env=popen_env,
             start_new_session=True,
         )
