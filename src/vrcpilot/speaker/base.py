@@ -31,14 +31,15 @@ class SpeakerBackend(ABC):
     def read(self) -> NDArray[np.float32]:
         """Return every sample buffered since the previous read.
 
-        Shape ``(N, CHANNELS)``; ``N == 0`` is the valid "no new audio"
-        signal (used when the underlying source stays quiet within the
-        backend's timeout).
+        Shape is ``(N, CHANNELS)``; an empty ``(0, CHANNELS)`` array is
+        the contract's "no new audio within the backend's timeout"
+        signal, not an error.
         """
 
     @abstractmethod
     def close(self) -> None:
         """Release platform resources.
 
-        Must be idempotent and not raise.
+        Must be idempotent and must not raise; the public wrapper and
+        ``ExitStack`` rollback paths can invoke it more than once.
         """

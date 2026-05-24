@@ -29,15 +29,16 @@ _logger = logging.getLogger(__name__)
 class ProcTapSpeakerBackend(SpeakerBackend):
     """SpeakerBackend backed by :class:`proctap.ProcessAudioCapture`.
 
+    proc-tap binds Windows Process Loopback to a single PID so the
+    captured stream contains only the bound process's audio; the
+    backend trusts the caller's PID without re-resolving so it stays
+    drivable from tests and from harnesses that already chose a PID.
+
     Args:
         read_timeout: Seconds :meth:`read` waits for the first chunk
             before returning empty. Must be ``> 0``.
-        pid: Target VRChat PID. The caller (typically
-            :class:`vrcpilot.speaker.Speaker`) is responsible for
-            supplying a resolved PID — this backend does not consult
-            :func:`vrcpilot.process.resolve_pid` itself so it stays
-            usable in tests and in scenarios where the PID was selected
-            externally.
+        pid: Target VRChat PID. Pre-resolved by the caller (typically
+            :class:`vrcpilot.speaker.Speaker`).
 
     Raises:
         ValueError: ``read_timeout`` is not strictly positive.
