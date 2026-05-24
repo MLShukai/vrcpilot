@@ -40,9 +40,17 @@ class Mic:
     """Session bound to a virtual-cable output device.
 
     Opened at construction, released on :meth:`close` / ``__exit__`` /
-    finaliser. ``device`` is a name substring; ``None`` defers to
-    ``$VRCPILOT_MIC_DEVICE`` then the OS default. ``sample_rate`` must
-    match the consumer (VRChat uses 48000).
+    finaliser.
+
+    Args:
+        device: Case-insensitive substring of the target output device
+            name (so ``"VRCPilot"`` resolves the full ``"VRCPilotMic"``
+            sink). ``None`` falls through to ``$VRCPILOT_MIC_DEVICE``
+            then :func:`vrcpilot.mic.default_device_name`.
+        sample_rate: Hz; must match the consumer or libpulse / WASAPI
+            will resample on the hot path (VRChat expects 48000).
+        channels: Output channel count baked into the player. Chunks
+            handed to :meth:`play` must agree with this value.
 
     Raises:
         MicDeviceNotFoundError: No output device matches the resolved
