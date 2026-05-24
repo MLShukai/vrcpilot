@@ -102,7 +102,19 @@ class Win32CaptureBackend(CaptureBackend):
 
     @override
     def read(self) -> np.ndarray:
-        """Block on the latest-frame slot and return one RGB ndarray."""
+        """Wait up to ``frame_timeout`` for a frame from the WGC worker.
+
+        The wait races with :meth:`close`, which sets the same event to
+        wake any blocked reader; the post-wait re-check of ``_closed``
+        keeps that race from returning a stale frame after shutdown.
+
+        Raises:
+            RuntimeError: :meth:`close` ran while this call was waiting
+                or holding the lock — the session is gone, do not retry.
+            TimeoutError: No frame arrived within ``frame_timeout``
+                seconds. Distinct from ``RuntimeError`` so polling
+                callers can decide whether to retry or escalate.
+        """
         if not self._frame_event.wait(timeout=self._frame_timeout):
             # ``close`` may have set the event; re-check the closed flag
             # before raising ``TimeoutError`` so the message stays accurate.
@@ -128,7 +140,12 @@ class Win32CaptureBackend(CaptureBackend):
 
     @override
     def close(self) -> None:
-        """Stop the WGC session, wake any waiter, and drain the slot."""
+        """Stop the WGC session and wake any thread blocked in :meth:`read`.
+
+        Failures from the underlying ``CaptureControl.stop()`` are
+        downgraded to :class:`RuntimeWarning` so this method satisfies
+        the "never raises" contract of :meth:`CaptureBackend.close`.
+        """
         if self._closed:
             return
         self._closed = True

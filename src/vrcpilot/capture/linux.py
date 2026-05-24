@@ -28,7 +28,13 @@ from .base import CaptureBackend
 
 
 class X11CaptureBackend(CaptureBackend):
-    """X11 Composite capture session: holds the display + redirected window."""
+    """Off-screen X11 capture backend for the VRChat window.
+
+    Redirects the target window to off-screen storage via the Composite
+    extension so :meth:`read` returns pixels regardless of stacking
+    order — i.e. capture works even when VRChat is occluded or
+    minimised, without ever raising the window.
+    """
 
     _display: Xlib.display.Display
     _window: _XWindow
@@ -85,8 +91,17 @@ class X11CaptureBackend(CaptureBackend):
 
     @override
     def read(self) -> np.ndarray:
-        """Re-grab the window pixmap through Composite and return an RGB
-        frame."""
+        """Synchronously re-grab the off-screen pixmap on every call.
+
+        Synchronous (no waiter / no timeout) because Composite gives us
+        the current pixels on demand; there is no producer thread to
+        race with as on Windows.
+
+        Raises:
+            RuntimeError: Window geometry collapsed to zero (typically
+                during resize) or the X server returned an XError mid
+                grab. The session is not invalidated — callers may retry.
+        """
         try:
             geom = self._window.get_geometry()
             width = int(geom.width)
@@ -106,7 +121,13 @@ class X11CaptureBackend(CaptureBackend):
 
     @override
     def close(self) -> None:
-        """Close the held X display connection (no unredirect, no pixmap)."""
+        """Close the held X display connection.
+
+        Deliberately does not unredirect: the redirect is per-client and
+        the server drops it automatically when the connection closes,
+        so an explicit unredirect would just risk an XError on a window
+        that may already be gone.
+        """
         try:
             self._display.close()
         except Exception as exc:  # noqa: BLE001 - close() must not raise
