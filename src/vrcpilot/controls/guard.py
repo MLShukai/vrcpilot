@@ -22,19 +22,31 @@ _FOCUS_RECHECK_INTERVAL: float = 0.05
 def ensure_target(*, pid: int | None = None) -> int:
     """Verify VRChat is running and the foreground window.
 
-    Returns the resolved PID so callers (notably :meth:`Mouse._to_desktop`)
-    can reuse it without re-running :func:`vrcpilot.process.resolve_pid`
-    and racing against VRChat exiting between the two lookups.
-
     Idempotent; safe to call before every input event. Native Wayland
     raises :class:`NotImplementedError` because the focus retry loop
-    would never converge there.
+    would never converge there (``is_foreground()`` always returns
+    False under native Wayland).
+
+    Args:
+        pid: Target VRChat instance when multiple are running. Omit to
+            let :func:`vrcpilot.process.resolve_pid` pick the sole
+            instance (raises if ambiguous).
+
+    Returns:
+        The resolved PID, so callers (notably :meth:`Mouse._to_desktop`)
+        can reuse it for follow-up window lookups without re-running
+        :func:`vrcpilot.process.resolve_pid` and racing against VRChat
+        exiting between the two scans of ``psutil.process_iter``.
 
     Raises:
+        NotImplementedError: Session is native Wayland; the focus
+            retry loop has no convergent state there.
         VRChatNotRunningError: No VRChat process exists.
         VRChatMultipleInstancesError: ``pid`` is omitted and multiple
             VRChat processes are running.
-        VRChatNotFocusedError: VRChat cannot be brought to the foreground.
+        VRChatNotFocusedError: VRChat cannot be brought to the
+            foreground within the retry budget (the window manager
+            kept refusing the focus request).
     """
     if is_wayland_native():
         raise NotImplementedError(
