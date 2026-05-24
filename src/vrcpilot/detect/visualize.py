@@ -17,8 +17,12 @@ def _decide_text_color(
     original: NDArray[np.uint8],
     bbox: tuple[int, int, int, int],
 ) -> tuple[int, int, int]:
-    """Black on bright patches, white on dark; out-of-bounds defaults to black
-    (readable on the typical white margin)."""
+    """Pick label colour from the underlying patch luminance.
+
+    Black on bright patches, white on dark. A bbox fully outside the
+    image defaults to black so labels stay readable on the typical white
+    margin when no signal exists.
+    """
     h, w = original.shape[:2]
     bx, by, bw, bh = bbox
     x0 = max(0, bx)

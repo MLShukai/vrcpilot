@@ -31,10 +31,11 @@ def nms(
     detections: list[Detection],
     iou_threshold: float,
 ) -> list[Detection]:
-    """Greedy NMS; drops a detection whose bbox IoU with any kept detection
-    exceeds ``iou_threshold``.
+    """Greedy non-maximum suppression on bbox IoU.
 
-    Output is confidence-descending.
+    Iterates detections high-confidence first and drops any whose
+    bbox overlaps a kept detection above ``iou_threshold``. Output is
+    therefore confidence-descending.
     """
     if not detections:
         return []

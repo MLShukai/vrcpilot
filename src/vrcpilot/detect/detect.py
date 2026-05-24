@@ -54,10 +54,13 @@ def detect(
     *,
     engine: DetectEngine | None = None,
 ) -> DetectResult:
-    """Run *engine* on *screenshot* against *query*.
+    """Locate *query* in *screenshot* and bundle the hits with both inputs.
 
-    The caller owns capture; any :class:`Screenshot` works. Passing
-    ``engine=None`` reuses the process-wide default
+    Capture is the caller's job — pass any :class:`Screenshot` (live
+    capture, hand-built, or replayed). The original
+    :class:`Screenshot` and ``query`` reference are preserved on the
+    result so capture metadata and "what was searched for" survive the
+    round trip. ``engine=None`` reuses the cached default
     :class:`TemplateDetectEngine`.
     """
     if engine is None:
