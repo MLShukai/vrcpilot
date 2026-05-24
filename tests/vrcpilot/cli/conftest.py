@@ -13,6 +13,18 @@ patching ``vrcpilot.cli._common.sys.stdin`` (or the per-subcommand
 ``sys.stdin`` binding) with a ``StringIO`` whose ``isatty()`` naturally
 returns ``False``; the explicit patch shadows the autouse default and
 is unwound first when the test ends.
+
+POLICY EXCEPTION: ``sys.stdin`` patching is treated as a pragmatic
+exception to the project-wide ban on 3rd-party / stdlib surface mocks
+(see ``.claude/skills/vrcpilot-testing/SKILL.md``). The substitutions
+do not fake stdlib behaviour -- they replace stdin with a
+plain ``io.StringIO`` whose ``isatty()`` and ``read()`` are the
+genuine stdlib implementations -- so the only "patching" is the
+test-harness-side TTY plumbing the runner cannot otherwise expose.
+The cleaner long-term fix is to add a ``stdin`` keyword argument to
+``cli._common.resolve_screenshot`` / ``cli.paste.run`` / ``cli.osc.run``
+so tests can inject ``io.StringIO`` directly; until that production
+refactor lands, the patching pattern stays.
 """
 
 from __future__ import annotations
