@@ -8,7 +8,7 @@ This is a hand-curated reference for every symbol exposed at `vrcpilot.<name>`. 
 
 - All `vrcpilot.<name>` symbols are listed in [`src/vrcpilot/__init__.py::__all__`](../src/vrcpilot/__init__.py).
 - Module attributes `vrcpilot.keyboard`, `vrcpilot.mouse`, and `vrcpilot.clipboard` are also part of the public surface.
-- Most call sites that send synthetic input or interact with the VRChat window expect VRChat to be **running and focused**. That requirement is enforced by [`ensure_target()`](#ensure_target), and the high-level helpers call it for you. The relevant exceptions (`VRChatNotRunningError`, `VRChatNotFocusedError`) are re-raised so callers can recover.
+- Most call sites that send synthetic input or interact with the VRChat window expect VRChat to be **running and focused**. That requirement is enforced by [`ensure_target()`](#vrcpilotcontrolsensure_target), and the high-level helpers call it for you. The relevant exceptions (`VRChatNotRunningError`, `VRChatNotFocusedError`) are re-raised so callers can recover.
 - Coordinate-bearing types (`OCRWord`, `OCRResult`, `Detection`, `DetectResult`) expose only **window-local** coordinates (`polygon` / `bbox`, origin at the VRChat window's top-left). `mouse.move(x, y)` consumes the same window-local frame, so OCR / detect bboxes feed in directly without translation — see [coordinate system](cli.md#coordinate-system).
 - Code blocks use `...` as the body of every signature so they paste back cleanly into a Python REPL or stub file.
 

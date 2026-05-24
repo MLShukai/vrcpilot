@@ -12,8 +12,8 @@ ______________________________________________________________________
 
 - **VRChat が Steam 経由でインストールされており**、Steam にログイン済みであること。
 - **デスクトップセッションが X11 または XWayland であること。** `loginctl show-session "$XDG_SESSION_ID" -p Type` を実行し `Type=x11` であることを確認してください。Wayland ネイティブセッションはサポート対象外です — `focus()` / `unfocus()` は警告を出して `False` を返し、合成入力はウィンドウに届きません。
-- **Steam が既に起動していること。** Steam が起動していない場合、`vrcpilot launch` は 30 秒の待機時間を Steam の起動画面で使い切り、最終的に `VRChat PID was not observed before timeout` で失敗します。先に Steam を起動しておいてください。
-- **Linux 限定 — `vrcpilot` よりも先に `inputtino-python` をインストールすること。** Linux の入力バックエンドは [`inputtino`](https://github.com/games-on-whales/inputtino) を利用します。先にネイティブビルドの前提条件をインストールしたうえで、`vrcpilot` と同じ Python 環境に `inputtino-python` を導入してください。詳しくは [`README.ja.md` のインストール](../README.ja.md#installation) を参照。
+- **Steam が既に起動していること。** Steam が起動していない場合、`vrcpilot launch` は 30 秒の待機時間を Steam の起動画面で使い切り、最終的に `vrcpilot: VRChat did not start within 30.0s` で失敗します。先に Steam を起動しておいてください。
+- **Linux 限定 — `vrcpilot` よりも先に `inputtino-python` をインストールすること。** Linux の入力バックエンドは [`inputtino`](https://github.com/games-on-whales/inputtino) を利用します。先にネイティブビルドの前提条件をインストールしたうえで、`vrcpilot` と同じ Python 環境に `inputtino-python` を導入してください。詳しくは [`README.ja.md` のインストール](../README.ja.md#%E3%82%A4%E3%83%B3%E3%82%B9%E3%83%88%E3%83%BC%E3%83%AB) を参照。
 - **Linux 限定 — `/dev/uinput` への書き込み権限があること。** 合成入力は `/dev/uinput` を経由します。`sudo usermod -aG input "$USER"` を実行し、一度ログアウトして再ログインしてください。`groups` の出力に `input` が含まれていれば OK です。
 - **画面がロックされていないこと。** スクリーンロック中はウィンドウ操作が不安定になります。
 
@@ -306,7 +306,7 @@ ______________________________________________________________________
 
 | 症状                                           | 想定される原因                                               | 対処                                                          |
 | ---------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------- |
-| `VRChat PID was not observed before timeout`   | Steam が起動していない、もしくは VRChat がインストール未済   | 先に Steam を起動し、Steam ライブラリでインストールを確認     |
+| `vrcpilot: VRChat did not start within 30.0s`  | Steam が起動していない、もしくは VRChat がインストール未済   | 先に Steam を起動し、Steam ライブラリでインストールを確認     |
 | `vrcpilot focus` がサイレントに 1 で終了       | Wayland ネイティブセッション、または VRChat ウィンドウ未生成 | X11 / XWayland に切り替え、ウォームアップを待つ               |
 | 入力コマンドから `VRChatNotFocusedError`       | 呼び出し直前にウィンドウのフォーカスが外れた                 | `vrcpilot focus` で再フォーカスしてから再試行                 |
 | Tab キーが効かない                             | 2026 系の UI では Tab がメニューに割り当てられなくなった     | Escape（Launch Pad）と R（Radial Action Menu）を使う          |

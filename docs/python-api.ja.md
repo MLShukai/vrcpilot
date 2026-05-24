@@ -8,7 +8,7 @@
 
 - `vrcpilot.<name>` のシンボルはすべて [`src/vrcpilot/__init__.py::__all__`](../src/vrcpilot/__init__.py) に列挙されています。
 - モジュール属性 `vrcpilot.keyboard`、`vrcpilot.mouse`、`vrcpilot.clipboard` も公開 API の一部です。
-- 合成入力を送ったり VRChat ウィンドウと対話したりする呼び出しのほとんどは、VRChat が**起動中かつフォーカスされている**ことを前提としています。この要件は [`ensure_target()`](#ensure_target) によって強制され、高レベルヘルパーは内部で呼び出します。関連する例外（`VRChatNotRunningError`、`VRChatNotFocusedError`）は呼び出し側でリカバーできるように再送出されます。
+- 合成入力を送ったり VRChat ウィンドウと対話したりする呼び出しのほとんどは、VRChat が**起動中かつフォーカスされている**ことを前提としています。この要件は [`ensure_target()`](#vrcpilotcontrolsensure_target) によって強制され、高レベルヘルパーは内部で呼び出します。関連する例外（`VRChatNotRunningError`、`VRChatNotFocusedError`）は呼び出し側でリカバーできるように再送出されます。
 - 座標を持つ型（`OCRWord`、`OCRResult`、`Detection`、`DetectResult`）は **ウィンドウローカル** な座標（`polygon` / `bbox`、原点は VRChat ウィンドウの左上）のみを公開します。`mouse.move(x, y)` も同じウィンドウローカル系を受け取るため、OCR / detect の bbox はそのまま渡せます — [coordinate system](cli.ja.md#coordinate-system) を参照してください。
 - コードブロックでは、Python REPL やスタブファイルに貼り付けやすいよう、すべてのシグネチャの本体に `...` を使用しています。
 
