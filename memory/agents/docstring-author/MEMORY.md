@@ -11,8 +11,12 @@ docstring / コメント記述専任エージェントが Google-style docstring
 
 - [vrcpilot project purpose](project_purpose.md) — VRChat automation library; launcher は基盤で、自動化エントリポイントとして文書化する
 - [Capture vs Screenshot API split](project_capture_screenshot_split.md) — streaming vs one-shot pixel surface, Wayland asymmetry, latest-only read
+- [Capture backend lifecycle docstring patterns](project_capture_backend_lifecycle.md) — synchronicity asymmetry, close-race re-check, never-raises close contract, no-unredirect rationale
 - [vrcpilot.controls subpackage shape](project_controls_subpackage.md) — template-method ABC, lazy backend singleton, ensure_target Wayland-fail-fast
 - [vrcpilot CLI subcommand docstring conventions](project_cli_subcommand_style.md) — module/patch-target/register/run shape and exit-code prose pattern
+- [CLI run() exit-code block style](project_cli_exit_code_block_style.md) — single-exit one-liner vs bulleted multi-exit block; pick the second whenever there are 2+ non-zero codes
+- [vrcpilot.osc subpackage docstring conventions](project_osc_subpackage.md) — OSC `i`/`f` tag intent, `client=` test seam, `INT_RANGE`/`FLOAT_RANGE`/`CHATBOX_MAX_LENGTH` constants
+- [vrcpilot.speaker subpackage docstring conventions](project_speaker_subpackage.md) — PID-isolated capture intent, lazy backend dispatch rationale, drain-all read contract
 
 ## reference（外部ツール・ライブラリ表現）
 
