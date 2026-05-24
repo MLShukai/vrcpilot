@@ -1,12 +1,15 @@
 """Capture-related test doubles.
 
-Stand-ins for the public :class:`vrcpilot.Capture` and
-:class:`vrcpilot.CaptureLoop`, and the third-party
-``windows_capture.WindowsCapture`` library.
+Stand-ins for the in-house :class:`vrcpilot.Capture` and
+:class:`vrcpilot.CaptureLoop` abstractions. Only the surface that
+production code actually invokes is mirrored.
 
-All stay duck-type compatible with the real surfaces so production
-code can be patched in place via ``mocker.patch`` and treat the fake
-as if it were the original.
+These are *own-ABC* fakes (the abstractions belong to vrcpilot itself),
+which is the only category the test strategy still permits in
+``tests/fakes/``. Third-party library surfaces (e.g. the upstream
+``windows_capture.WindowsCapture``) are deliberately not mirrored here
+— their behaviour is covered by ``integration-real`` tests against the
+real library on a Windows runner.
 """
 
 from __future__ import annotations
@@ -27,9 +30,7 @@ class FakeCapture:
     needs to be exercised against a real, deterministic frame source.
 
     Constructor arguments mirror :class:`vrcpilot.Capture` so the fake
-    can be substituted via either ``mocker.patch(..., FakeCapture)``
-    (replace the class) or ``mocker.patch(..., return_value=fake)``
-    (replace the instance).
+    can be substituted via ``mocker.patch(..., return_value=fake)``.
 
     Args:
         frame_timeout: Accepted for signature compatibility; ignored.
@@ -86,8 +87,8 @@ class FakeCaptureLoop:
 
     Class-level state (``instances`` / ``frames_per_start`` /
     ``init_side_effect``) is mutable so tests can configure behaviour
-    before construction. Reset between tests by the
-    ``capture_fakes``-style fixture in your local conftest.
+    before construction. Reset between tests by a fixture in your
+    local conftest.
     """
 
     instances: list[FakeCaptureLoop] = []
@@ -126,124 +127,3 @@ class FakeCaptureLoop:
         exc_tb: TracebackType | None,
     ) -> None:
         del exc_type, exc_val, exc_tb
-
-
-class FakeWindowsCaptureControl:
-    """Stand-in for ``windows_capture.CaptureControl``.
-
-    Records ``stop()`` invocations and optionally raises so close
-    handshake error paths can be exercised.
-    """
-
-    def __init__(self) -> None:
-        self.stop_calls: int = 0
-        self.stop_raises: BaseException | None = None
-
-    def stop(self) -> None:
-        self.stop_calls += 1
-        if self.stop_raises is not None:
-            raise self.stop_raises
-
-
-class _FakeFrameBuffer:
-    """Mimic ``windows_capture.Frame.frame_buffer.tobytes()``."""
-
-    def __init__(self, payload: bytes) -> None:
-        self._payload = payload
-
-    def tobytes(self) -> bytes:
-        return self._payload
-
-
-class FakeWindowsFrame:
-    """Stand-in for ``windows_capture.Frame``.
-
-    Only exposes ``frame_buffer`` / ``width`` / ``height`` because
-    those are the sole fields :class:`vrcpilot.capture.windows.Win32CaptureBackend`
-    reads.
-    """
-
-    def __init__(self, payload: bytes, width: int, height: int) -> None:
-        self.frame_buffer = _FakeFrameBuffer(payload)
-        self.width = width
-        self.height = height
-
-
-class FakeWindowsCapture:
-    """Stand-in for ``windows_capture.WindowsCapture``.
-
-    Captures the constructor kwargs on the class, records the
-    ``@event``-decorated handlers, and exposes :meth:`emit_frame` so
-    each test can fire frames synchronously into the registered
-    ``on_frame_arrived`` callback. Unlike the real library, no
-    background thread is spawned — the test owns timing.
-
-    Subclass per test (in a fixture) so each test gets fresh
-    class-level state. Tests sharing the canonical class would leak
-    ``last_kwargs`` / ``start_raises`` / ``last_instance`` between
-    runs. See ``capture_fakes``-style fixtures in the test packages.
-    """
-
-    last_kwargs: dict[str, object] = {}
-    start_raises: BaseException | None = None
-    last_instance: FakeWindowsCapture | None = None
-
-    def __init__(self, **kwargs: object) -> None:
-        type(self).last_kwargs = kwargs
-        type(self).last_instance = self
-        self._frame_handler: object = None
-        self._closed_handler: object = None
-        self._control = FakeWindowsCaptureControl()
-
-    def event(self, fn: object) -> object:
-        """Replicate ``windows_capture.WindowsCapture.event``.
-
-        Real library routes by ``__name__`` and returns the function
-        untouched so the decorator preserves the original definition.
-        """
-        name = getattr(fn, "__name__", "")
-        if name == "on_frame_arrived":
-            self._frame_handler = fn
-        elif name == "on_closed":
-            self._closed_handler = fn
-        return fn
-
-    def start_free_threaded(self) -> FakeWindowsCaptureControl:
-        start_raises = type(self).start_raises
-        if start_raises is not None:
-            raise start_raises
-        return self._control
-
-    def emit_frame(self, payload: bytes, width: int, height: int) -> None:
-        """Synchronously invoke the registered ``on_frame_arrived``.
-
-        The real library passes a ``Frame`` plus an
-        ``InternalCaptureControl``; the production code only reads
-        ``frame_buffer`` / ``width`` / ``height`` and ignores the
-        control, so a plain ``object()`` stand-in suffices.
-        """
-        handler = self._frame_handler
-        assert handler is not None, "on_frame_arrived was not registered"
-        handler(FakeWindowsFrame(payload, width, height), object())  # type: ignore[operator]
-
-    @property
-    def control(self) -> FakeWindowsCaptureControl:
-        return self._control
-
-
-def make_fresh_windows_capture_subclass() -> type[FakeWindowsCapture]:
-    """Return a subclass of :class:`FakeWindowsCapture` with isolated state.
-
-    Each test that exercises the WGC backend needs its own
-    ``last_kwargs`` / ``start_raises`` / ``last_instance`` so class-
-    level mutations do not leak between tests. Centralising the
-    subclass dance here keeps test files free of the boilerplate that
-    the strategy document forbids.
-    """
-
-    class _Fresh(FakeWindowsCapture):
-        last_kwargs: dict[str, object] = {}
-        start_raises: BaseException | None = None
-        last_instance: FakeWindowsCapture | None = None
-
-    return _Fresh

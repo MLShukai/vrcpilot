@@ -34,14 +34,7 @@ from .audio import (
     FakeSpeaker,
     FakeSpeakerLoop,
 )
-from .capture import (
-    FakeCapture,
-    FakeCaptureLoop,
-    FakeWindowsCapture,
-    FakeWindowsCaptureControl,
-    FakeWindowsFrame,
-    make_fresh_windows_capture_subclass,
-)
+from .capture import FakeCapture, FakeCaptureLoop
 from .inputtino import FakeInputtinoKeyboard, FakeInputtinoMouse, FakeMouseButton
 from .ocr import FakeOCREngine
 from .process import FakePopen, FakeProcess
@@ -89,14 +82,10 @@ __all__ = [
     "FakeSpeaker",
     "FakeSpeakerLoop",
     "FakeWavFileMuxer",
-    "FakeWindowsCapture",
-    "FakeWindowsCaptureControl",
-    "FakeWindowsFrame",
     "FakeXDisplay",
     "FakeXGeometry",
     "FakeXWindow",
     "fake_x11_display_cm",
-    "make_fresh_windows_capture_subclass",
     "make_xerror_subclass",
     "patch_stdin_with_screenshot",
     "write_screenshot_payload",
