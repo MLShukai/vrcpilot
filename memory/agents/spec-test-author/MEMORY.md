@@ -13,3 +13,5 @@ shared な前提 ([テスト戦略 4 区分と新モック方針](../../feedback
 - [3rd-party 表面 fake は cleanup target / 自前 ABC fake は使用面のみミラー](feedback_fakes_mirror_production.md) — 3rd-party 表面 fake は新規禁止 + 既存も整理対象。自前 ABC fake は production 呼び出し面のみミラー
 - [subprocess を real-resource として使うパターン](feedback_subprocess_real_resource_patterns.md) — terminate / wait_for_pid 系の検証で実 child を spawn して PID 操作で 3rd-party seam モックを回避
 - [filesystem / PATH 探索系は HOME / PATH 操作で real-resource 化する](feedback_real_filesystem_path_lookup.md) — shutil.which / Path.expanduser / Path.read_text の代わりに env 操作で実 lookup を走らせる
+- [unused PID で dispatch + backend を end-to-end 駆動する](feedback_unused_pid_integration_pattern.md) — `pid=99_999_999` で `resolve_pid` short-circuit → 実 backend が走り False/None を返す。internal モック不要
+- [tkinter stub window で X11 / Win32 backend を integration-real テスト](feedback_tkinter_stub_window_pattern.md) — `tkinter.Tk()` を spawn、PID match で find_vrchat\_\* が拾える。FakeXDisplay / mocker.patch 不要

@@ -1,81 +1,124 @@
-"""Tests for :mod:`vrcpilot.windows`.
+"""Tests for :mod:`vrcpilot.windows` (Win32 helpers).
 
 The module under test imports Windows-only DLLs (``pywintypes``,
-``win32gui``, ``win32process``) and raises ``ImportError`` on any
-other platform. A module-level skip up front keeps non-Windows runners
-from even attempting the import — anything below executes only on
-Windows.
+``win32gui``, ``win32process``) and raises ``ImportError`` on every
+other platform. A module-level skip up front prevents non-Windows
+runners from even attempting the import -- everything below executes
+only on a Windows host.
+
+The geometry tests spawn a real Tk top-level window with a known
+size, then locate its HWND via ``EnumWindows`` matching on
+``os.getpid()`` and compare the reported rectangle against the
+requested dimensions. This is the integration-real pattern for
+Win32: tkinter is in the stdlib so no extra dependency is needed,
+and the WM round-trip exercises the exact code path that runs
+against VRChat at runtime.
 """
 
 from __future__ import annotations
 
+import os
 import sys
 
 import pytest
 
 if sys.platform != "win32":
-    pytest.skip("Windows-only module", allow_module_level=True)
+    pytest.skip("vrcpilot.windows is Windows-only", allow_module_level=True)
 
-from pytest_mock import MockerFixture
+import tkinter
+from collections.abc import Iterator
 
 from vrcpilot.windows import find_vrchat_hwnd, get_window_rect
 
 
-class TestFindVrchatHwnd:
-    """Real ``EnumWindows`` walk; no real VRChat process running.
+@pytest.fixture
+def tk_window() -> Iterator[tuple[tkinter.Tk, int, int]]:
+    """Spawn a real Tk top-level window with a known size.
 
-    Passing a sentinel PID that no real process owns is enough to
-    exercise the enumeration without depending on any specific window
-    being open. The helper must report ``None`` rather than raise.
+    Yields ``(root, width, height)``. ``update()`` forces the window
+    through the WM so it shows up in ``EnumWindows`` with the requested
+    geometry. The owner PID equals ``os.getpid()``, which is what
+    ``find_vrchat_hwnd`` matches against. Destroyed on teardown so
+    other tests do not see a stray window.
     """
+    root = tkinter.Tk()
+    width, height = 320, 240
+    root.geometry(f"{width}x{height}+50+60")
+    root.update_idletasks()
+    root.update()
+    try:
+        yield root, width, height
+    finally:
+        root.destroy()
 
+
+class TestFindVrchatHwnd:
     def test_returns_none_for_unknown_pid(self):
-        # ``-1`` is never a valid Windows PID; with no matching window
-        # the helper must surface ``None``.
+        # Real ``EnumWindows`` walk. ``-1`` is never a valid Windows
+        # PID, so even on a fully populated desktop the helper must
+        # report ``None`` rather than raise.
         assert find_vrchat_hwnd(-1) is None
+
+    def test_locates_visible_top_level_window_by_pid(
+        self, tk_window: tuple[tkinter.Tk, int, int]
+    ):
+        # Real round-trip: a tkinter window owned by ``os.getpid()`` is
+        # enumerated by ``EnumWindows``, its PID matches via
+        # ``GetWindowThreadProcessId``, ``IsWindowVisible`` is True, so
+        # the helper returns its HWND. This is the exact production
+        # path that locates VRChat at runtime.
+        _root, _w, _h = tk_window
+
+        hwnd = find_vrchat_hwnd(os.getpid())
+
+        assert hwnd is not None
+        assert hwnd > 0
 
 
 class TestGetWindowRect:
     def test_returns_none_for_invalid_hwnd(self):
-        # ``0`` is not a valid HWND. ``GetWindowRect`` raises
-        # ``pywintypes.error`` for it; the helper must convert that to
-        # ``None`` and not propagate.
+        # ``0`` is not a valid HWND. The underlying ``GetWindowRect``
+        # call raises ``pywintypes.error`` for it; the helper must
+        # convert that to ``None`` and not propagate.
         assert get_window_rect(0) is None
 
-    def test_returns_none_when_rect_query_raises(self, mocker: MockerFixture):
-        # When the underlying API raises ``pywintypes.error`` (HWND
-        # destroyed mid-call) the helper must surface ``None`` rather
-        # than propagate. Patching the API is the only way to drive
-        # this branch deterministically without owning a real HWND
-        # that disappears on cue.
-        import pywintypes
-
-        mocker.patch(
-            "vrcpilot.windows.win32gui.GetWindowRect",
-            side_effect=pywintypes.error(
-                1400, "GetWindowRect", "Invalid window handle."
-            ),
-        )
-
-        assert get_window_rect(99999) is None
-
-    @pytest.mark.parametrize(
-        ("rect"),
-        [
-            (100, 200, 100, 800),  # zero width
-            (100, 200, 900, 200),  # zero height
-            (100, 200, 50, 800),  # negative width (right < left)
-            (100, 200, 900, 100),  # negative height (bottom < top)
-        ],
-    )
-    def test_returns_none_on_degenerate_rect(
-        self,
-        mocker: MockerFixture,
-        rect: tuple[int, int, int, int],
+    def test_returns_window_dimensions_for_real_hwnd(
+        self, tk_window: tuple[tkinter.Tk, int, int]
     ):
-        # Degenerate rectangles cannot occur for a real visible HWND but
-        # are cheap to drive via a patch and document the boundary
-        # contract (``width <= 0 or height <= 0`` -> ``None``).
-        mocker.patch("vrcpilot.windows.win32gui.GetWindowRect", return_value=rect)
+        # Real geometry round-trip: ask Tk for a 320x240 window, locate
+        # its HWND, then the production helper must report a rectangle
+        # whose width and height match. Position is WM-dependent (DWM
+        # frame margins, monitor placement) so only the size is pinned.
+        _root, width, height = tk_window
+        hwnd = find_vrchat_hwnd(os.getpid())
+        assert hwnd is not None
 
-        assert get_window_rect(12345) is None
+        rect = get_window_rect(hwnd)
+
+        assert rect is not None
+        _x, _y, w, h = rect
+        assert w == width
+        assert h == height
+
+    def test_returns_none_after_window_destroyed(self):
+        # Window destroyed mid-call: ``GetWindowRect`` raises
+        # ``pywintypes.error`` for the dead HWND and the helper
+        # converts that to ``None``. Drive this by spawning a real
+        # window, capturing its HWND, destroying it, then asking for
+        # geometry -- exactly the race the production handler exists
+        # to absorb.
+        root = tkinter.Tk()
+        root.geometry("200x100+10+10")
+        root.update_idletasks()
+        root.update()
+        hwnd = find_vrchat_hwnd(os.getpid())
+        assert hwnd is not None
+        try:
+            root.destroy()
+
+            assert get_window_rect(hwnd) is None
+        finally:
+            try:
+                root.destroy()
+            except tkinter.TclError:
+                pass
