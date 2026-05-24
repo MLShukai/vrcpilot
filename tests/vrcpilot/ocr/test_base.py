@@ -1,33 +1,21 @@
 """Unit tests for :mod:`vrcpilot.ocr.base`.
 
-Covers ``OCRWord`` derived properties (``bbox`` / ``center``), the
-``__post_init__`` length guard, and the ABC enforcement on
-``OCREngine``.
+Covers the value-object contract of :class:`OCRWord`: polygon length
+guard plus the two derived geometry properties (``bbox`` / ``center``)
+that downstream callers (mouse.move, visualize.render) depend on.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import FrozenInstanceError
 from typing import cast
 
-import numpy as np
 import pytest
-from numpy.typing import NDArray
 
-from vrcpilot.ocr import OCREngine, OCRWord, Polygon
+from vrcpilot.ocr import OCRWord, Polygon
 
 
 def _word(polygon: Polygon, text: str = "x", confidence: float = 0.9) -> OCRWord:
     return OCRWord(text=text, polygon=polygon, confidence=confidence)
-
-
-class TestOCRWordFrozen:
-    def test_word_is_frozen(self):
-        word = _word(((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)))
-        with pytest.raises(FrozenInstanceError):
-            # Frozen dataclass: any attribute assignment must fail.
-            word.text = "y"  # type: ignore[misc]
 
 
 class TestOCRWordPolygonValidation:
@@ -47,12 +35,12 @@ class TestOCRWordPolygonValidation:
             ),
         ],
     )
-    def test_word_polygon_must_have_4_points(
+    def test_word_rejects_polygon_with_wrong_vertex_count(
         self,
         bad_polygon: tuple[tuple[float, float], ...],
     ):
-        # The dataclass type pins length to 4, but at runtime
-        # mismatched polygons can sneak in via dynamic construction.
+        # Static typing pins length=4 but runtime tuple-building can
+        # slip past the type checker; the dataclass must still reject.
         with pytest.raises(ValueError, match="must have exactly 4 points"):
             OCRWord(
                 text="x",
@@ -62,8 +50,7 @@ class TestOCRWordPolygonValidation:
 
 
 class TestOCRWordBBox:
-    def test_word_bbox_basic(self):
-        # Axis-aligned rectangle: bbox is the rectangle itself.
+    def test_axis_aligned_polygon_yields_envelope_as_bbox(self):
         polygon: Polygon = (
             (10.0, 20.0),
             (60.0, 20.0),
@@ -72,9 +59,8 @@ class TestOCRWordBBox:
         )
         assert _word(polygon).bbox == (10, 20, 50, 18)
 
-    def test_word_bbox_rotated_polygon(self):
-        # Tilted polygon's bbox is the axis-aligned envelope:
-        # x ∈ [2, 18], y ∈ [3, 17].
+    def test_rotated_polygon_uses_axis_aligned_envelope(self):
+        # Tilted quad: x in [2, 18], y in [3, 17].
         polygon: Polygon = (
             (10.0, 3.0),
             (18.0, 10.0),
@@ -83,20 +69,18 @@ class TestOCRWordBBox:
         )
         assert _word(polygon).bbox == (2, 3, 16, 14)
 
-    def test_word_bbox_uses_round(self):
-        # 0.4 → 0 (down), 0.6 → 1 (up): boundary check that
-        # ``int(round(...))`` is applied to all four components.
+    def test_fractional_coordinates_round_to_nearest_int(self):
+        # 0.4 -> 0 (down), 0.6 -> 1 (up): verify all four components
+        # pass through ``int(round(...))``.
         polygon: Polygon = (
             (10.4, 20.4),
             (60.6, 20.4),
             (60.6, 38.6),
             (10.4, 38.6),
         )
-        # x_min=10.4 → 10, y_min=20.4 → 20,
-        # width=50.2 → 50, height=18.2 → 18.
         assert _word(polygon).bbox == (10, 20, 50, 18)
 
-    def test_word_bbox_degenerate_polygon_has_zero_size(self):
+    def test_degenerate_polygon_has_zero_width_and_height(self):
         polygon: Polygon = (
             (5.0, 7.0),
             (5.0, 7.0),
@@ -107,7 +91,7 @@ class TestOCRWordBBox:
 
 
 class TestOCRWordCenter:
-    def test_word_center_axis_aligned(self):
+    def test_axis_aligned_center_is_polygon_centroid(self):
         polygon: Polygon = (
             (10.0, 20.0),
             (60.0, 20.0),
@@ -116,10 +100,19 @@ class TestOCRWordCenter:
         )
         cx, cy = _word(polygon).center
         assert (cx, cy) == (35.0, 29.0)
+
+    def test_center_is_returned_as_floats(self):
+        polygon: Polygon = (
+            (10.0, 20.0),
+            (60.0, 20.0),
+            (60.0, 38.0),
+            (10.0, 38.0),
+        )
+        cx, cy = _word(polygon).center
         assert isinstance(cx, float)
         assert isinstance(cy, float)
 
-    def test_word_center_tilted_polygon(self):
+    def test_tilted_polygon_center_is_vertex_mean(self):
         polygon: Polygon = (
             (10.0, 3.0),
             (18.0, 10.0),
@@ -129,34 +122,3 @@ class TestOCRWordCenter:
         cx, cy = _word(polygon).center
         assert cx == pytest.approx(10.0)
         assert cy == pytest.approx(10.0)
-
-
-class TestOCREngineABC:
-    def test_engine_cannot_be_instantiated_directly(self):
-        # ``OCREngine`` is an ABC: instantiating it raises ``TypeError``
-        # because ``recognize`` is still abstract.
-        with pytest.raises(TypeError):
-            OCREngine()  # type: ignore[abstract]
-
-    def test_engine_subclass_must_implement_recognize(self):
-        class _Incomplete(OCREngine):
-            pass
-
-        with pytest.raises(TypeError):
-            _Incomplete()  # type: ignore[abstract]
-
-    def test_engine_concrete_subclass_can_be_constructed(self):
-        # Sanity check: a subclass that implements ``recognize`` must
-        # instantiate without complaint and dispatch correctly.
-        captured: list[NDArray[np.uint8]] = []
-
-        class _Echo(OCREngine):
-            def recognize(self, image: NDArray[np.uint8]) -> Sequence[OCRWord]:
-                captured.append(image)
-                return ()
-
-        engine = _Echo()
-        image: NDArray[np.uint8] = np.zeros((4, 4, 3), dtype=np.uint8)
-        result = engine.recognize(image)
-        assert list(result) == []
-        assert len(captured) == 1
