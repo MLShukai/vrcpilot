@@ -1,4 +1,14 @@
-"""Tests for ``vrcpilot.process.executable``."""
+"""Tests for :mod:`vrcpilot.process.executable`.
+
+All tests use real filesystem fixtures under ``tmp_path``; the
+discovery chain (VDF parsing, ``Path.is_file`` probing) runs unchanged.
+On Linux, ``HOME`` is repointed at ``tmp_path`` so the canonical Steam
+roots (``~/.steam/steam`` etc.) resolve under our controlled tree --
+no monkeypatching of vrcpilot's own discovery helpers required.
+
+On Windows the auto-detect path consults the registry via ``winreg``;
+those branches are e2e-only here.
+"""
 
 from __future__ import annotations
 
@@ -7,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers import only_linux
 from vrcpilot.process import VRChatLauncherNotFoundError
 from vrcpilot.process.executable import (
     find_vrchat_launcher,
@@ -14,7 +25,7 @@ from vrcpilot.process.executable import (
     parse_steam_library_paths,
 )
 
-_DUMMY_VDF = """"libraryfolders"
+_VDF_WITH_TWO_LIBRARIES = """"libraryfolders"
 {
     "0"
     {
@@ -30,163 +41,181 @@ _DUMMY_VDF = """"libraryfolders"
 """
 
 
+def _make_launcher(library_root: Path) -> Path:
+    """Lay out ``<library>/steamapps/common/VRChat/launch.exe`` under tmp."""
+    launch_exe = library_root / "steamapps" / "common" / "VRChat" / "launch.exe"
+    launch_exe.parent.mkdir(parents=True)
+    launch_exe.write_bytes(b"")
+    return launch_exe
+
+
 class TestParseSteamLibraryPaths:
-    def test_extracts_paths_from_vdf(self, tmp_path: Path) -> None:
+    def test_extracts_every_path_entry(self, tmp_path: Path):
         vdf = tmp_path / "libraryfolders.vdf"
-        vdf.write_text(_DUMMY_VDF, encoding="utf-8")
+        vdf.write_text(_VDF_WITH_TWO_LIBRARIES, encoding="utf-8")
+
         result = parse_steam_library_paths(vdf)
+
         assert len(result) == 2
 
-    def test_returns_empty_when_file_missing(self, tmp_path: Path) -> None:
+    def test_returns_empty_list_when_file_missing(self, tmp_path: Path):
+        # ``read_text`` raises ``OSError`` for a missing file. The
+        # helper must absorb that and return ``[]`` so callers can
+        # treat "no vdf" the same as "no libraries listed".
         assert parse_steam_library_paths(tmp_path / "nope.vdf") == []
 
 
-class TestSteamPathsHelpersReturnRootsOnly:
-    """The platform helpers must enumerate Steam install **roots** only.
+class TestLinuxSteamPathsReturnsRootsOnly:
+    """``linux_steam_paths`` enumerates *install roots*, not libraries.
 
     Library expansion via ``libraryfolders.vdf`` is centralised in
-    :func:`find_vrchat_launcher`; the helpers must not perform that
-    expansion themselves, otherwise the responsibility for Steam library
-    discovery would live in two places at once.
+    :func:`find_vrchat_launcher`. If this helper expanded the vdf
+    itself, library discovery would live in two places and drift.
     """
 
-    def test_linux_helper_does_not_expand_vdf(
+    @only_linux
+    def test_returns_canonical_roots_unchanged_by_vdf_presence(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        # Make ``~/.steam/steam`` resolve under tmp_path and plant a vdf
-        # that references a library OUTSIDE the returned set. If the helper
-        # were to expand the vdf, that library path would leak into the
-        # returned list.
+    ):
+        # Plant a vdf under the canonical root pointing at an OUTSIDE
+        # library. If the helper were to expand the vdf, that library
+        # path would leak into the result.
         monkeypatch.setenv("HOME", str(tmp_path))
         steam_root = tmp_path / ".steam" / "steam"
         vdf = steam_root / "steamapps" / "libraryfolders.vdf"
         vdf.parent.mkdir(parents=True)
-        library = tmp_path / "external-library"
+        external = tmp_path / "external-library"
         vdf.write_text(
-            f'"libraryfolders" {{ "0" {{ "path" "{library.as_posix()}" }} }}',
+            f'"libraryfolders" {{ "0" {{ "path" "{external.as_posix()}" }} }}',
             encoding="utf-8",
         )
 
         result = linux_steam_paths()
 
-        # Roots only — no external library leak from vdf expansion.
-        assert library not in result
-        # And the canonical roots are exactly what the helper returns.
+        assert external not in result
         assert result == [
             Path("~/.steam/steam").expanduser(),
             Path("~/.local/share/Steam").expanduser(),
         ]
 
 
-class TestFindVrchatLauncher:
-    def test_uses_override_when_given(self, tmp_path: Path) -> None:
+class TestFindVrchatLauncherOverride:
+    """Override path is platform-agnostic; runs everywhere."""
+
+    def test_returns_override_when_path_is_a_file(self, tmp_path: Path):
         exe = tmp_path / "launch.exe"
         exe.write_bytes(b"")
-        result = find_vrchat_launcher(exe)
-        assert result == exe
 
-    def test_raises_when_override_missing(self, tmp_path: Path) -> None:
+        assert find_vrchat_launcher(exe) == exe
+
+    def test_raises_when_override_does_not_exist(self, tmp_path: Path):
         with pytest.raises(VRChatLauncherNotFoundError, match="override"):
             find_vrchat_launcher(tmp_path / "missing.exe")
 
+
+class TestFindVrchatLauncherEnvVar:
+    """``VRCHAT_LAUNCHER`` env var resolution; platform-agnostic."""
+
     def test_reads_env_var_when_no_override(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    ):
         exe = tmp_path / "launch.exe"
         exe.write_bytes(b"")
         monkeypatch.setenv("VRCHAT_LAUNCHER", str(exe))
-        result = find_vrchat_launcher()
-        assert result == exe
 
-    def test_skips_missing_env_var_value_falls_back_to_discovery(
+        assert find_vrchat_launcher() == exe
+
+
+class TestFindVrchatLauncherDiscoveryLinux:
+    """Linux discovery chain driven by real ``HOME`` manipulation.
+
+    Both canonical roots (``~/.steam/steam`` and ``~/.local/share/Steam``)
+    resolve under ``tmp_path`` so the real ``linux_steam_paths()`` /
+    ``find_vrchat_launcher`` chain runs end-to-end against fixtures we
+    control -- no monkeypatching of vrcpilot's own helpers required.
+    """
+
+    @only_linux
+    def test_expands_libraryfolders_vdf_and_finds_launcher(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setenv("VRCHAT_LAUNCHER", str(tmp_path / "nope.exe"))
-        monkeypatch.setattr("vrcpilot.process.executable.linux_steam_paths", lambda: [])
-        monkeypatch.setattr(
-            "vrcpilot.process.executable.windows_steam_paths", lambda: []
-        )
-        with pytest.raises(VRChatLauncherNotFoundError):
-            find_vrchat_launcher()
+    ):
+        # Set up HOME so ``~/.steam/steam`` resolves under tmp_path.
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("VRCHAT_LAUNCHER", raising=False)
 
-    def test_finds_launcher_via_libraryfolders(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """``find_vrchat_launcher`` itself expands ``libraryfolders.vdf``.
-
-        Verifies the centralised expansion: the platform helper returns
-        only the Steam *root*, and ``find_vrchat_launcher`` is the one that
-        reads the root's vdf and probes each listed library for
-        ``launch.exe``.
-        """
+        # Plant the launcher under a separate "library" dir, then point
+        # the canonical root's vdf at that library. find_vrchat_launcher
+        # must read the vdf at the root and probe each listed library.
         library = tmp_path / "lib"
-        launch_exe = library / "steamapps" / "common" / "VRChat" / "launch.exe"
-        launch_exe.parent.mkdir(parents=True)
-        launch_exe.write_bytes(b"")
+        launch_exe = _make_launcher(library)
 
-        steam_root = tmp_path / "steam"
-        vdf_dir = steam_root / "steamapps"
-        vdf_dir.mkdir(parents=True)
-        vdf = vdf_dir / "libraryfolders.vdf"
+        steam_root = tmp_path / ".steam" / "steam"
+        vdf = steam_root / "steamapps" / "libraryfolders.vdf"
+        vdf.parent.mkdir(parents=True)
         vdf.write_text(
             f'"libraryfolders" {{ "0" {{ "path" "{library.as_posix()}" }} }}',
             encoding="utf-8",
         )
 
-        if sys.platform == "linux":
-            monkeypatch.setattr(
-                "vrcpilot.process.executable.linux_steam_paths",
-                lambda: [steam_root],
-            )
-        else:
-            monkeypatch.setattr(
-                "vrcpilot.process.executable.windows_steam_paths",
-                lambda: [steam_root],
-            )
-        monkeypatch.delenv("VRCHAT_LAUNCHER", raising=False)
-        result = find_vrchat_launcher()
-        assert result == launch_exe
+        assert find_vrchat_launcher() == launch_exe
 
+    @only_linux
     def test_falls_back_to_root_when_vdf_missing(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """Without a vdf the Steam root itself is treated as a library.
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        # Some installs (fresh / hand-edited / non-standard) lack a
+        # vdf. The launcher is then expected directly under the root's
+        # ``steamapps/common/VRChat/`` tree.
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("VRCHAT_LAUNCHER", raising=False)
 
-        Some installs (fresh, hand-edited, or non-standard layouts) lack
-        a ``libraryfolders.vdf``. In that case ``launch.exe`` is expected
-        directly under the root's ``steamapps/common/VRChat/`` tree.
-        """
-        steam_root = tmp_path / "steam"
-        launch_exe = steam_root / "steamapps" / "common" / "VRChat" / "launch.exe"
-        launch_exe.parent.mkdir(parents=True)
-        launch_exe.write_bytes(b"")
+        steam_root = tmp_path / ".steam" / "steam"
+        launch_exe = _make_launcher(steam_root)
         # Deliberately do NOT create ``steamapps/libraryfolders.vdf``.
 
-        if sys.platform == "linux":
-            monkeypatch.setattr(
-                "vrcpilot.process.executable.linux_steam_paths",
-                lambda: [steam_root],
-            )
-        else:
-            monkeypatch.setattr(
-                "vrcpilot.process.executable.windows_steam_paths",
-                lambda: [steam_root],
-            )
-        monkeypatch.delenv("VRCHAT_LAUNCHER", raising=False)
-        result = find_vrchat_launcher()
-        assert result == launch_exe
+        assert find_vrchat_launcher() == launch_exe
 
-    def test_raises_with_candidates_when_nothing_found(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    @only_linux
+    def test_falls_back_to_dot_local_share_root(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        # Second canonical root: ``~/.local/share/Steam``. Plant the
+        # launcher only there and verify the discovery still finds it.
+        monkeypatch.setenv("HOME", str(tmp_path))
         monkeypatch.delenv("VRCHAT_LAUNCHER", raising=False)
-        monkeypatch.setattr("vrcpilot.process.executable.linux_steam_paths", lambda: [])
-        monkeypatch.setattr(
-            "vrcpilot.process.executable.windows_steam_paths", lambda: []
-        )
+
+        steam_root = tmp_path / ".local" / "share" / "Steam"
+        launch_exe = _make_launcher(steam_root)
+
+        assert find_vrchat_launcher() == launch_exe
+
+
+class TestFindVrchatLauncherNotFound:
+    """Discovery exhausted without finding the launcher."""
+
+    @only_linux
+    def test_error_message_lists_candidates_tried_on_linux(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        # Empty HOME with no launcher anywhere: discovery must fail and
+        # the message must include a "Tried" section so the user knows
+        # which candidate paths to override.
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("VRCHAT_LAUNCHER", raising=False)
+
         with pytest.raises(VRChatLauncherNotFoundError, match="Tried"):
+            find_vrchat_launcher()
+
+    def test_env_var_pointing_at_missing_file_does_not_short_circuit(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        # The env var path is best-effort: a missing target must fall
+        # through to library discovery, not abort. Verify by setting a
+        # missing env-var target and an empty HOME (Linux) -- discovery
+        # then completes the chain to the NotFound error.
+        monkeypatch.setenv("VRCHAT_LAUNCHER", str(tmp_path / "nope.exe"))
+        if sys.platform == "linux":
+            monkeypatch.setenv("HOME", str(tmp_path / "empty-home"))
+
+        with pytest.raises(VRChatLauncherNotFoundError):
             find_vrchat_launcher()

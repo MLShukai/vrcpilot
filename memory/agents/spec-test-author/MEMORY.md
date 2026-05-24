@@ -11,3 +11,5 @@ shared な前提 ([テスト戦略 4 区分と新モック方針](../../feedback
 - [Avoid object-typed fixture parameters](feedback_fixture_typing.md) — mock fixture パラメータに `: object` を付けない (pyright ignore ノイズの原因)
 - [自前 ABC fake は単一消費者でも tests/fakes/ に集約する](feedback_shared_fakes_in_tests_fakes.md) — 自前 ABC は単一消費者でも `tests/fakes/`。3rd-party 表面 fake は新規追加禁止
 - [3rd-party 表面 fake は cleanup target / 自前 ABC fake は使用面のみミラー](feedback_fakes_mirror_production.md) — 3rd-party 表面 fake は新規禁止 + 既存も整理対象。自前 ABC fake は production 呼び出し面のみミラー
+- [subprocess を real-resource として使うパターン](feedback_subprocess_real_resource_patterns.md) — terminate / wait_for_pid 系の検証で実 child を spawn して PID 操作で 3rd-party seam モックを回避
+- [filesystem / PATH 探索系は HOME / PATH 操作で real-resource 化する](feedback_real_filesystem_path_lookup.md) — shutil.which / Path.expanduser / Path.read_text の代わりに env 操作で実 lookup を走らせる

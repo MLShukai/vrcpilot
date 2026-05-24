@@ -1,26 +1,51 @@
-"""Tests for :mod:`vrcpilot.process`."""
+"""Tests for :mod:`vrcpilot.process`'s pid / wait / terminate APIs.
+
+What is covered here vs. elsewhere:
+
+* **PID discovery** (``find_pid``, ``find_pids``, ``resolve_pid``):
+  the autouse conftest fixture ``_no_real_vrchat`` pins
+  ``psutil.process_iter`` to an empty iterator, so every test in this
+  module observes "no VRChat running" by default. That gives us the
+  negative case for free. The **positive case** ("find_pid returns a
+  PID when VRChat IS running") requires a real ``VRChat.exe``
+  process and is covered by ``tests/e2e/`` -- the policy forbids
+  individual tests from re-patching ``psutil.process_iter``.
+
+* **Wait helpers** (``wait_for_pid``, ``wait_for_no_pid``) use real
+  short timeouts to exercise the polling loop end-to-end. With the
+  autouse empty ``process_iter``, ``wait_for_pid(pid=None, timeout=0.05)``
+  returns ``None`` after one real poll cycle. ``pid=<int>`` mode is
+  driven by real ``psutil.pid_exists`` against actual subprocesses we
+  spawn (and an obviously-non-existent high PID for the absent case).
+
+* **``terminate``** is exercised against real subprocesses spawned via
+  ``subprocess.Popen([sys.executable, "-c", "import time;
+  time.sleep(N)"])``. The spawned process's name is ``python``-ish,
+  never ``VRChat.exe``, so ``terminate(child.pid)`` triggers the
+  "not a VRChat process" guard for free. We never spawn a real
+  ``VRChat.exe``, so the success-path kill is e2e-only.
+
+* **Public exceptions** (``VRChatMultipleInstancesError``): only the
+  ``pids`` payload (a load-bearing attribute the public API exposes)
+  is verified; subclass relationships are not retested (pyright +
+  Python language guarantee them).
+"""
 
 from __future__ import annotations
 
-import dataclasses
-from pathlib import Path
+import subprocess
+import sys
+import time
+from collections.abc import Iterator
 
 import psutil
 import pytest
-from pytest_mock import MockerFixture
 
-from tests.fakes import FakeProcess
 from vrcpilot.process import (
-    VRCHAT_PROCESS_NAME,
-    VRCHAT_STEAM_APP_ID,
-    OscConfig,
-    UmuLauncherNotFoundError,
-    VRChatAlreadyRunningError,
-    VRChatLauncherNotFoundError,
+    PID_WAIT_INTERVAL,
+    PID_WAIT_TIMEOUT,
     VRChatMultipleInstancesError,
     VRChatNotRunningError,
-    build_launch_command,
-    build_vrchat_launch_args,
     find_pid,
     find_pids,
     resolve_pid,
@@ -30,529 +55,283 @@ from vrcpilot.process import (
 )
 
 
-def _process_iter_returning(mocker: MockerFixture, *procs: FakeProcess) -> None:
-    """Override the autouse empty-iterator default with the given fakes."""
-    mocker.patch(
-        "vrcpilot.process.pid.psutil.process_iter",
-        return_value=list(procs),
+@pytest.fixture
+def short_lived_subprocess() -> Iterator[subprocess.Popen[bytes]]:
+    """Spawn a real child process that sleeps long enough for assertions.
+
+    Yields the live ``Popen`` object so tests can read ``child.pid``.
+    On teardown the child is killed (idempotent: a test that already
+    killed it will see no error). 5 seconds is plenty for any single
+    assertion in this module; the polling loops use sub-second
+    timeouts so the test itself completes in ms.
+    """
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(5)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
+    try:
+        yield child
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait(timeout=5.0)
 
 
-class TestOscConfig:
-    def test_to_launch_arg_default(self):
-        assert OscConfig().to_launch_arg() == "--osc=9000:127.0.0.1:9001"
+def _doomed_pid() -> int:
+    """Return a PID that is guaranteed to not exist on this host.
 
-    @pytest.mark.parametrize(
-        ("in_port", "out_ip", "out_port", "expected"),
-        [
-            (9000, "127.0.0.1", 9001, "--osc=9000:127.0.0.1:9001"),
-            (10000, "192.168.1.10", 10001, "--osc=10000:192.168.1.10:10001"),
-            (1234, "0.0.0.0", 5678, "--osc=1234:0.0.0.0:5678"),
-        ],
+    Spawn a tiny child, capture its PID, then ``wait()`` for it to
+    fully exit. The captured PID is now historical -- ``psutil`` will
+    raise ``NoSuchProcess`` for it. This is more reliable than picking
+    a "very high" number which can collide on long-running hosts.
+    """
+    child = subprocess.Popen(
+        [sys.executable, "-c", "pass"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
-    def test_to_launch_arg_custom(
-        self, in_port: int, out_ip: str, out_port: int, expected: str
-    ):
-        cfg = OscConfig(in_port=in_port, out_ip=out_ip, out_port=out_port)
-
-        assert cfg.to_launch_arg() == expected
-
-    def test_is_frozen(self):
-        cfg = OscConfig()
-
-        with pytest.raises(dataclasses.FrozenInstanceError):
-            cfg.in_port = 1234  # type: ignore[misc]
-
-
-class TestBuildVrchatLaunchArgs:
-    def test_no_args_returns_empty(self):
-        assert build_vrchat_launch_args() == []
-
-    def test_no_vr(self):
-        assert build_vrchat_launch_args(no_vr=True) == ["--no-vr"]
-
-    @pytest.mark.parametrize(
-        ("width", "height", "expected"),
-        [
-            (1280, None, ["-screen-width", "1280"]),
-            (None, 720, ["-screen-height", "720"]),
-            (
-                1280,
-                720,
-                ["-screen-width", "1280", "-screen-height", "720"],
-            ),
-        ],
-    )
-    def test_screen_dimensions(
-        self, width: int | None, height: int | None, expected: list[str]
-    ):
-        result = build_vrchat_launch_args(screen_width=width, screen_height=height)
-
-        assert result == expected
-
-    def test_osc(self):
-        result = build_vrchat_launch_args(osc=OscConfig(in_port=9000))
-
-        assert result == ["--osc=9000:127.0.0.1:9001"]
-
-    def test_extra_args_appended(self):
-        result = build_vrchat_launch_args(extra_args=["--enable-debug-gui"])
-
-        assert result == ["--enable-debug-gui"]
-
-    def test_combined_order(self):
-        result = build_vrchat_launch_args(
-            no_vr=True,
-            screen_width=1280,
-            screen_height=720,
-            osc=OscConfig(),
-            extra_args=["--enable-debug-gui", "--profile=2"],
-        )
-
-        assert result == [
-            "--no-vr",
-            "-screen-width",
-            "1280",
-            "-screen-height",
-            "720",
-            "--osc=9000:127.0.0.1:9001",
-            "--enable-debug-gui",
-            "--profile=2",
-        ]
-
-
-class TestBuildLaunchCommand:
-    def test_basic(self):
-        steam = Path("/usr/bin/steam")
-
-        result = build_launch_command(steam, 438100)
-
-        assert result == [str(steam), "-applaunch", "438100"]
-
-    @pytest.mark.parametrize("app_id", [438100, 440, 1])
-    def test_app_id_stringified(self, app_id: int):
-        result = build_launch_command(Path("/usr/bin/steam"), app_id)
-
-        assert result[2] == str(app_id)
-
-    def test_default_app_id(self):
-        result = build_launch_command(Path("/usr/bin/steam"))
-
-        assert result[2] == str(VRCHAT_STEAM_APP_ID)
-
-    def test_appends_vrchat_args(self):
-        steam = Path("/usr/bin/steam")
-
-        result = build_launch_command(
-            steam, 438100, vrchat_args=["--no-vr", "-screen-width", "1280"]
-        )
-
-        assert result == [
-            str(steam),
-            "-applaunch",
-            "438100",
-            "--no-vr",
-            "-screen-width",
-            "1280",
-        ]
-
-    def test_no_vrchat_args_returns_legacy_shape(self):
-        steam = Path("/usr/bin/steam")
-
-        result = build_launch_command(steam, 438100, vrchat_args=None)
-
-        assert result == [str(steam), "-applaunch", "438100"]
+    pid = child.pid
+    child.wait(timeout=5.0)
+    # Poll psutil until the PID is actually gone -- on some kernels
+    # the process briefly lingers as a zombie before being reaped.
+    deadline = time.monotonic() + 5.0
+    while psutil.pid_exists(pid) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    return pid
 
 
 class TestFindPid:
-    def test_returns_pid_when_running(self, mocker: MockerFixture):
-        _process_iter_returning(mocker, FakeProcess(name=VRCHAT_PROCESS_NAME, pid=4242))
+    """``find_pid`` is deprecated; verify the negative case and warning.
 
-        with pytest.warns(DeprecationWarning):
-            assert find_pid() == 4242
+    The positive case (returning a real PID) requires a live
+    ``VRChat.exe`` and lives in tests/e2e/.
+    """
 
-    def test_returns_none_when_not_running(self):
-        # autouse fixture already empties ``process_iter``; no setup needed.
-        with pytest.warns(DeprecationWarning):
-            assert find_pid() is None
-
-    def test_ignores_other_processes(self, mocker: MockerFixture):
-        _process_iter_returning(mocker, FakeProcess(name="explorer.exe", pid=1))
-
+    def test_returns_none_when_no_vrchat_running(self):
+        # autouse fixture pins process_iter to empty -> no VRChat seen.
         with pytest.warns(DeprecationWarning):
             assert find_pid() is None
-
-    def test_returns_newest_pid_when_multiple_running(self, mocker: MockerFixture):
-        # create_time descending → pid=222 (ct=20) is "newest" and wins.
-        _process_iter_returning(
-            mocker,
-            FakeProcess(name=VRCHAT_PROCESS_NAME, pid=111, create_time=10.0),
-            FakeProcess(name=VRCHAT_PROCESS_NAME, pid=222, create_time=20.0),
-        )
-
-        with pytest.warns(DeprecationWarning):
-            assert find_pid() == 222
 
     def test_emits_deprecation_warning(self):
+        # Spec deprecates find_pid in favour of find_pids; the warning
+        # message must mention the deprecation so callers know.
         with pytest.warns(DeprecationWarning, match=r"find_pid\(\) is deprecated"):
             find_pid()
 
 
 class TestFindPids:
-    def test_returns_empty_when_not_running(self):
-        # autouse fixture already empties ``process_iter``; no setup needed.
+    """``find_pids`` enumerates all VRChat instances, newest first.
+
+    The autouse empty-iterator gives us the empty-list case. The
+    populated cases (single, multiple, ordering by ``create_time``,
+    skipping AccessDenied / NoSuchProcess) require real ``VRChat.exe``
+    processes and are e2e-only.
+    """
+
+    def test_returns_empty_list_when_no_vrchat_running(self):
         assert find_pids() == []
-
-    def test_returns_single_match(self, mocker: MockerFixture):
-        _process_iter_returning(mocker, FakeProcess(name=VRCHAT_PROCESS_NAME, pid=4242))
-
-        assert find_pids() == [4242]
-
-    def test_returns_all_matches_skipping_other_processes(self, mocker: MockerFixture):
-        _process_iter_returning(
-            mocker,
-            FakeProcess(name=VRCHAT_PROCESS_NAME, pid=111, create_time=10.0),
-            FakeProcess(name="explorer.exe", pid=222, create_time=99.0),
-            FakeProcess(name=VRCHAT_PROCESS_NAME, pid=333, create_time=20.0),
-        )
-
-        # Sorted by create_time descending: pid=333 (20.0) before pid=111 (10.0).
-        assert find_pids() == [333, 111]
-
-    def test_ignores_other_processes(self, mocker: MockerFixture):
-        _process_iter_returning(mocker, FakeProcess(name="explorer.exe", pid=1))
-
-        assert find_pids() == []
-
-    def test_returns_pids_in_create_time_descending_order(self, mocker: MockerFixture):
-        _process_iter_returning(
-            mocker,
-            FakeProcess(name=VRCHAT_PROCESS_NAME, pid=10, create_time=100.0),
-            FakeProcess(name=VRCHAT_PROCESS_NAME, pid=20, create_time=300.0),
-            FakeProcess(name=VRCHAT_PROCESS_NAME, pid=30, create_time=200.0),
-        )
-
-        # Newest first: 300 -> 200 -> 100.
-        assert find_pids() == [20, 30, 10]
-
-    def test_skips_processes_with_access_denied_on_create_time(
-        self, mocker: MockerFixture
-    ):
-        _process_iter_returning(
-            mocker,
-            FakeProcess(
-                name=VRCHAT_PROCESS_NAME,
-                pid=111,
-                create_time_raises=psutil.AccessDenied(pid=111),
-            ),
-            FakeProcess(name=VRCHAT_PROCESS_NAME, pid=222, create_time=5.0),
-        )
-
-        assert find_pids() == [222]
-
-    def test_skips_processes_with_no_such_process_on_create_time(
-        self, mocker: MockerFixture
-    ):
-        _process_iter_returning(
-            mocker,
-            FakeProcess(
-                name=VRCHAT_PROCESS_NAME,
-                pid=111,
-                create_time_raises=psutil.NoSuchProcess(pid=111),
-            ),
-            FakeProcess(name=VRCHAT_PROCESS_NAME, pid=222, create_time=5.0),
-        )
-
-        assert find_pids() == [222]
 
 
 class TestResolvePid:
-    def test_returns_explicit_pid_unchanged(self, mocker: MockerFixture):
-        # Even if a single VRChat instance is running with a different pid,
-        # an explicit pid arg is honoured verbatim (no liveness check).
-        _process_iter_returning(
-            mocker, FakeProcess(name=VRCHAT_PROCESS_NAME, pid=4242, create_time=1.0)
-        )
+    """``resolve_pid`` returns an explicit PID verbatim, or consults
+    ``find_pids`` when ``None``."""
 
+    def test_explicit_pid_returned_verbatim_without_liveness_check(self):
+        # Documented behaviour: no liveness check on an explicit PID.
+        # Even a clearly-fake PID must be returned as-is so callers
+        # can address a pre-known instance without an extra syscall.
         assert resolve_pid(999) == 999
 
-    def test_returns_single_when_no_pid_specified(self, mocker: MockerFixture):
-        _process_iter_returning(
-            mocker, FakeProcess(name=VRCHAT_PROCESS_NAME, pid=4242, create_time=1.0)
-        )
-
-        assert resolve_pid(None) == 4242
-
-    def test_raises_not_running_when_no_processes(self):
-        # autouse fixture leaves process_iter empty.
-        with pytest.raises(VRChatNotRunningError):
+    def test_raises_not_running_when_no_pid_and_nothing_running(self):
+        # autouse: find_pids() is empty -> VRChatNotRunningError.
+        with pytest.raises(VRChatNotRunningError, match="not running"):
             resolve_pid(None)
 
-    def test_raises_multiple_instances_with_pids_attribute(self, mocker: MockerFixture):
-        _process_iter_returning(
-            mocker,
-            FakeProcess(name=VRCHAT_PROCESS_NAME, pid=111, create_time=10.0),
-            FakeProcess(name=VRCHAT_PROCESS_NAME, pid=222, create_time=20.0),
-        )
 
-        with pytest.raises(VRChatMultipleInstancesError) as excinfo:
-            resolve_pid(None)
+class TestVRChatMultipleInstancesError:
+    """The exception's ``pids`` attribute is a load-bearing public field.
 
-        # ``.pids`` mirrors ``find_pids`` (newest first: 222, then 111).
-        assert excinfo.value.pids == find_pids()
-        assert excinfo.value.pids == [222, 111]
+    Subclass relationship (``isinstance(err, VRChatNotRunningError)``)
+    is not re-tested here -- Python's class system guarantees it.
+    """
 
-
-class TestExceptions:
-    def test_multiple_instances_is_subclass_of_not_running(self):
-        assert issubclass(VRChatMultipleInstancesError, VRChatNotRunningError)
-
-    def test_multiple_instances_pids_is_independent_copy(self):
-        # Mutating the source list must not mutate the exception attribute.
+    def test_pids_attribute_is_independent_copy_of_caller_list(self):
+        # The constructor stores ``list(pids)`` so the caller's later
+        # mutations do not bleed into the exception's record. Critical
+        # because the err.pids payload is what API consumers act on
+        # when deciding which instance to target.
         source = [10, 20]
+
         err = VRChatMultipleInstancesError(source)
         source.append(30)
 
         assert err.pids == [10, 20]
 
-    @pytest.mark.parametrize(
-        "exc_type",
-        [
-            VRChatLauncherNotFoundError,
-            VRChatAlreadyRunningError,
-            UmuLauncherNotFoundError,
-        ],
-    )
-    def test_runtime_error_subclasses(self, exc_type: type[BaseException]):
-        assert issubclass(exc_type, RuntimeError)
+    def test_message_includes_candidate_pids(self):
+        # The message must surface the candidate PIDs so a CLI / e2e
+        # log can identify which instances were ambiguous.
+        err = VRChatMultipleInstancesError([111, 222])
+
+        assert "111" in str(err)
+        assert "222" in str(err)
 
 
 class TestWaitForPid:
-    def test_returns_immediately_when_pid_exists(self, mocker: MockerFixture):
-        _process_iter_returning(mocker, FakeProcess(name=VRCHAT_PROCESS_NAME, pid=42))
-        # Sleep should never be called when the pid is already there.
-        sleep_spy = mocker.patch("vrcpilot.process.pid.time.sleep")
+    """``wait_for_pid`` polls until a VRChat PID appears or timeout.
 
-        result = wait_for_pid(timeout=5.0, interval=1.0)
+    Two modes:
 
-        assert result == 42
-        assert sleep_spy.call_count == 0
+    * ``pid=None`` -> waits for ANY VRChat (positive case is e2e).
+    * ``pid=<int>`` -> waits for that exact PID via real
+      ``psutil.pid_exists``; both branches (alive / dead) are testable
+      with a real spawned subprocess.
+    """
 
-    def test_returns_newest_when_multiple_running(self, mocker: MockerFixture):
-        # ``find_pids`` returns newest first; ``wait_for_pid(pid=None)`` follows
-        # that ordering so callers can wait on the most-recently-started one.
-        _process_iter_returning(
-            mocker,
-            FakeProcess(name=VRCHAT_PROCESS_NAME, pid=10, create_time=1.0),
-            FakeProcess(name=VRCHAT_PROCESS_NAME, pid=20, create_time=5.0),
-        )
+    def test_returns_none_on_timeout_when_no_vrchat_running(self):
+        # autouse: process_iter empty -> find_pids() never returns a
+        # PID. With a tiny timeout the real wall-clock loop exits
+        # quickly without any patching of time.sleep.
+        start = time.monotonic()
 
-        result = wait_for_pid(timeout=5.0, interval=0.01)
-
-        assert result == 20
-
-    def test_returns_none_on_timeout(self, mocker: MockerFixture):
-        # autouse fixture leaves ``process_iter`` empty -> find_pids() is empty.
-        # Use a tiny timeout/interval so the real wall-clock loop exits
-        # within milliseconds without any monkeypatching of time.
         result = wait_for_pid(timeout=0.05, interval=0.01)
 
+        elapsed = time.monotonic() - start
+        assert result is None
+        # The loop must actually respect the timeout, not block forever.
+        assert elapsed < 2.0
+
+    def test_returns_specific_pid_immediately_when_alive(
+        self, short_lived_subprocess: subprocess.Popen[bytes]
+    ):
+        # The pid= mode bypasses find_pids() entirely; it polls
+        # psutil.pid_exists() against the real PID we just spawned.
+        result = wait_for_pid(
+            timeout=2.0, interval=0.01, pid=short_lived_subprocess.pid
+        )
+
+        assert result == short_lived_subprocess.pid
+
+    def test_returns_none_when_specific_pid_is_dead(self):
+        # A PID for a process that has already exited will never satisfy
+        # psutil.pid_exists; the helper must respect the timeout and
+        # return None, not loop forever.
+        result = wait_for_pid(timeout=0.05, interval=0.01, pid=_doomed_pid())
+
         assert result is None
 
-    def test_returns_specific_pid_when_alive(self, mocker: MockerFixture):
-        # With ``pid=`` specified, ``psutil.pid_exists`` is the gate; the
-        # ``process_iter`` content is irrelevant.
-        mocker.patch("vrcpilot.process.pid.psutil.pid_exists", return_value=True)
-
-        result = wait_for_pid(timeout=5.0, interval=0.01, pid=12345)
-
-        assert result == 12345
-
-    def test_returns_none_when_specific_pid_never_appears(self, mocker: MockerFixture):
-        mocker.patch("vrcpilot.process.pid.psutil.pid_exists", return_value=False)
-
-        result = wait_for_pid(timeout=0.05, interval=0.01, pid=99999)
-
-        assert result is None
-
-    def test_uses_module_defaults(self):
-        # Sanity: defaults match the documented constants.
-        from vrcpilot.process import PID_WAIT_INTERVAL, PID_WAIT_TIMEOUT
-
-        defaults = wait_for_pid.__defaults__
-        assert defaults == (PID_WAIT_TIMEOUT, PID_WAIT_INTERVAL)
+    def test_default_timeout_matches_module_constant(self):
+        # The default timeout / interval must remain the
+        # documented module-level constants so e2e tooling that imports
+        # PID_WAIT_TIMEOUT receives the same value the wait helpers
+        # use. Catches a regression where the default drifts away from
+        # the documented constant.
+        assert wait_for_pid.__defaults__ == (PID_WAIT_TIMEOUT, PID_WAIT_INTERVAL)
 
 
 class TestWaitForNoPid:
-    def test_returns_true_immediately_when_absent(self, mocker: MockerFixture):
-        # autouse fixture: process_iter is empty -> find_pids() is empty.
-        sleep_spy = mocker.patch("vrcpilot.process.pid.time.sleep")
+    """``wait_for_no_pid`` polls until VRChat is gone or timeout."""
+
+    def test_returns_true_immediately_when_no_vrchat_running(self):
+        # autouse: find_pids() is empty from the start -> first poll
+        # satisfies the predicate. Must NOT sleep before returning.
+        start = time.monotonic()
 
         result = wait_for_no_pid(timeout=5.0, interval=1.0)
 
+        elapsed = time.monotonic() - start
         assert result is True
-        assert sleep_spy.call_count == 0
+        # Generous bound: the helper should return before the 1.0s
+        # interval would tick once.
+        assert elapsed < 0.5
 
-    def test_returns_false_on_timeout(self, mocker: MockerFixture):
-        _process_iter_returning(mocker, FakeProcess(name=VRCHAT_PROCESS_NAME))
-
-        result = wait_for_no_pid(timeout=0.05, interval=0.01)
+    def test_returns_false_when_specific_pid_still_alive_after_timeout(
+        self, short_lived_subprocess: subprocess.Popen[bytes]
+    ):
+        # The pid= mode polls real psutil.pid_exists; while the child
+        # is alive the predicate is never satisfied within timeout.
+        result = wait_for_no_pid(
+            timeout=0.1, interval=0.01, pid=short_lived_subprocess.pid
+        )
 
         assert result is False
 
-    def test_returns_true_when_specific_pid_gone(self, mocker: MockerFixture):
-        # ``pid=`` mode: only the named PID matters. Other VRChat processes
-        # may still be running.
-        _process_iter_returning(mocker, FakeProcess(name=VRCHAT_PROCESS_NAME, pid=4242))
-        mocker.patch("vrcpilot.process.pid.psutil.pid_exists", return_value=False)
-
-        result = wait_for_no_pid(timeout=5.0, interval=0.01, pid=99999)
+    def test_returns_true_when_specific_pid_already_dead(self):
+        # A PID for an already-reaped process: psutil.pid_exists is
+        # False immediately, the helper returns True without timing out.
+        result = wait_for_no_pid(timeout=2.0, interval=0.01, pid=_doomed_pid())
 
         assert result is True
 
-    def test_returns_false_when_specific_pid_still_alive(self, mocker: MockerFixture):
-        mocker.patch("vrcpilot.process.pid.psutil.pid_exists", return_value=True)
-
-        result = wait_for_no_pid(timeout=0.05, interval=0.01, pid=4242)
-
-        assert result is False
-
-    def test_uses_module_defaults(self):
-        from vrcpilot.process import PID_WAIT_INTERVAL, PID_WAIT_TIMEOUT
-
-        defaults = wait_for_no_pid.__defaults__
-        assert defaults == (PID_WAIT_TIMEOUT, PID_WAIT_INTERVAL)
-
-
-class TestTerminate:
-    def test_kills_matching_process(self, mocker: MockerFixture):
-        proc = FakeProcess(name=VRCHAT_PROCESS_NAME, pid=4242)
-        _process_iter_returning(mocker, proc)
-        mocker.patch("vrcpilot.process.pid.psutil.wait_procs")
-
-        result = terminate()
-
-        assert result == [4242]
-        assert proc.kill_calls == 1
-
-    def test_returns_empty_list_when_not_running(self, mocker: MockerFixture):
-        _process_iter_returning(mocker, FakeProcess(name="explorer.exe"))
-        mocker.patch("vrcpilot.process.pid.psutil.wait_procs")
-
-        result = terminate()
-
-        assert result == []
-
-    def test_kills_all_when_no_pids_given(self, mocker: MockerFixture):
-        """``terminate()`` with no args keeps the legacy "kill every"
-        behavior."""
-        p1 = FakeProcess(name=VRCHAT_PROCESS_NAME, pid=10)
-        p2 = FakeProcess(name=VRCHAT_PROCESS_NAME, pid=20)
-        other = FakeProcess(name="explorer.exe", pid=30)
-        _process_iter_returning(mocker, p1, other, p2)
-        mocker.patch("vrcpilot.process.pid.psutil.wait_procs")
-
-        result = terminate()
-
-        assert result == [10, 20]
-        assert p1.kill_calls == 1
-        assert p2.kill_calls == 1
-        assert other.kill_calls == 0
-
-    def test_swallows_no_such_process(self, mocker: MockerFixture):
-        proc = FakeProcess(
-            name=VRCHAT_PROCESS_NAME,
-            pid=9999,
-            kill_raises=psutil.NoSuchProcess(pid=9999),
+    def test_default_timeout_matches_module_constant(self):
+        assert wait_for_no_pid.__defaults__ == (
+            PID_WAIT_TIMEOUT,
+            PID_WAIT_INTERVAL,
         )
-        _process_iter_returning(mocker, proc)
-        mocker.patch("vrcpilot.process.pid.psutil.wait_procs")
 
-        result = terminate()
 
-        assert result == [9999]
+class TestTerminateNoArgs:
+    """``terminate()`` with no args targets every running VRChat."""
 
-    def test_kills_only_specified_pid_when_pid_given(self, mocker: MockerFixture):
-        target = FakeProcess(name=VRCHAT_PROCESS_NAME, pid=10)
-        # ``terminate(10)`` constructs ``psutil.Process(10)`` and reads
-        # ``.name()``; intercept the constructor so it returns our fake.
-        mocker.patch(
-            "vrcpilot.process.pid.psutil.Process",
-            return_value=target,
-        )
-        # ``process_iter`` must not be consulted in the explicit-pid path —
-        # populate it with the *other* PID and assert nothing fires.
-        other = FakeProcess(name=VRCHAT_PROCESS_NAME, pid=20)
-        _process_iter_returning(mocker, other)
-        mocker.patch("vrcpilot.process.pid.psutil.wait_procs")
+    def test_returns_empty_list_when_no_vrchat_running(self):
+        # autouse: process_iter empty -> nothing to kill -> [].
+        assert terminate() == []
 
-        result = terminate(10)
 
-        assert result == [10]
-        assert target.kill_calls == 1
-        assert other.kill_calls == 0
+class TestTerminateExplicitPid:
+    """``terminate(pid)`` validates name before killing.
 
-    def test_kills_multiple_specified_pids(self, mocker: MockerFixture):
-        p10 = FakeProcess(name=VRCHAT_PROCESS_NAME, pid=10)
-        p20 = FakeProcess(name=VRCHAT_PROCESS_NAME, pid=20)
+    The success path (real VRChat kill) is e2e-only. The two failure
+    modes are testable here:
 
-        def _fake_process(pid: int) -> FakeProcess:
-            return {10: p10, 20: p20}[pid]
+    * non-existent PID -> silently skipped (returns []).
+    * existing PID with wrong name -> ValueError, never killed.
+    """
 
-        mocker.patch(
-            "vrcpilot.process.pid.psutil.Process",
-            side_effect=_fake_process,
-        )
-        mocker.patch("vrcpilot.process.pid.psutil.wait_procs")
+    def test_silently_skips_non_existent_pid(self):
+        # An already-reaped PID raises NoSuchProcess from
+        # psutil.Process(pid); terminate() must treat that as
+        # "already gone" so callers can re-invoke it idempotently.
+        assert terminate(_doomed_pid()) == []
 
-        result = terminate(10, 20)
-
-        assert result == [10, 20]
-        assert p10.kill_calls == 1
-        assert p20.kill_calls == 1
-
-    def test_refuses_to_kill_non_vrchat_pid(self, mocker: MockerFixture):
-        impostor = FakeProcess(name="notepad.exe", pid=4242)
-        mocker.patch(
-            "vrcpilot.process.pid.psutil.Process",
-            return_value=impostor,
-        )
+    def test_refuses_to_kill_non_vrchat_pid(
+        self, short_lived_subprocess: subprocess.Popen[bytes]
+    ):
+        # The subprocess we spawned is a Python interpreter, not
+        # VRChat.exe. The name validation must fire and ValueError
+        # must be raised BEFORE any kill is issued.
+        pid = short_lived_subprocess.pid
 
         with pytest.raises(ValueError, match="not a VRChat process"):
-            terminate(4242)
+            terminate(pid)
 
-        # No kill must have fired, because validation happens before kill.
-        assert impostor.kill_calls == 0
+        # Critical: the impostor is still alive. The fixture's
+        # teardown will kill it cleanly.
+        assert short_lived_subprocess.poll() is None
+        # Sanity check: the name we matched against was indeed not
+        # "VRChat.exe".
+        assert psutil.Process(pid).name() != "VRChat.exe"
 
-    def test_silently_skips_non_existent_pid(self, mocker: MockerFixture):
-        # psutil.Process(pid) raises NoSuchProcess for a vanished PID --
-        # terminate() must treat that as "already gone" (not an error).
-        mocker.patch(
-            "vrcpilot.process.pid.psutil.Process",
-            side_effect=psutil.NoSuchProcess(pid=9999),
-        )
-        mocker.patch("vrcpilot.process.pid.psutil.wait_procs")
+    def test_mixed_existing_and_missing_pids_skips_missing(
+        self, short_lived_subprocess: subprocess.Popen[bytes]
+    ):
+        # When some explicit PIDs are gone and some are alive (but not
+        # VRChat), validation must surface the wrong-name ValueError
+        # from the alive one rather than swallowing it. Documents the
+        # ordering: a missing PID earlier in the args list does not
+        # short-circuit a downstream impostor's validation.
+        with pytest.raises(ValueError, match="not a VRChat process"):
+            terminate(_doomed_pid(), short_lived_subprocess.pid)
 
-        result = terminate(9999)
+        # Impostor still alive.
+        assert short_lived_subprocess.poll() is None
 
-        assert result == []
 
-    def test_mixed_existing_and_missing_pids(self, mocker: MockerFixture):
-        """Missing PIDs are skipped; surviving ones are still killed."""
-        alive = FakeProcess(name=VRCHAT_PROCESS_NAME, pid=10)
-
-        def _fake_process(pid: int) -> FakeProcess:
-            if pid == 9999:
-                raise psutil.NoSuchProcess(pid=9999)
-            return alive
-
-        mocker.patch(
-            "vrcpilot.process.pid.psutil.Process",
-            side_effect=_fake_process,
-        )
-        mocker.patch("vrcpilot.process.pid.psutil.wait_procs")
-
-        result = terminate(9999, 10)
-
-        assert result == [10]
-        assert alive.kill_calls == 1
+# NOTE: The success path of terminate() -- actually killing a running
+# VRChat.exe and observing psutil.wait_procs() complete -- requires a
+# real VRChat instance and lives in tests/e2e/. find_pids() with a
+# populated result (single / multi / create_time ordering / AccessDenied
+# skip) is similarly e2e-only because the test policy forbids
+# individual tests from re-patching ``vrcpilot.process.pid.psutil.process_iter``.
