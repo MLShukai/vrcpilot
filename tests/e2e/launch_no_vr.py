@@ -4,6 +4,10 @@ Verifies that :func:`vrcpilot.launch` succeeds with ``no_vr=True`` on a
 machine that may not have an HMD attached, that a PID becomes visible,
 remains stable after a warm-up window, and that termination reports
 success.
+
+Run with::
+
+    just e2e-test launch_no_vr
 """
 
 from __future__ import annotations

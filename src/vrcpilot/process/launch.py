@@ -1,9 +1,11 @@
-"""VRChat launch flow (direct-spawn / via-steam)。
+"""VRChat launch flow: direct-spawn (default) and via-Steam fallback.
 
-Direct-spawn は EAC ラッパー ``launch.exe`` を呼ぶ (``VRChat.exe`` 直叩きだと
-offline モードで起動するため)。``via_steam=True`` は ``steam.exe -applaunch``
-にフォールバックし、既存インスタンスがあれば :class:`VRChatAlreadyRunningError`
-を上げる (Steam が新規起動せず既存ウィンドウへ focus するだけのため)。
+The default route spawns the EAC wrapper ``launch.exe`` directly because
+calling ``VRChat.exe`` itself boots the client into offline mode (EAC is
+not initialised). ``via_steam=True`` falls back to
+``steam.exe -applaunch <app_id>`` and refuses to run if VRChat is already
+up — Steam would only refocus the existing window, never spawn a fresh
+instance, so the call would silently lie about "launching".
 """
 
 from __future__ import annotations
@@ -32,6 +34,8 @@ class OscConfig:
     out_port: int = 9001
 
     def to_launch_arg(self) -> str:
+        """Render as the single ``--osc=<in>:<ip>:<out>`` token VRChat
+        parses."""
         return f"--osc={self.in_port}:{self.out_ip}:{self.out_port}"
 
 
@@ -46,11 +50,15 @@ def build_vrchat_launch_args(
 ) -> list[str]:
     """Assemble the VRChat-side argv that follows ``-applaunch <app_id>``.
 
-    Output order is fixed (``no_vr`` -> screen size -> ``osc`` ->
-    ``--profile`` -> ``extra_args``) so the argv is byte-stable across
-    runs. ``extra_args`` is the escape hatch for flags this helper does
-    not model. ``profile`` is rendered as the single ``--profile=N``
-    token (the format VRChat accepts).
+    The token order (``no_vr`` -> screen size -> ``osc`` -> ``--profile`` ->
+    ``extra_args``) is part of the contract: the e2e harness and Steam
+    launch-option captures compare argv byte-for-byte across runs.
+
+    Args:
+        profile: Rendered as the single token ``--profile=N`` (the only
+            spelling VRChat accepts; ``--profile N`` silently breaks).
+        extra_args: Escape hatch for VRChat flags this helper does not
+            model. Appended verbatim at the end of the argv.
     """
     args: list[str] = []
     if no_vr:
@@ -74,11 +82,11 @@ def build_launch_command(
     *,
     vrchat_args: list[str] | None = None,
 ) -> list[str]:
-    """Build the Steam ``-applaunch`` argv for spawning the game.
+    """Build the Steam ``-applaunch`` argv without spawning.
 
     Exposed separately from :func:`launch` so callers can inspect, log,
-    or wrap the command without spawning. ``steam_executable`` is not
-    validated by this helper.
+    or wrap the command before deciding to run it. ``steam_executable``
+    is taken on trust — existence is the caller's concern.
     """
     cmd = [str(steam_executable), "-applaunch", str(app_id)]
     if vrchat_args:
@@ -93,14 +101,22 @@ def validate_launch_args(
     proton_path: Path | None,
     profile: int | None,
 ) -> None:
-    """``launch()`` 引数の fail-fast バリデーション.
+    """Fail-fast cross-check of :func:`launch` argument combinations.
 
-    ``profile`` は両 platform で許容する (Windows でも VRChat の
-    ``--profile=N`` argv を直接渡せる)。``wineprefix`` / ``proton_path``
-    は Linux + direct-spawn 専用。``via_steam`` との同時指定は ``profile``
-    を含めて禁止 — Steam 経由は ``--profile`` の伝達経路が異なる
-    (Steam の launch options 側で持つべき) ため、ここで argv に注入する
-    と二重指定や見落としを招く。
+    ``--profile=N`` is accepted on both platforms (VRChat parses it the
+    same way regardless of host OS). ``wineprefix`` / ``proton_path``
+    are Linux + direct-spawn only — on Windows they signal a config
+    copy-paste mistake and are rejected outright.
+
+    Combining any of ``wineprefix`` / ``proton_path`` / ``profile`` with
+    ``via_steam=True`` is rejected because the Steam route carries
+    those settings through Steam's own launch-options surface; injecting
+    them into argv here would silently double-specify or get lost.
+
+    Raises:
+        ValueError: One of the rules above was violated. The message
+            names the offending combination so the caller can drop the
+            wrong flag without guessing.
     """
     if profile is not None and profile < 0:
         raise ValueError(f"profile must be non-negative (got {profile})")
@@ -123,12 +139,15 @@ def _wait_for_new_pid(
     timeout: float,
     interval: float,
 ) -> int | None:
-    """Launch 前後の PID 集合差分から新規 PID を返す.
+    """Return the first PID that appears after spawn relative to ``pre_pids``.
 
-    :func:`find_pids` が新しい順なので、複数の新規 PID があれば最新の 1 つを返す
-    (通常はそもそも 1 つしか増えないが、race 対策で先頭採用)。
+    :func:`find_pids` returns newest-first, so when more than one new PID
+    appears (rare; usually only one) we take the most recent — defensive
+    against a race where a sibling instance starts in the same window.
     """
-    # ``process/__init__.py`` <-> ``launch.py`` の循環を断つため遅延 import。
+    # Deferred to break the ``process/__init__.py`` <-> ``launch.py`` import
+    # cycle: ``__init__`` re-exports ``find_pids`` from ``pid``, which would
+    # otherwise be observed mid-construction.
     from . import find_pids
 
     deadline = time.monotonic() + timeout
@@ -159,72 +178,88 @@ def launch(
     wait_timeout: float = PID_WAIT_TIMEOUT,
     wait_interval: float = PID_WAIT_INTERVAL,
 ) -> int | None:
-    """Launch VRChat and (optionally) wait for the new PID to appear.
+    """Spawn VRChat and (optionally) wait for the new PID to appear.
 
-    Default path spawns VRChat's ``launch.exe`` (the EAC wrapper bundled
-    alongside ``VRChat.exe``) directly. Calling ``VRChat.exe`` itself would
-    boot in offline mode because EAC is not initialized — so ``launch.exe``
-    is the required entry point. On Linux the spawn goes through
-    ``umu-run`` (auto-discovered from PATH) to host the Wine/Proton runtime.
+    Two spawn routes share this entry point. The mental model:
 
-    Pass ``via_steam=True`` to fall back to the legacy
-    ``steam.exe -applaunch <app_id>`` route. That path fails fast with
-    :class:`VRChatAlreadyRunningError` if VRChat is already running because
-    Steam will just refocus the existing instance instead of spawning a
-    new one, defeating the purpose of a "launch" call.
+    * **Direct-spawn (default)**: invoke the EAC wrapper ``launch.exe``
+      ourselves. On Windows that is a plain ``subprocess.Popen``; on Linux
+      it goes through ``umu-run`` (auto-discovered from PATH) so Proton's
+      Wine prefix hosts the binary. The process is detached
+      (``CREATE_NEW_PROCESS_GROUP`` / ``start_new_session=True``) so the
+      caller can exit without taking VRChat down.
+    * **Via-Steam (``via_steam=True``)**: hand off to
+      ``steam.exe -applaunch <app_id>``. Refuses to run if any VRChat
+      process is already up — Steam silently refocuses the existing
+      instance in that case, so the call would observe no new PID and
+      hang on the post-spawn wait.
+
+    The post-spawn wait diffs ``find_pids()`` against the pre-spawn
+    snapshot rather than tailing a single subprocess; this is what makes
+    the via-Steam route observable at all (the spawned child is Steam's,
+    not ours).
 
     Args:
-        via_steam: Use ``steam.exe -applaunch`` instead of direct spawn.
-            Mutually exclusive with ``wineprefix`` / ``proton_path`` /
-            ``profile``.
-        app_id: Steam app id used by ``-applaunch`` (``via_steam=True`` route
-            only). The direct-spawn route does **not** forward this as
-            ``$GAMEID`` to ``umu-run``; see the in-function comment for the
-            reason (umu-launcher's "global defaults" protonfix collides with
-            VRChat's DLL surface, 2026-05-23).
-        steam_path: Override Steam executable auto-detection. Only used
-            when ``via_steam=True``.
-        vrchat_launcher: Override the ``launch.exe`` path. When ``None``,
-            auto-discovered via Steam ``libraryfolders.vdf``
-            (see :func:`vrcpilot.process.executable.find_vrchat_launcher`).
+        via_steam: Switch to the ``steam.exe -applaunch`` route. Mutually
+            exclusive with ``wineprefix`` / ``proton_path`` / ``profile``
+            because Steam carries those through its own launch-options UI.
+        app_id: Forwarded to ``-applaunch`` on the via-Steam route only.
+            Deliberately **not** exported as ``$GAMEID`` to ``umu-run`` on
+            the direct-spawn route: doing so makes umu-launcher apply its
+            "global defaults" protonfix (no VRChat-specific fix is
+            registered upstream), which in turn pulls in an unimplemented
+            ``coremessaging.dll`` entry point and aborts Wine. See the
+            in-function comment for the 2026-05-23 incident reference.
+        steam_path: Skip Steam auto-detection. Honoured only when
+            ``via_steam=True``.
+        vrchat_launcher: Skip ``launch.exe`` auto-detection. When
+            ``None`` the path is resolved via
+            :func:`vrcpilot.process.executable.find_vrchat_launcher`
+            (Steam ``libraryfolders.vdf`` walk).
         wineprefix: Linux + direct-spawn only. Sets ``$WINEPREFIX`` for
-            the ``umu-run`` subprocess.
-        proton_path: Linux + direct-spawn only. Sets ``$PROTON_PATH``.
-        profile: Pass ``--profile=N`` to VRChat (separates SaveData /
-            cache folders). Must be a non-negative int. Accepted on both
-            Windows and Linux. On Linux, additionally auto-generates a
-            prefix at ``$XDG_DATA_HOME/vrcpilot/profiles/<profile>/wineprefix``
-            (falls back to ``~/.local/share/...``) and uses that for
-            ``$WINEPREFIX``; an explicit ``wineprefix`` overrides this.
-            Not compatible with ``via_steam`` (the Steam route should
-            carry ``--profile`` via Steam launch options instead).
-        no_vr / screen_width / screen_height / osc / extra_args: Forwarded
-            to VRChat's argv via :func:`build_vrchat_launch_args`.
-        wait_timeout: Seconds to wait for the new VRChat PID to appear
-            after spawning. ``<=0`` to skip the wait entirely.
-        wait_interval: Polling interval for the PID wait.
+            the ``umu-run`` child so the caller can pin a specific Wine
+            prefix (e.g. one shared with Steam's ``compatdata/438100``).
+        proton_path: Linux + direct-spawn only. Sets ``$PROTON_PATH`` for
+            umu-launcher to consume.
+        profile: VRChat ``--profile=N`` (slot number; non-negative).
+            Separates SaveData / cache folders. On Linux this also seeds
+            a per-profile Wine prefix under
+            ``$XDG_DATA_HOME/vrcpilot/profiles/<profile>/wineprefix``
+            (or ``~/.local/share/...``) unless ``wineprefix`` is set
+            explicitly.
+        no_vr, screen_width, screen_height, osc, extra_args: Forwarded
+            verbatim to :func:`build_vrchat_launch_args`.
+        wait_timeout: Seconds to wait for the new VRChat PID after
+            spawning. ``<= 0`` skips the wait (returns ``None`` immediately).
+        wait_interval: Poll cadence during the PID wait.
 
     Returns:
-        The newly-spawned VRChat PID, or ``None`` if the wait was skipped
-        (``wait_timeout <= 0``) or timed out.
+        The newly-spawned VRChat PID, or ``None`` when the wait was
+        skipped (``wait_timeout <= 0``) or expired without observing
+        a new process.
 
     Raises:
-        SteamNotFoundError: ``via_steam=True`` but Steam not found.
+        ValueError: ``validate_launch_args`` rejected the argument
+            combination (e.g. ``profile`` together with ``via_steam``).
+        SteamNotFoundError: ``via_steam=True`` but no Steam executable
+            could be located.
         SteamNotRunningError: Linux + ``via_steam=True`` but the Steam
-            desktop client is not running on the host.
-        VRChatLauncherNotFoundError: ``launch.exe`` cannot be located.
-        UmuLauncherNotFoundError: Linux but ``umu-run`` is missing from
-            PATH.
-        VRChatAlreadyRunningError: ``via_steam=True`` but VRChat is
-            already running.
-        VRChatDisplayNotAvailableError: Linux + direct-spawn but neither
-            ``$DISPLAY`` nor ``$WAYLAND_DISPLAY`` is set (no graphical
-            session attached).
-        ValueError: Invalid argument combination (see
-            :func:`validate_launch_args`).
+            desktop client is not running, so ``-applaunch`` has nothing
+            to dispatch to.
+        VRChatLauncherNotFoundError: Direct-spawn route but ``launch.exe``
+            cannot be located in any Steam library.
+        UmuLauncherNotFoundError: Linux direct-spawn route but
+            ``umu-run`` is missing from PATH (umu-launcher not installed).
+        VRChatDisplayNotAvailableError: Linux direct-spawn route with
+            neither ``$DISPLAY`` nor ``$WAYLAND_DISPLAY`` set — Wine
+            would block indefinitely waiting for a graphical session.
+        VRChatAlreadyRunningError: ``via_steam=True`` but at least one
+            VRChat process is already running (Steam would just refocus
+            it).
     """
-    # Deferred so tests reach the live ``vrcpilot.steam`` binding via
-    # ``monkeypatch`` instead of a captured module-level alias.
+    # Deferred so tests that monkeypatch ``vrcpilot.steam.find_steam_executable``
+    # actually intercept the call — a module-level import would freeze the
+    # original reference at import time.
     from vrcpilot.steam import find_steam_executable
 
     from .executable import find_vrchat_launcher
@@ -270,13 +305,13 @@ def launch(
 
             umu_run = find_umu_launcher()
             argv = [str(umu_run), str(launcher), *vrchat_args]
-            # GAMEID は意図的に渡さない。GAMEID=438100 を渡すと umu-launcher が
-            # ProtonFixes の "global defaults" (VRChat 専用 fix は未登録) を当て、
-            # その global defaults が UMU-Proton-latest では未実装の
-            # coremessaging.dll.DllGetActivationFactory を呼んで wine が即死する
-            # (2026-05-23 実機で観測)。GAMEID 未指定なら umu の素の default で
-            # 起動して安定する。ProtonFixes に VRChat (438100) の正規 fix が
-            # upstream に追加されたら戻す価値がある。
+            # GAMEID is deliberately omitted. Passing GAMEID=438100 makes
+            # umu-launcher apply its "global defaults" protonfix (no VRChat
+            # entry is registered upstream), which calls the unimplemented
+            # ``coremessaging.dll.DllGetActivationFactory`` and aborts Wine
+            # (observed on hardware 2026-05-23). Without GAMEID umu falls
+            # back to its bare default and boots cleanly. Worth revisiting
+            # only once VRChat (438100) gains a real ProtonFixes entry.
             if wineprefix is not None:
                 env_overrides["WINEPREFIX"] = str(wineprefix)
             elif profile is not None:

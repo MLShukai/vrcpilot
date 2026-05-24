@@ -1,8 +1,12 @@
 """``vrcpilot linux-mic`` subcommand: manage the PipeWire virtual mic.
 
-Linux-only; importing this module on any other platform raises
-:class:`ImportError`. The top-level CLI only wires the subcommand in
-when ``sys.platform == "linux"``.
+Linux-only because Windows uses VB-Audio Virtual Cable, which is a
+user-space driver registered out-of-band; there is no Windows
+analogue for the ``register`` / ``unregister`` / ``status`` actions.
+The top-level CLI conditionally wires this subcommand only on Linux,
+so ``vrcpilot --help`` on Windows never advertises a command that has
+no Windows implementation. Importing this module on a non-Linux
+platform raises :class:`ImportError` as a defensive secondary guard.
 """
 
 from __future__ import annotations
@@ -21,7 +25,7 @@ from ._common import SubParsersAction
 
 
 def register(subparsers: SubParsersAction) -> None:
-    """Wire ``linux-mic`` plus its three actions into the top-level CLI."""
+    """Wire ``linux-mic`` plus its three actions into the CLI."""
     parser = subparsers.add_parser(
         "linux-mic",
         help=(
@@ -107,16 +111,17 @@ def _run_unregister() -> int:
 
 
 def _runtime_loaded(sink_name: str) -> tuple[bool, str | None]:
-    """Return ``(loaded, error)`` for whether PipeWire has the sink loaded.
+    """Probe whether PipeWire currently has the named null-sink loaded.
 
     ``loaded`` is ``True`` iff a ``module-null-sink`` with
-    ``sink_name=<sink_name>`` is currently in ``pulse.module_list()``.
+    ``sink_name=<sink_name>`` appears in ``pulse.module_list()``.
     ``error`` carries a short description when the pulsectl probe
-    itself failed (missing dependency, control-plane error); ``status``
-    surfaces it alongside the ``not loaded`` answer so it never raises.
+    itself fails (missing dependency, control-plane error); ``status``
+    surfaces it alongside the ``not loaded`` answer so this helper
+    never raises out into the CLI.
 
-    Goes through :func:`vrcpilot.mic.linux.open_pulse_control` -- the
-    seam ``register`` / ``unregister`` / ``status`` all share.
+    Goes through :func:`vrcpilot.mic.linux.open_pulse_control` — the
+    shared seam ``register`` / ``unregister`` / ``status`` all use.
     """
     from vrcpilot.mic import linux as mic_linux
 
@@ -148,15 +153,15 @@ def _runtime_loaded(sink_name: str) -> tuple[bool, str | None]:
 
 
 def _soundcard_visible(sink_name: str) -> tuple[bool, str | None]:
-    """Return ``(visible, error)`` for whether soundcard can see the sink.
+    """Probe whether ``soundcard`` can enumerate the named PipeWire sink.
 
     Goes through :func:`soundcard.get_speaker` so the match honours
     both ``Speaker.id`` (PipeWire surfaces the null-sink as
     ``id="VRCPilotMic"``) and ``Speaker.name`` (description-derived,
     e.g. ``"VRCPilot_Virtual_Mic"``). A name-only scan misses this
-    divergence -- the regression an id-aware match fixed.
+    divergence — the regression an id-aware match fixed.
 
-    ``error`` is set when the probe itself blew up (soundcard not
+    ``error`` is set when the probe itself blows up (soundcard not
     installed, libpulse / WASAPI dlopen failure); callers print it
     alongside the ``not visible`` answer rather than raising.
     """
@@ -191,8 +196,8 @@ def _run_status() -> int:
     ``not visible`` for soundcard); ``unavailable`` is the fixed label
     whenever a probe itself blew up, and the matching stderr line
     carries the underlying ``error: <message>``. Splitting the streams
-    keeps scripts free to ``grep`` stdout without parsing
-    failure-detail parentheticals.
+    lets scripts ``grep`` stdout without parsing failure-detail
+    parentheticals.
     """
     from vrcpilot.mic import linux as mic_linux
     from vrcpilot.mic.base import VIRTUAL_MIC_SINK_NAME
@@ -223,8 +228,8 @@ def _run_status() -> int:
 def run(args: argparse.Namespace) -> int:
     """Dispatch the requested ``linux-mic`` action.
 
-    Reaching this function implies Linux: the module's import guard
-    would have raised on any other platform.
+    Reaching this function implies Linux; the module's import guard
+    raises on every other platform.
     """
     match args.action:
         case "register":

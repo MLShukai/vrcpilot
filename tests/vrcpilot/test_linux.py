@@ -1,4 +1,4 @@
-"""Tests for :mod:`vrcpilot.linux` (X11 helpers).
+"""Integration-real tests for :mod:`vrcpilot.linux` (X11 helpers).
 
 The module under test raises ``ImportError`` on non-Linux platforms and
 the real paths require a reachable X server. Two module-level skips up

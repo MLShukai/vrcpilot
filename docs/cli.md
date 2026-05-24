@@ -156,7 +156,7 @@ ______________________________________________________________________
 
 ## record
 
-Record VRChat video and/or audio to a file or stream it to stdout. Video is the VRChat window (focus-free, same backends as [`Capture`](python-api.md#vrcpilotcapture)); audio is VRChat-only — a native PipeWire pipeline on Linux, `proc-tap` process loopback on Windows — so system audio from other applications is not mixed in.
+Record VRChat video and/or audio to a file or stream it to stdout. Video is the VRChat window (focus-free, same backends as [`Capture`](python-api.md#vrcpilotcapturecapture)); audio is VRChat-only — a native PipeWire pipeline on Linux, `proc-tap` process loopback on Windows — so system audio from other applications is not mixed in.
 
 ```
 vrcpilot record [-o PATH] [--video] [--audio] [--fps FLOAT] [--duration SECONDS]
@@ -338,7 +338,7 @@ vrcpilot mouse scroll AMOUNT
 
 **Side effects**: synthesizes input via [`pydirectinput`](https://github.com/learncodebygaming/pydirectinput) (Windows) or [`inputtino`](https://github.com/games-on-whales/inputtino) (Linux uinput).
 
-> `mouse press` / `mouse release` are intentionally not exposed. The kernel releases buttons when the CLI process exits, so down/up cannot be paired across separate invocations. For paired down/up actions, drive input from a single Python process via [`vrcpilot.mouse.press` / `vrcpilot.mouse.release`](python-api.md#mouse).
+> `mouse press` / `mouse release` are intentionally not exposed. The kernel releases buttons when the CLI process exits, so down/up cannot be paired across separate invocations. For paired down/up actions, drive input from a single Python process via [`vrcpilot.mouse.press` / `vrcpilot.mouse.release`](python-api.md#vrcpilotmouse).
 
 ______________________________________________________________________
 

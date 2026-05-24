@@ -12,7 +12,7 @@ ______________________________________________________________________
 
 - **VRChat is installed via Steam**, and Steam is logged in.
 - **The desktop session is X11 or XWayland.** Run `loginctl show-session "$XDG_SESSION_ID" -p Type` to confirm `Type=x11`. Wayland-native sessions are not supported — `focus()` / `unfocus()` warn and return `False`, and synthetic input cannot reach the window.
-- **Steam is already running.** If Steam is not running, `vrcpilot launch` will spend its 30-second wait on Steam's startup screen and then fail with `VRChat PID was not observed before timeout`. Bring Steam up first.
+- **Steam is already running.** If Steam is not running, `vrcpilot launch` will spend its 30-second wait on Steam's startup screen and then fail with `vrcpilot: VRChat did not start within 30.0s`. Bring Steam up first.
 - **Linux only — `inputtino-python` is installed before `vrcpilot`.** The Linux input backend comes from [`inputtino`](https://github.com/games-on-whales/inputtino). Install the native build prerequisites first, then install `inputtino-python` into the same Python environment as `vrcpilot`; see [`README.md` Installation](../README.md#installation).
 - **Linux only — write access to `/dev/uinput`.** Synthetic input writes through `/dev/uinput`. Run `sudo usermod -aG input "$USER"`, then log out and back in. Confirm with `groups` showing `input`.
 - **The screen is not locked.** Window operations are unstable while the screen is locked.
@@ -304,16 +304,16 @@ ______________________________________________________________________
 
 ## 11. Recovering from common failures
 
-| Symptom                                      | Likely cause                                              | Fix                                                     |
-| -------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------- |
-| `VRChat PID was not observed before timeout` | Steam is not running, or VRChat install is missing        | Start Steam first; verify the install in Steam library  |
-| `vrcpilot focus` exits 1 silently            | Wayland-native session, or VRChat window not yet mapped   | Switch to X11 / XWayland; wait for the warm-up          |
-| `VRChatNotFocusedError` from input commands  | The window lost focus right before the call               | Re-focus with `vrcpilot focus`, then retry              |
-| Tab key does nothing                         | The 2026-series UI no longer maps Tab to a menu           | Use Escape (Launch Pad) and R (Radial Action Menu)      |
-| `keyboard press` ignored                     | `--duration` lowered below `0.1`                          | Restore the default of `0.1` or higher                  |
-| `mouse move` lands far from the OCR target   | Treating OCR/detect `pos` as desktop-absolute coordinates | Pass `pos.bbox` directly — `mouse move` is window-local |
-| `pyperclip.PyperclipException` on Linux      | No clipboard backend installed                            | `sudo apt-get install xclip` (or `xsel`)                |
-| Capture hangs or fails immediately           | Wayland-native session, or screen is locked               | Switch to X11 / XWayland; unlock the screen             |
+| Symptom                                       | Likely cause                                              | Fix                                                     |
+| --------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------- |
+| `vrcpilot: VRChat did not start within 30.0s` | Steam is not running, or VRChat install is missing        | Start Steam first; verify the install in Steam library  |
+| `vrcpilot focus` exits 1 silently             | Wayland-native session, or VRChat window not yet mapped   | Switch to X11 / XWayland; wait for the warm-up          |
+| `VRChatNotFocusedError` from input commands   | The window lost focus right before the call               | Re-focus with `vrcpilot focus`, then retry              |
+| Tab key does nothing                          | The 2026-series UI no longer maps Tab to a menu           | Use Escape (Launch Pad) and R (Radial Action Menu)      |
+| `keyboard press` ignored                      | `--duration` lowered below `0.1`                          | Restore the default of `0.1` or higher                  |
+| `mouse move` lands far from the OCR target    | Treating OCR/detect `pos` as desktop-absolute coordinates | Pass `pos.bbox` directly — `mouse move` is window-local |
+| `pyperclip.PyperclipException` on Linux       | No clipboard backend installed                            | `sudo apt-get install xclip` (or `xsel`)                |
+| Capture hangs or fails immediately            | Wayland-native session, or screen is locked               | Switch to X11 / XWayland; unlock the screen             |
 
 ______________________________________________________________________
 

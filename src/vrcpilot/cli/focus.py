@@ -1,4 +1,9 @@
-"""``vrcpilot focus`` subcommand."""
+"""``vrcpilot focus`` subcommand: bring the VRChat window to the foreground.
+
+Thin shell over :func:`vrcpilot.window.focus`. The window backend can
+fail for several reasons (no VRChat, no window handle, native Wayland)
+that all collapse to a single user-visible diagnostic.
+"""
 
 from __future__ import annotations
 
@@ -12,7 +17,7 @@ from ._common import SubParsersAction, add_pid_arg, handle_multi_instance_error
 
 
 def register(subparsers: SubParsersAction) -> None:
-    """Add the ``focus`` subparser to the top-level subparsers."""
+    """Wire the ``focus`` subparser into the top-level CLI."""
     parser = subparsers.add_parser(
         "focus",
         help="Bring the running VRChat window to the foreground.",
@@ -21,11 +26,14 @@ def register(subparsers: SubParsersAction) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
-    """Run ``focus``; silent on success, exit 1 on any failure.
+    """Focus the VRChat window; silent on success.
 
-    Failures (VRChat not running, no window, native Wayland) print one
-    ``vrcpilot: ...`` line to stderr. With multiple VRChat processes
-    running and no ``--pid``, exits 1 with the multi-instance diagnostic.
+    Exit codes:
+
+    * 0: window was focused
+    * 1: any failure (no VRChat, no window, native Wayland, or the
+      multi-instance case without ``--pid``); a single
+      ``vrcpilot: ...`` line is written to stderr.
     """
     try:
         if focus(pid=args.pid):

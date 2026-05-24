@@ -41,8 +41,7 @@ _default_engine: OCREngine | None = None
 
 
 def _get_default_engine() -> OCREngine:
-    """Return the process-wide cached :class:`RapidOCREngine`, building it
-    lazily.
+    """Return the lazily-built, process-wide cached :class:`RapidOCREngine`.
 
     Not thread-safe; under racy access the worst case is a transient
     duplicate engine that is immediately replaced.

@@ -83,18 +83,19 @@ class PipeWireSpeakerBackend(SpeakerBackend):
     """SpeakerBackend that captures VRChat audio via native PipeWire.
 
     Constructor performs the full three-plane setup (see module
-    docstring) under an ``ExitStack`` so a partial start-up never
-    leaks the null-sink or the ``pw-record`` subprocess. :meth:`close`
-    is also registered with :func:`atexit` for the same reason.
+    docstring) under an ``ExitStack`` so a partial start-up never leaks
+    the null-sink or the ``pw-record`` subprocess. :meth:`close` is
+    also registered with :func:`atexit` so an interpreter shutdown that
+    bypasses ``__exit__`` still releases the PipeWire resources.
 
     Args:
         read_timeout: Seconds :meth:`read` waits for the first chunk
             before returning empty. Must be ``> 0``.
-        pid: Target VRChat PID. The caller (typically
-            :class:`vrcpilot.speaker.Speaker`) supplies a resolved PID;
-            the backend filters PipeWire output nodes by
-            ``application.process.id`` so concurrent VRChat instances
-            never share an audio tap.
+        pid: Target VRChat PID. The backend filters PipeWire output
+            nodes by ``application.process.id`` so concurrent VRChat
+            instances never share an audio tap; callers (typically
+            :class:`vrcpilot.speaker.Speaker`) supply a pre-resolved
+            PID rather than re-resolving here.
 
     Raises:
         ValueError: ``read_timeout`` is not strictly positive.

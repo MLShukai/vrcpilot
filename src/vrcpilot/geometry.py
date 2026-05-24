@@ -46,18 +46,28 @@ if sys.platform == "linux":
 def get_vrchat_window_rect(
     *, pid: int | None = None
 ) -> tuple[int, int, int, int] | None:
-    """Return the VRChat window ``(x, y, width, height)`` in desktop pixels.
+    """Locate the VRChat window's screen rect for capture and click
+    translation.
 
-    *pid* selects the target instance when multiple VRChat processes are
-    running. When omitted, :func:`vrcpilot.process.resolve_pid` chooses the
-    sole running instance.
+    Args:
+        pid: Disambiguates when multiple VRChat instances run. When
+            ``None``, :func:`vrcpilot.process.resolve_pid` picks the
+            sole instance (or raises).
 
-    Returns ``None`` when VRChat is not running, the window cannot be located,
-    or the geometry query fails. Raises
-    :class:`vrcpilot.process.VRChatMultipleInstancesError` when *pid* is
-    omitted and multiple VRChat processes are running, so callers can prompt
-    for ``--pid`` rather than silently choosing one. Raises
-    :class:`NotImplementedError` outside Windows / Linux.
+    Returns:
+        ``(x, y, width, height)`` in desktop pixels, or ``None`` when
+        VRChat is not running, the window has not yet been mapped, or
+        the platform backend cannot reach its display. Returning ``None``
+        (rather than raising) lets polling callers retry without
+        try/except.
+
+    Raises:
+        VRChatMultipleInstancesError: ``pid`` was omitted and more than
+            one VRChat is running. Surfaced (not swallowed) so callers
+            can prompt the user for ``--pid`` rather than silently
+            picking one.
+        NotImplementedError: Running on a platform other than Windows or
+            Linux.
     """
     try:
         resolved = process.resolve_pid(pid)

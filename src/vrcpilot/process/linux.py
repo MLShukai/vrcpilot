@@ -44,29 +44,40 @@ def find_umu_launcher(override: Path | None = None) -> Path:
 
 
 def profile_wineprefix(profile: int) -> Path:
-    """Vrcpilot 管理の profile 番号に対応する ``$WINEPREFIX`` パスを返す。
+    """Return the vrcpilot-managed ``$WINEPREFIX`` path for a profile slot.
 
-    既存ディレクトリの存在は保証しない (呼び出し側で
-    ``mkdir(parents=True, exist_ok=True)`` する)。
+    Path-only: directory creation is the caller's responsibility (the
+    launch flow does ``mkdir(parents=True, exist_ok=True)`` right before
+    spawning).
     """
     base = Path(os.environ.get("XDG_DATA_HOME") or "~/.local/share").expanduser()
     return base / "vrcpilot" / "profiles" / str(profile) / "wineprefix"
 
 
 def preflight_linux_environment(*, via_steam: bool) -> None:
-    """Linux 限定の launch pre-flight (display / Steam の事前確認)。
+    """Fail fast on Linux launch preconditions that would otherwise hang.
 
-    direct-spawn: ``umu-run`` + Wine は GUI セッションへ attach できないと
-    block して進まない (SSH 経由などで $DISPLAY が無い環境で発生)。事前検出
-    して :class:`VRChatDisplayNotAvailableError` を投げる方が、subprocess
-    が永久に hang するより早く失敗できる。X11 / Wayland どちらでも実用上は
-    動くので、$DISPLAY と $WAYLAND_DISPLAY のいずれかが立っていれば OK と
-    する。
+    Two different gates depending on the spawn route:
 
-    via_steam: ``steam.exe -applaunch`` は Steam クライアントが既に起動して
-    いることを前提とした call (Steam は自分の display attachment を持って
-    いる)。vrcpilot からは Steam UI を立ち上げられないので、未起動なら
-    :class:`SteamNotRunningError` を投げてユーザーに通知する。
+    * **Direct-spawn** (``via_steam=False``): the ``umu-run`` + Wine
+      subprocess blocks indefinitely when no graphical session is
+      attached (a real failure mode under plain SSH). We pre-check
+      ``$DISPLAY`` / ``$WAYLAND_DISPLAY`` and raise
+      :class:`VRChatDisplayNotAvailableError` so the caller sees an
+      immediate, actionable error instead of a hung process. Either
+      X11 or Wayland is enough.
+    * **Via-Steam** (``via_steam=True``): ``steam.exe -applaunch``
+      assumes Steam is already running (Steam owns its own display
+      attachment). vrcpilot cannot start the Steam UI for the user, so
+      a missing Steam process is surfaced via
+      :class:`SteamNotRunningError`.
+
+    Raises:
+        VRChatDisplayNotAvailableError: Direct-spawn route with neither
+            ``$DISPLAY`` nor ``$WAYLAND_DISPLAY`` set. Empty strings count
+            as unset (stripped systemd unit envs frequently produce this).
+        SteamNotRunningError: Via-Steam route but no Steam client is
+            running on the host.
     """
     if via_steam:
         from vrcpilot.steam import SteamNotRunningError, is_steam_running

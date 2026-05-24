@@ -144,8 +144,7 @@ def _write_config(path: Path) -> bool:
 
 
 def _unload_matching_null_sinks(pulse: Any) -> int:
-    """Unload every ``module-null-sink`` targeting
-    :data:`VIRTUAL_MIC_SINK_NAME`.
+    """Unload every ``module-null-sink`` bound to ``VRCPilotMic``.
 
     Shared between ``register`` (stale-cleanup before a fresh load) and
     ``unregister`` (full teardown) so the matching predicate stays

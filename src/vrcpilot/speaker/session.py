@@ -26,7 +26,14 @@ def _select_speaker_backend(
     read_timeout: float,
     pid: int,
 ) -> SpeakerBackend:
-    """Return a started :class:`SpeakerBackend` for the host platform."""
+    """Return a started :class:`SpeakerBackend` for the host platform.
+
+    Backend imports are intentionally inline so the platform-specific
+    optional dependency (``pulsectl`` on Linux, ``proc-tap`` on Windows)
+    is only loaded on the matching host. Both submodules raise
+    ``ImportError`` at import time on the wrong platform, so a top-level
+    import would crash collection on any cross-platform CI shard.
+    """
     if sys.platform == "linux":
         from vrcpilot.speaker.linux import PipeWireSpeakerBackend
 
@@ -41,20 +48,18 @@ def _select_speaker_backend(
 class Speaker:
     """Process-isolated audio capture session for VRChat.
 
-    VRChat must already be running when the constructor is called.
-    ``read_timeout`` is in seconds and bounds how long :meth:`read`
-    waits on a quiet stream before returning an empty ndarray.
+    Only audio emitted by the bound VRChat PID is delivered to the
+    caller; co-resident applications and other VRChat instances stay
+    off the stream. VRChat must already be running when the constructor
+    is called.
 
     Args:
-        read_timeout: Seconds :meth:`read` waits for new samples before
-            returning an empty ndarray. Must be ``> 0``. Default ``2.0``.
-        pid: Target VRChat PID. When omitted,
-            :func:`vrcpilot.process.resolve_pid` picks the sole running
-            instance and raises
-            :class:`vrcpilot.process.VRChatMultipleInstancesError` if more
-            than one VRChat process is running. Pass an explicit PID to
-            bind the speaker session to one instance when several are
-            running concurrently.
+        read_timeout: Seconds :meth:`read` waits on a quiet stream
+            before returning an empty ndarray. Must be ``> 0``.
+        pid: Target VRChat PID. Omit to let
+            :func:`vrcpilot.process.resolve_pid` pick the sole running
+            instance; pass explicitly to disambiguate when several
+            VRChat processes coexist.
 
     Raises:
         RuntimeError: VRChat is not running, or the platform backend
@@ -84,8 +89,8 @@ class Speaker:
     def read(self) -> NDArray[np.float32]:
         """Return every sample buffered since the previous read.
 
-        Shape ``(N, CHANNELS)``; ``N == 0`` is the valid "no new audio"
-        signal, returned when no samples arrive within ``read_timeout``.
+        Shape is ``(N, CHANNELS)``; an empty ``(0, CHANNELS)`` array is
+        the documented "no new audio" tick rather than an error.
 
         Raises:
             RuntimeError: Session is closed or the backend reports a

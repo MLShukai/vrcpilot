@@ -1,4 +1,4 @@
-"""Tests for :mod:`vrcpilot.steam`.
+"""Integration-real tests for :mod:`vrcpilot.steam`.
 
 Coverage split between two strategies:
 

@@ -18,25 +18,21 @@ type AudioCallback = Callable[[NDArray[np.float32]], None]
 class SpeakerLoop:
     """Run a :class:`Speaker` on a background thread.
 
-    Constructs and owns its own :class:`Speaker`; VRChat must already
-    be running. Each tick drains one chunk and forwards it to
-    ``callback``. Empty chunks (``N == 0``) are forwarded verbatim as a
-    "silence tick" signal. Exceptions from the callback or
-    :meth:`Speaker.read` are stashed and re-raised on the next
-    :meth:`stop` / :meth:`close` so the worker never dies silently.
-
-    ``chunk_seconds`` is the inter-tick sleep, in seconds.
+    Owns its inner :class:`Speaker`; VRChat must already be running.
+    Empty chunks are forwarded verbatim as the "silence tick" signal so
+    downstream consumers (sinks, VAD) can detect quiet periods rather
+    than mistaking them for a dead loop. Worker-thread exceptions are
+    captured and re-raised on the next :meth:`stop` / :meth:`close` so
+    a silent thread death cannot go unnoticed.
 
     Args:
         callback: Invoked with each ndarray ``Speaker.read`` returns.
-        chunk_seconds: Inter-tick sleep budget; must be ``> 0``.
+        chunk_seconds: Inter-tick sleep in seconds; must be ``> 0``.
         read_timeout: Forwarded to the owned :class:`Speaker`; must be
             ``> 0``.
-        pid: Target VRChat PID forwarded to :class:`Speaker`. When
-            omitted, :func:`vrcpilot.process.resolve_pid` picks the sole
-            running instance and raises
-            :class:`vrcpilot.process.VRChatMultipleInstancesError` if
-            more than one VRChat process is running.
+        pid: Target VRChat PID forwarded to :class:`Speaker`. Omit to
+            let :func:`vrcpilot.process.resolve_pid` pick the sole
+            running instance.
 
     Raises:
         RuntimeError: The internal :class:`Speaker` cannot start.

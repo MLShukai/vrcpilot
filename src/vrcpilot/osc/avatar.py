@@ -26,17 +26,21 @@ class AvatarParameters:
         self._sender = sender
 
     def send_bool(self, name: str, value: bool) -> None:
-        """Write ``name`` as a bool avatar parameter."""
+        """Write ``name`` as a bool avatar parameter.
+
+        Goes through :meth:`OscSender.send_bool`, so the value reaches
+        VRChat as the OSC ``i`` tag (VRChat rejects the bool tag).
+        """
         self._sender.send_bool(self._address(name), value)
 
     def send_int(self, name: str, value: int) -> None:
-        """Write ``name`` as an int avatar parameter (range-checked
-        upstream)."""
+        """Write ``name`` as an int avatar parameter; sender validates
+        range."""
         self._sender.send_int(self._address(name), value)
 
     def send_float(self, name: str, value: float) -> None:
-        """Write ``name`` as a float avatar parameter (range-checked
-        upstream)."""
+        """Write ``name`` as a float avatar parameter; sender validates
+        range."""
         self._sender.send_float(self._address(name), value)
 
     @staticmethod

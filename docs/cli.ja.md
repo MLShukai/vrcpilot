@@ -10,7 +10,7 @@
 
 - サブコマンドは成功時に終了コード `0`、回復可能な失敗時に `1` を返し、stderr へ `vrcpilot: <message>` の 1 行を出力します。一部のコマンドは入力形状エラーに対して `2` も使用します（例えば `record` は `-o` の拡張子の不一致や `--fps` と `--audio` の組み合わせを終了コード `2` で拒否します）。該当ケースは以下で個別に明記します。
 - `vrcpilot --version` は解決済みのパッケージバージョンを表示します（`importlib.metadata` 経由で読み込むため `pyproject.toml` と常に同期します）。
-- CLI は `argcomplete` 対応です（`PYTHON_ARGCOMPLETE_OK` が [`src/vrcpilot/cli/__init__.py`](../src/vrcpilot/cli/__init__.py) で宣言されています）。セットアップは [`README.md`](../README.ja.md#shell-completion) を参照してください。
+- CLI は `argcomplete` 対応です（`PYTHON_ARGCOMPLETE_OK` が [`src/vrcpilot/cli/__init__.py`](../src/vrcpilot/cli/__init__.py) で宣言されています）。セットアップは [`README.ja.md`](../README.ja.md#%E3%82%B7%E3%82%A7%E3%83%AB%E8%A3%9C%E5%AE%8C) を参照してください。
 
 ### `Screenshot` YAML の受け渡し
 
@@ -156,7 +156,7 @@ ______________________________________________________________________
 
 ## record
 
-VRChat の映像 / 音声をファイルへ録画するか、stdout にストリーム配信します。映像は VRChat ウィンドウです（フォーカス不要、[`Capture`](python-api.ja.md#vrcpilotcapture) と同じバックエンドを使用）。音声は VRChat 単体のもので、Linux ではネイティブ PipeWire パイプライン、Windows では `proc-tap` プロセスループバックを使用するため、他アプリケーションのシステム音声は混入しません。
+VRChat の映像 / 音声をファイルへ録画するか、stdout にストリーム配信します。映像は VRChat ウィンドウです（フォーカス不要、[`Capture`](python-api.ja.md#vrcpilotcapturecapture) と同じバックエンドを使用）。音声は VRChat 単体のもので、Linux ではネイティブ PipeWire パイプライン、Windows では `proc-tap` プロセスループバックを使用するため、他アプリケーションのシステム音声は混入しません。
 
 ```
 vrcpilot record [-o PATH] [--video] [--audio] [--fps FLOAT] [--duration SECONDS]
@@ -323,7 +323,7 @@ vrcpilot mouse scroll AMOUNT
 
 **副作用**: [`pydirectinput`](https://github.com/learncodebygaming/pydirectinput)（Windows）または [`inputtino`](https://github.com/games-on-whales/inputtino)（Linux uinput）経由で入力を合成します。
 
-> `mouse press` / `mouse release` は意図的に公開していません。CLI プロセスが終了するとカーネルがボタンを離すため、別々の呼び出しを跨いで down / up をペアにできません。down / up を対で動かしたい場合は、単一の Python プロセスから [`vrcpilot.mouse.press` / `vrcpilot.mouse.release`](python-api.ja.md#mouse) を呼んでください。
+> `mouse press` / `mouse release` は意図的に公開していません。CLI プロセスが終了するとカーネルがボタンを離すため、別々の呼び出しを跨いで down / up をペアにできません。down / up を対で動かしたい場合は、単一の Python プロセスから [`vrcpilot.mouse.press` / `vrcpilot.mouse.release`](python-api.ja.md#vrcpilotmouse) を呼んでください。
 
 ______________________________________________________________________
 

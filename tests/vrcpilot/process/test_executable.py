@@ -223,9 +223,10 @@ class TestFindVrchatLauncherNotFound:
         with pytest.raises(VRChatLauncherNotFoundError) as excinfo:
             find_vrchat_launcher()
 
-        # "fall-through happened" の証拠を pin する: env var の path も
-        # discovery 候補も "Tried" に列挙されること。env var で abort
-        # していたら discovery 候補は現れない。
+        # Pin "fall-through happened" by asserting both the env-var path
+        # AND the discovery candidates appear in the "Tried" list. If the
+        # env var had aborted discovery, the discovery candidates would
+        # be absent.
         msg = str(excinfo.value)
         assert str(missing) in msg
         assert ".steam/steam" in msg

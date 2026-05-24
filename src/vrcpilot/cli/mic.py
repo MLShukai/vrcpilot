@@ -104,11 +104,12 @@ def _wav_to_float32(
 ) -> tuple[NDArray[np.float32], int, int]:
     """Decode a WAV into the chunk shape :class:`vrcpilot.mic.Mic` expects.
 
-    Returns ``(samples, framerate, channels)`` where ``samples`` is
-    ``(N,)`` for mono input or ``(N, channels)`` otherwise.
+    Returns ``(samples, framerate, channels)``; ``samples`` is
+    ``(N,)`` for mono input and ``(N, channels)`` otherwise.
 
     Raises:
-        wave.Error: ``sampwidth != 2`` (not 16-bit signed PCM).
+        wave.Error: WAV is not 16-bit signed PCM (the only width
+            supported by the soundcard backend's float32 conversion).
     """
     sampwidth = reader.getsampwidth()
     if sampwidth != 2:
@@ -134,10 +135,10 @@ def _raw_stream_chunks(
 ) -> Iterator[NDArray[np.float32]]:
     """Yield float32 chunks from a raw little-endian s16 PCM stream.
 
-    Reads are aligned to ``channels * 2`` byte boundaries so no
-    partial frames cross chunk boundaries (which would misalign
-    channels). The final short read is still yielded as long as it
-    contains at least one whole frame.
+    Reads are aligned to whole frames (``channels * 2`` bytes) so a
+    partial frame never spans chunks — which would misalign the
+    channels in subsequent output. The final short read is still
+    yielded as long as it contains at least one whole frame.
     """
     frame_bytes = channels * 2
     frames_per_chunk = max(1, int(rate * chunk_ms / 1000))
@@ -173,10 +174,11 @@ def _resolve_input(
 ) -> tuple[Iterable[NDArray[np.float32]], int, int] | int:
     """Resolve CLI args to ``(chunks, channels, sample_rate)`` or an exit code.
 
-    Returns an integer exit code in place of the tuple when the input
-    is unresolvable (tty stdin, ``auto`` format against an unknown
-    extension). The chunks iterable is a one-element list for WAV
-    inputs (decoded eagerly) or a generator for raw s16le.
+    Returns the integer exit code in place of the tuple when the
+    input is unresolvable (tty stdin with ``-i -``, ``auto`` format
+    against an unknown extension). The chunks iterable is a
+    one-element list for WAV (decoded eagerly so the file handle can
+    close inside the function) or a generator that streams raw s16le.
     """
     input_arg: str = args.input
     fmt: str = args.format
@@ -229,8 +231,10 @@ def _resolve_input(
 
 
 def run(args: argparse.Namespace) -> int:
-    """Execute ``vrcpilot mic``; see module docstring for exit-code
-    contract."""
+    """Stream resolved PCM into the configured mic device.
+
+    See the module docstring for the exit-code contract.
+    """
     try:
         resolved = _resolve_input(args)
     except wave.Error as exc:

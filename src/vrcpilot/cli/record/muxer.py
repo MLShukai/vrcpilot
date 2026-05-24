@@ -1,8 +1,20 @@
 """PyAV-backed muxers backing ``vrcpilot record``.
 
-CLI-internal: not part of any public ``__all__``. Library users should
-compose :class:`vrcpilot.CaptureLoop` / :class:`vrcpilot.SpeakerLoop`
-with their own writers rather than depending on these classes.
+CLI-internal: not part of any public ``__all__``. Library users
+should compose :class:`vrcpilot.CaptureLoop` /
+:class:`vrcpilot.SpeakerLoop` with their own writers rather than
+depending on these classes.
+
+Three concrete muxers cover the three output shapes:
+
+* :class:`Mp4FileMuxer` — H.264 + AAC to a seekable ``.mp4`` file
+* :class:`WavFileMuxer` — ``pcm_s16le`` to a ``.wav`` file
+* :class:`MkvStdoutMuxer` — H.264 + AAC over a non-seekable pipe.
+  Matroska (rather than MP4) for pipe mode because MP4 must seek
+  back to the start on close to patch ``moov``, which a pipe
+  forbids. MKV is self-describing chunk-by-chunk — readers like
+  ffmpeg pick up the codec / layout from the stream itself without
+  knowing the duration in advance.
 """
 
 import abc

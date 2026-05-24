@@ -61,18 +61,18 @@ class Mouse(ABC):
         consulted. Out-of-window coordinates are forwarded as-is, never
         clamped — drag gestures and off-screen parking rely on that.
 
-        ``pid`` selects the target VRChat instance when multiple are
-        running. With ``focus=True`` the PID resolved by
-        :func:`ensure_target` is reused for the window-rect lookup so a
-        single call cannot race against VRChat exiting between the two
-        helpers. With ``focus=False`` the supplied ``pid`` (possibly
-        ``None``) is forwarded directly to :meth:`_to_desktop` /
-        :func:`get_vrchat_window_rect`, which only resolves on the
-        absolute path when ``pid`` was omitted.
+        With ``focus=True`` the PID resolved by :func:`ensure_target` is
+        reused for the window-rect lookup so a single call cannot race
+        against VRChat exiting between the two helpers. With
+        ``focus=False`` the supplied ``pid`` (possibly ``None``) is
+        forwarded directly to :meth:`_to_desktop`, which only resolves
+        on the absolute path when ``pid`` was omitted.
 
-        Raises :class:`VRChatNotRunningError` when ``relative=False``
-        and the VRChat window cannot be located (``focus=False`` does
-        not suppress this — the lookup is needed to interpret ``(x, y)``).
+        Raises:
+            VRChatNotRunningError: ``relative=False`` and the VRChat
+                window cannot be located. ``focus=False`` does not
+                suppress this — the lookup is needed to interpret
+                ``(x, y)``.
         """
         if focus:
             resolved: int | None = ensure_target(pid=pid)
@@ -96,8 +96,9 @@ class Mouse(ABC):
         still surfaces as :class:`VRChatMultipleInstancesError` on the
         rare ``focus=False`` + absolute path).
 
-        Raises :class:`VRChatNotRunningError` when the window cannot be
-        located, since the translation is undefined without an origin.
+        Raises:
+            VRChatNotRunningError: VRChat window cannot be located,
+                so the translation has no origin to anchor to.
         """
         rect = get_vrchat_window_rect(pid=pid)
         if rect is None:

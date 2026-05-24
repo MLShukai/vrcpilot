@@ -1,4 +1,4 @@
-"""Tests for :mod:`vrcpilot.windows` (Win32 helpers).
+"""Integration-real tests for :mod:`vrcpilot.windows` (Win32 helpers).
 
 The module under test imports Windows-only DLLs (``pywintypes``,
 ``win32gui``, ``win32process``) and raises ``ImportError`` on every

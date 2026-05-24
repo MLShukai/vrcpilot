@@ -5,11 +5,10 @@
 ## 目的
 
 `tests/` 配下の通常のユニットテストは `pytest` で完結する高速・自動な検証だが、
-`vrcpilot` は最終的に Steam 経由で実 VRChat プロセスを起動・終了する必要があ
-り、その経路はモックでは検証しきれない。本ディレクトリのスクリプトは、実機で
-VRChat を起こして PID を確認し、`terminate` まで通すことで、ライブラリ全体が
-本物の環境で期待通り動くことを人間または Claude Code が確かめるための入口で
-ある。
+`vrcpilot` は最終的に実 VRChat プロセスを起動・操作・終了する必要があり、その
+経路はモックでは検証しきれない。本ディレクトリのスクリプトは、実機で VRChat
+を起こして PID を確認し、`terminate` まで通すことで、ライブラリ全体が本物の
+環境で期待通り動くことを人間または Claude Code が確かめるための入口である。
 
 各スクリプトは終了時に必ず以下のいずれかを標準出力へ出す。
 
@@ -21,9 +20,12 @@ VRChat を起こして PID を確認し、`terminate` まで通すことで、�
 
 ## 前提条件
 
-- Windows 環境を想定（launcher が動作すれば Linux でも実行可能）。
+- Windows / Linux のどちらでも実行可能（Linux では direct-spawn 用に
+  `umu-launcher` が必要。詳細は [README.md](../../README.md) を参照）。
 - VRChat と Steam がインストール済みで、Steam にログイン済みであること。
 - `just setup` 済みで `uv` 環境が整っていること。
+- `mic` シナリオを使う場合は、Windows なら VB-Audio Virtual Cable、Linux
+  なら `vrcpilot linux-mic register` 済みの `VRCPilotMic` シンクが必要。
 
 ## 警告
 
@@ -53,16 +55,55 @@ uv run python tests/e2e/launch_terminate.py
 
 ## シナリオ一覧
 
-| 名前                   | 内容                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `all`                  | 同ディレクトリ内の全シナリオを subprocess で順に実行し、PASS/FAIL を集約する。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `launch_terminate`     | API (`vrcpilot.launch` / `find_pid` / `terminate`) のハッピーパス。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `cli_launch_terminate` | `uv run vrcpilot` の `launch` / `pid` / `terminate` を subprocess で叩く CLI 経路の検証。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `launch_no_vr`         | `vrcpilot.launch(no_vr=True)` でデスクトップモード起動を確認。HMD 非装着のマシンでも動く想定。                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `focus_unfocus`        | `vrcpilot.focus()` で最前面化、`vrcpilot.unfocus()` で z-order 最下層化。各操作後に `_e2e_artifacts/` へスクリーンショットを保存し、Claude / 人間が目視確認する。                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `screenshot`           | `vrcpilot.take_screenshot()` で VRChat ウィンドウだけのスクリーンショットが取れることを確認。1280x720 で起動した VRChat に対して撮影し、`_e2e_artifacts/screenshot_vrchat_<timestamp>.png` にウィンドウのみが写った PNG が保存される（デスクトップ背景や他アプリが混入していないこと）。                                                                                                                                                                                                                                                                                    |
-| `cli_record_ffmpeg`    | `uv run vrcpilot record --audio` の 2 出力経路を end-to-end 検証する。Step A は `-o <wav>` モードで保存され、`wave.open` で 48 kHz / stereo / 16-bit を確認し RMS dBFS をログ。Step B は stdout の自己記述 MKV を `ffmpeg -i - -c:a pcm_s16le` にパイプして WAV へ再エンコードし、`ffprobe` で `pcm_s16le` / 48 kHz / stereo / duration を確認する。                                                                                                                                                                                                                        |
-| `multi_instance`       | `vrcpilot.launch(profile=0, no_vr=True)` と `profile=1` で 2 インスタンスを並走させ、複数 PID 系の API 契約を検証する。`find_pids()` が newest-first で両 PID を返すこと、`resolve_pid(None)` が `VRChatMultipleInstancesError` を raise し `.pids` に両方を含むこと、`launch(via_steam=True)` が `VRChatAlreadyRunningError` で fail-fast し既存 PID を改変しないこと、`terminate(pid_a)` が選択 kill し `terminate()` が残りを全 kill することを順に確認する。Linux は profile ごとに wineprefix が auto-gen されるため、初回実行は Proton 初期化で数分かかることがある。 |
+### ランチャ系
+
+| 名前                   | 内容                                                                                                                                                                                                                                                                                                 |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `all`                  | 同ディレクトリ内の全シナリオを subprocess で順に実行し、PASS/FAIL を集約する                                                                                                                                                                                                                         |
+| `launch_terminate`     | API (`vrcpilot.launch` / `find_pid` / `terminate`) のハッピーパス                                                                                                                                                                                                                                    |
+| `launch_via_steam`     | `vrcpilot.launch(via_steam=True)` の従来 Steam 経由ルートを検証 (default が direct-spawn に変わった後の保険)                                                                                                                                                                                         |
+| `launch_no_vr`         | `vrcpilot.launch(no_vr=True)` のデスクトップモード起動を確認 (HMD 非装着想定)                                                                                                                                                                                                                        |
+| `cli_launch_terminate` | `uv run vrcpilot` の `launch` / `pid` / `terminate` を subprocess で叩く CLI 経路の検証                                                                                                                                                                                                              |
+| `multi_instance`       | `profile=0` と `profile=1` で 2 インスタンスを並走させ、複数 PID 系 API 契約 (`find_pids` newest-first / `VRChatMultipleInstancesError` / `VRChatAlreadyRunningError` / 個別 `terminate(pid)`) を検証する。Linux は profile ごとに wineprefix が auto-gen されるため初回は Proton 初期化で数分かかる |
+
+### ウィンドウ・画面
+
+| 名前            | 内容                                                                                                                              |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `focus_unfocus` | `vrcpilot.focus()` / `unfocus()` を交互に呼び、各操作後の screenshot を `_e2e_artifacts/` へ保存して目視確認できるようにする      |
+| `screenshot`    | `vrcpilot.take_screenshot()` が VRChat ウィンドウのみを切り出していること (デスクトップ背景や他アプリが混入していないこと) を確認 |
+| `capture`       | `vrcpilot.CaptureLoop` を 30fps で駆動し、e2e ローカルの PyAV writer 経由で MP4 を保存しつつ per-frame interval を記録            |
+
+### 認識系
+
+| 名前     | 内容                                                                                                                                |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `ocr`    | LaunchPad を開いた状態で `vrcpilot.ocr()` を実行し、text-rich な panel に対して既定の `RapidOCREngine` がワード抽出できることを確認 |
+| `detect` | LaunchPad の各アイコンを `tests/e2e/fixtures/detect_icons/` の PNG で template-search し、全アイコンの検出可否をチェック            |
+
+### 合成入力
+
+| 名前        | 内容                                                                                                                                       |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `mouse`     | `move` / `click` / `press` + `release` / `scroll` / variadic combo (`click(LEFT, RIGHT)`) を順に呼び、`ensure_target` guard 経路も検証する |
+| `keyboard`  | ESC で LaunchPad を toggle した上で、`down/press/up` triplet と `press(SHIFT_LEFT, A)` 短縮形の挙動を交互ステップで検証                    |
+| `clipboard` | `vrcpilot.clipboard.paste("...")` で日本語文字列をチャット入力欄へ流し込み、screenshot で目視可能にする                                    |
+
+### 音声・OSC
+
+| 名前      | 内容                                                                                                                                                                                                                        |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `speaker` | `vrcpilot.speaker.SpeakerLoop` を駆動し、proc-tap (Windows) / PipeWire (Linux) からの WAV 出力 + RMS をチェック (CLI 非依存)                                                                                                |
+| `mic`     | `vrcpilot.Mic` をサインで駆動し、Windows なら `CABLE Input` -> `CABLE Output`、Linux なら `VRCPilotMic` null-sink -> monitor をループバック確認する。**VRChat を起動しない例外的なシナリオ** (mic 出力単独の経路だけを検証) |
+| `osc`     | VRChat 内蔵の OSC Debug Panel を trinket で固定し、`OscSender` から送った `/input/*` / `/avatar/parameters/*` がパネル上のラインとして可視化されていることを screenshot で確認                                              |
+
+### 録画 CLI (外部 ffmpeg / ffprobe 必須)
+
+| 名前                      | 内容                                                                                                                                                                                                                                                                                     |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cli_record_ffmpeg`       | `vrcpilot record --audio` を 2 出力経路で検証: (A) `-o <wav>` 直接保存 → `wave.open` で 48 kHz / stereo / 16-bit + RMS dBFS を確認、(B) stdout の自己記述 MKV を `ffmpeg -i - -c:a pcm_s16le` にパイプして WAV 再エンコード → `ffprobe` で pcm_s16le / 48 kHz / stereo / duration を確認 |
+| `cli_record_video_ffmpeg` | `vrcpilot record --video` の stdout MKV を `ffmpeg` にパイプして `.mp4` に `-c:v copy`。`ffprobe` で video stream が 1 本、audio stream が 0 本であることを確認                                                                                                                          |
+| `cli_record_av_ffmpeg`    | `vrcpilot record` の既定 (映像 + 音声) `-o <mp4>` ファイル出力経路。stream-mode 版は `cli_record_video_ffmpeg` / `cli_record_ffmpeg` がカバー                                                                                                                                            |
 
 ## 実行時間の目安
 
@@ -83,7 +124,7 @@ CLI mirror は **CLI でしか検証できない契約があるサブコマン�
   - argparse 解析・stdout 整形・API 委譲は `tests/vrcpilot/cli/` の unit test
     がカバー済み
   - API 経路の e2e で実 VRChat / 実デバイスとの結合はすでに検証済み
-  - 全 14 サブコマンドを 1:1 で mirror するとシナリオ数・実行時間が倍近くなる
+  - 全サブコマンドを 1:1 で mirror するとシナリオ数・実行時間が倍近くなる
     割に追加カバレッジが薄い
 
 新しい CLI サブコマンドを足すときも、同じ問いを立てる:

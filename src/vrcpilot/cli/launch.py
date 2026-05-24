@@ -1,4 +1,11 @@
-"""``vrcpilot launch`` subcommand."""
+"""``vrcpilot launch`` subcommand: start VRChat.
+
+Two routes coexist for historical reasons: direct spawn (default,
+required on Linux where Steam cannot relay the OSC flags) and the
+legacy ``steam.exe -applaunch`` route via ``--via-steam``. Most flags
+only apply to one route; the API layer validates the combination and
+raises before any subprocess is started.
+"""
 
 from __future__ import annotations
 
@@ -26,10 +33,9 @@ from ._common import SubParsersAction, attach_completer
 def _profile_value(value: str) -> int:
     """Argparse ``type`` validator for ``--profile``.
 
-    Parses ``value`` as an integer and rejects negatives so the
-    vrcpilot-managed prefix index is always ``>= 0``. Raises
-    :class:`argparse.ArgumentTypeError` with a clear message so argparse
-    can surface it as an exit-2 usage error.
+    Rejects negatives so the vrcpilot-managed prefix index is always
+    ``>= 0``. Raises :class:`argparse.ArgumentTypeError` so argparse
+    surfaces the failure as its usual exit-2 usage error.
     """
     parsed = int(value)
     if parsed < 0:
@@ -38,7 +44,7 @@ def _profile_value(value: str) -> int:
 
 
 def register(subparsers: SubParsersAction) -> None:
-    """Add the ``launch`` subparser to the top-level subparsers."""
+    """Wire the ``launch`` subparser into the top-level CLI."""
     launch_parser = subparsers.add_parser(
         "launch",
         help="Launch VRChat (direct spawn by default; --via-steam for Steam route).",
@@ -158,21 +164,23 @@ def register(subparsers: SubParsersAction) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
-    """Run ``launch``; print the PID on stdout when a wait succeeds.
+    """Spawn VRChat and (optionally) wait for its PID.
 
-    ``osc_in_port`` gates the OSC triple: without it the other
-    ``--osc-out-*`` flags are silently ignored. ``--wait-timeout 0`` (or
-    negative) spawns and returns without waiting.
+    ``--osc-in-port`` gates the OSC triple: without it the other
+    ``--osc-out-*`` flags are silently ignored, so a partial OSC
+    configuration is never forwarded to VRChat. ``--wait-timeout 0``
+    (or negative) spawns and returns without waiting.
 
     Exit codes:
 
-    * 0: success (PID printed) or wait was skipped
+    * 0: success (PID printed on stdout) or wait was skipped
     * 1: wait timed out without observing a new PID
-    * 2: Steam/launch.exe/umu-run not found, invalid flag combination, or
-      Linux pre-flight failed (no DISPLAY/WAYLAND_DISPLAY for direct-spawn,
-      Steam client not running for ``--via-steam``)
-    * 3: :class:`VRChatAlreadyRunningError` was raised (currently only
-      reachable via the ``--via-steam`` route)
+    * 2: Steam / ``launch.exe`` / ``umu-run`` not found, invalid flag
+      combination, or Linux pre-flight failed (no
+      ``DISPLAY`` / ``WAYLAND_DISPLAY`` for direct-spawn, or Steam
+      client not running for ``--via-steam``)
+    * 3: :class:`VRChatAlreadyRunningError` (currently only reachable
+      via the ``--via-steam`` route)
     """
     osc = (
         OscConfig(

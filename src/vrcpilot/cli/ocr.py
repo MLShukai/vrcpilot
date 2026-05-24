@@ -35,7 +35,7 @@ _VIZ_DEFAULT: object = object()
 
 
 def register(subparsers: SubParsersAction) -> None:
-    """Add the ``ocr`` subparser to the top-level subparsers."""
+    """Wire the ``ocr`` subparser into the top-level CLI."""
     parser = subparsers.add_parser(
         "ocr",
         help="Run OCR on the running VRChat window.",
@@ -61,8 +61,8 @@ def register(subparsers: SubParsersAction) -> None:
 def _resolve_viz_path(arg: object, *, now: datetime) -> Path | None:
     """Resolve ``args.viz`` to an output path; ``None`` propagates.
 
-    ``now`` is injected so tests can pin the default filename's
-    timestamp.
+    ``now`` is injected so tests pin the default filename's timestamp
+    deterministically instead of racing the wall clock.
     """
     if arg is None:
         return None
@@ -80,7 +80,14 @@ def _resolve_viz_path(arg: object, *, now: datetime) -> Path | None:
 
 
 def run(args: argparse.Namespace) -> int:
-    """Run ``ocr``; exit 1 when the screenshot input cannot be resolved."""
+    """OCR the resolved screenshot and emit a YAML payload on stdout.
+
+    Word coordinates in the payload are VRChat window-local so they
+    feed straight into ``vrcpilot mouse move``. Exit 1 with
+    ``vrcpilot: ...`` on stderr when the screenshot input cannot be
+    resolved (no ``--screenshot`` and no piped stdin, missing file,
+    or malformed YAML).
+    """
     shot = resolve_screenshot(args)
     if shot is None:
         return 1

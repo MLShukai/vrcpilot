@@ -19,12 +19,11 @@ class CaptureBackend(ABC):
     def read(self) -> np.ndarray:
         """Return the latest frame as an ``(H, W, 3)`` uint8 RGB ndarray.
 
-        May block or be synchronous depending on backend.
+        Backends may block (WGC waits for a callback) or be synchronous
+        (X11 re-grabs on demand); the public :class:`Capture` surface
+        hides the difference but implementers must pick one mode.
         """
 
     @abstractmethod
     def close(self) -> None:
-        """Release platform resources.
-
-        Must be idempotent and not raise.
-        """
+        """Release platform resources; must be idempotent and never raise."""

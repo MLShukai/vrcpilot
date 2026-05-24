@@ -23,22 +23,24 @@ _CLIPBOARD_SETTLE: float = 0.05
 
 
 def paste(text: str, *, focus: bool = True, pid: int | None = None) -> None:
-    """Send arbitrary Unicode ``text`` to VRChat via clipboard + Ctrl+V.
+    """Send arbitrary Unicode ``text`` to VRChat by clipboard + ``Ctrl+V``.
 
-    The brief sleep between copy and paste is load-bearing: on Linux,
-    xclip / xsel take selection ownership asynchronously, so an
-    immediate Ctrl+V can paste the *previous* clipboard contents. Pass
-    ``focus=False`` only inside loops that have already verified the
-    target window is foreground.
+    Works around the scancode keyboard backend's ASCII-only limit (no
+    Japanese, no emoji). The brief settle sleep between copy and paste
+    is load-bearing on Linux: xclip / xsel take selection ownership
+    asynchronously, so an immediate ``Ctrl+V`` can paste the *previous*
+    clipboard contents.
 
-    ``pid`` selects the target VRChat instance when multiple are
-    running. The Ctrl+V keystroke is dispatched with ``focus=False`` so
-    :func:`ensure_target` runs at most once per call; ``focus=False``
-    is the hot-loop fast path and intentionally skips every PID lookup
-    (including the internal :func:`vrcpilot.process.resolve_pid`).
+    Args:
+        focus: Set ``False`` only inside hot loops that have already
+            verified VRChat is foreground; it skips both
+            :func:`ensure_target` and the internal PID lookups.
+        pid: Disambiguates when multiple VRChat instances run; ignored
+            when ``focus=False``.
 
-    Raises :class:`pyperclip.PyperclipException` when the clipboard
-    backend is missing (e.g. no ``xclip`` / ``xsel`` on Linux).
+    Raises:
+        pyperclip.PyperclipException: No clipboard backend is reachable
+            (e.g. neither ``xclip`` nor ``xsel`` installed on Linux).
     """
     if focus:
         ensure_target(pid=pid)
