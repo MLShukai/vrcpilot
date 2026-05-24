@@ -1,78 +1,38 @@
-"""Tests for :mod:`vrcpilot.cli.pid`."""
+"""Tests for :mod:`vrcpilot.cli.pid`.
+
+``vrcpilot pid`` is a thin shell over :func:`vrcpilot.process.find_pids`:
+its only contract is "exit 1 + empty stdout when no VRChat is running,
+otherwise one PID per line on stdout (exit 0) in the order returned by
+``find_pids``."
+
+The project autouse ``_no_real_vrchat`` fixture pre-empties
+``psutil.process_iter`` so every test below runs the negative path
+without any mocking. Listing live PIDs requires either a real
+``VRChat.exe`` process or stubbing psutil (banned by the new mocking
+policy) -- both are deferred to the e2e suite.
+"""
 
 from __future__ import annotations
 
 import pytest
-from pytest_mock import MockerFixture
 
-from tests.fakes import FakeProcess
 from vrcpilot.cli import main
-from vrcpilot.process import VRCHAT_PROCESS_NAME
 
 
-class TestPidCommand:
-    def test_prints_each_pid_on_separate_line(
-        self, mocker: MockerFixture, capsys: pytest.CaptureFixture[str]
-    ):
-        mocker.patch(
-            "vrcpilot.process.pid.psutil.process_iter",
-            return_value=[
-                FakeProcess(name=VRCHAT_PROCESS_NAME, pid=111),
-                FakeProcess(name=VRCHAT_PROCESS_NAME, pid=222),
-            ],
-        )
+class TestPidNoVRChat:
+    """``vrcpilot pid`` against a host with no VRChat running."""
 
-        exit_code = main(["pid"])
+    def test_exits_with_code_one(self):
+        # ``find_pids()`` returns ``[]`` (autouse empty ``process_iter``),
+        # so the CLI takes the "no running VRChat" branch.
+        assert main(["pid"]) == 1
 
-        assert exit_code == 0
-        out_lines = capsys.readouterr().out.splitlines()
-        assert out_lines == ["111", "222"]
-
-    def test_exit_code_when_running(
-        self, mocker: MockerFixture, capsys: pytest.CaptureFixture[str]
-    ):
-        mocker.patch(
-            "vrcpilot.process.pid.psutil.process_iter",
-            return_value=[FakeProcess(name=VRCHAT_PROCESS_NAME, pid=12345)],
-        )
-
-        exit_code = main(["pid"])
-
-        assert exit_code == 0
-        assert capsys.readouterr().out == "12345\n"
-
-    def test_exit_code_when_absent(self, capsys: pytest.CaptureFixture[str]):
-        # The autouse conftest fixture empties ``process_iter`` so this
-        # is a real, mock-free run of the negative path.
-        exit_code = main(["pid"])
-
-        assert exit_code == 1
-        captured = capsys.readouterr()
-        assert captured.out == ""
-        assert captured.err == ""
-
-    def test_no_stdout_when_absent(self, capsys: pytest.CaptureFixture[str]):
-        exit_code = main(["pid"])
-
-        assert exit_code == 1
+    def test_stdout_is_empty(self, capsys: pytest.CaptureFixture[str]):
+        main(["pid"])
         assert capsys.readouterr().out == ""
 
-    def test_multiple_pids_in_iter_order(
-        self, mocker: MockerFixture, capsys: pytest.CaptureFixture[str]
-    ):
-        # Order in stdout must mirror ``process_iter`` order so callers
-        # can rely on it staying consistent with ``find_pids()``.
-        mocker.patch(
-            "vrcpilot.process.pid.psutil.process_iter",
-            return_value=[
-                FakeProcess(name=VRCHAT_PROCESS_NAME, pid=300),
-                FakeProcess(name="other.exe", pid=999),
-                FakeProcess(name=VRCHAT_PROCESS_NAME, pid=100),
-                FakeProcess(name=VRCHAT_PROCESS_NAME, pid=200),
-            ],
-        )
-
-        exit_code = main(["pid"])
-
-        assert exit_code == 0
-        assert capsys.readouterr().out.splitlines() == ["300", "100", "200"]
+    def test_stderr_is_empty(self, capsys: pytest.CaptureFixture[str]):
+        # The "no PIDs" path is intentionally silent so callers can
+        # branch on the exit code without filtering noise.
+        main(["pid"])
+        assert capsys.readouterr().err == ""

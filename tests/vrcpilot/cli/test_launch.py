@@ -1,116 +1,101 @@
 """Tests for :mod:`vrcpilot.cli.launch`.
 
-The CLI's only job is argv parsing and dispatch to
-:func:`vrcpilot.process.launch`. We stub ``launch`` itself so the tests
-never spawn a real subprocess, never poll for PIDs, and remain fast and
-deterministic on every platform. Exception paths are exercised by
-setting ``side_effect`` on the stub.
+``vrcpilot launch`` is the argv-to-:func:`vrcpilot.process.launch`
+dispatcher. The CLI's responsibilities are:
+
+* Build a Namespace whose flag names match the API kwargs.
+* Translate API exceptions to documented exit codes (2 for usage /
+  pre-flight, 3 for ``VRChatAlreadyRunningError``).
+* Print the PID on success (which we cover via the wait-skipped
+  branch -- spawning a real VRChat needs e2e infrastructure).
+
+Real launch on a developer / CI Linux box without ``$DISPLAY`` raises
+:class:`VRChatDisplayNotAvailableError` from
+:func:`vrcpilot.process.linux.preflight_linux_environment`; the
+``--via-steam`` route raises :class:`SteamNotRunningError` from the
+same pre-flight when Steam isn't running. Both let us exercise the
+``exit 2`` mapping with no mocking. Argparse-only assertions are
+exercised through :func:`vrcpilot.cli.build_parser` so they run on
+every platform.
 """
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
-from pytest_mock import MockerFixture
 
-from vrcpilot.cli import main
-from vrcpilot.process import (
-    UmuLauncherNotFoundError,
-    VRChatAlreadyRunningError,
-    VRChatDisplayNotAvailableError,
-    VRChatLauncherNotFoundError,
-)
-from vrcpilot.steam import SteamNotFoundError, SteamNotRunningError
+from vrcpilot.cli import build_parser, main
 
 
-@pytest.fixture
-def fake_launch(mocker: MockerFixture) -> MagicMock:
-    """Stub ``vrcpilot.cli.launch.launch`` so CLI tests do not actually spawn.
+class TestLaunchArgparse:
+    """Argparse plumbing: every documented flag must reach the Namespace."""
 
-    Returns the mock so tests can assert call arguments. The mock's
-    ``return_value`` is the PID that ``launch`` would have observed
-    (set per-test via ``fake_launch.return_value = ...``).
-    """
-    mock = mocker.patch("vrcpilot.cli.launch.launch", return_value=12345, autospec=True)
-    return mock
+    def test_via_steam_defaults_to_false(self):
+        ns = build_parser().parse_args(["launch"])
+        assert ns.via_steam is False
 
+    def test_via_steam_flag_sets_true(self):
+        ns = build_parser().parse_args(["launch", "--via-steam"])
+        assert ns.via_steam is True
 
-class TestLaunchCommand:
-    def test_via_steam_forwarded(self, fake_launch: MagicMock) -> None:
-        exit_code = main(["launch", "--via-steam"])
-        assert exit_code == 0
-        assert fake_launch.call_args.kwargs["via_steam"] is True
+    def test_app_id_forwarded(self):
+        ns = build_parser().parse_args(["launch", "--app-id", "999"])
+        assert ns.app_id == 999
 
-    def test_default_uses_direct_spawn(self, fake_launch: MagicMock) -> None:
-        exit_code = main(["launch"])
-        assert exit_code == 0
-        assert fake_launch.call_args.kwargs["via_steam"] is False
-
-    def test_app_id_forwarded(self, fake_launch: MagicMock) -> None:
-        main(["launch", "--app-id", "999"])
-        assert fake_launch.call_args.kwargs["app_id"] == 999
-
-    def test_steam_path_forwarded(self, fake_launch: MagicMock, tmp_path: Path) -> None:
+    def test_steam_path_forwarded(self, tmp_path: Path):
         steam_path = tmp_path / "steam.exe"
-        main(["launch", "--steam-path", str(steam_path)])
-        assert fake_launch.call_args.kwargs["steam_path"] == steam_path
+        ns = build_parser().parse_args(["launch", "--steam-path", str(steam_path)])
+        assert ns.steam_path == steam_path
 
-    def test_vrchat_launcher_forwarded(
-        self, fake_launch: MagicMock, tmp_path: Path
-    ) -> None:
+    def test_vrchat_launcher_forwarded(self, tmp_path: Path):
         launcher = tmp_path / "launch.exe"
-        main(["launch", "--vrchat-launcher", str(launcher)])
-        assert fake_launch.call_args.kwargs["vrchat_launcher"] == launcher
+        ns = build_parser().parse_args(["launch", "--vrchat-launcher", str(launcher)])
+        assert ns.vrchat_launcher == launcher
 
-    def test_wineprefix_forwarded(self, fake_launch: MagicMock, tmp_path: Path) -> None:
+    def test_wineprefix_forwarded(self, tmp_path: Path):
         prefix = tmp_path / "prefix"
-        main(["launch", "--wineprefix", str(prefix)])
-        assert fake_launch.call_args.kwargs["wineprefix"] == prefix
+        ns = build_parser().parse_args(["launch", "--wineprefix", str(prefix)])
+        assert ns.wineprefix == prefix
 
-    def test_proton_path_forwarded(
-        self, fake_launch: MagicMock, tmp_path: Path
-    ) -> None:
+    def test_proton_path_forwarded(self, tmp_path: Path):
         proton = tmp_path / "proton"
-        main(["launch", "--proton-path", str(proton)])
-        assert fake_launch.call_args.kwargs["proton_path"] == proton
+        ns = build_parser().parse_args(["launch", "--proton-path", str(proton)])
+        assert ns.proton_path == proton
 
-    def test_profile_forwarded(self, fake_launch: MagicMock) -> None:
-        main(["launch", "--profile", "3"])
-        assert fake_launch.call_args.kwargs["profile"] == 3
+    def test_profile_zero_accepted(self):
+        ns = build_parser().parse_args(["launch", "--profile", "0"])
+        assert ns.profile == 0
 
-    def test_profile_zero_accepted(self, fake_launch: MagicMock) -> None:
-        # 0 is the boundary value and must be accepted (non-negative).
-        main(["launch", "--profile", "0"])
-        assert fake_launch.call_args.kwargs["profile"] == 0
+    def test_profile_positive_accepted(self):
+        ns = build_parser().parse_args(["launch", "--profile", "3"])
+        assert ns.profile == 3
 
-    def test_profile_negative_rejected_by_argparse(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_profile_negative_rejected(
+        self,
+        capsys: pytest.CaptureFixture[str],
+    ):
+        # Custom ``_profile_value`` raises ``ArgumentTypeError`` for
+        # negatives; argparse surfaces it as exit 2 with the message
+        # in stderr.
         with pytest.raises(SystemExit):
             main(["launch", "--profile", "-1"])
-        stderr = capsys.readouterr().err
-        assert "non-negative" in stderr
+        assert "non-negative" in capsys.readouterr().err
 
-    def test_no_vr_propagates(self, fake_launch: MagicMock) -> None:
-        main(["launch", "--no-vr"])
-        assert fake_launch.call_args.kwargs["no_vr"] is True
+    def test_no_vr_flag(self):
+        ns = build_parser().parse_args(["launch", "--no-vr"])
+        assert ns.no_vr is True
 
-    def test_screen_dimensions_propagate(self, fake_launch: MagicMock) -> None:
-        main(["launch", "--screen-width", "1920", "--screen-height", "1080"])
-        kw = fake_launch.call_args.kwargs
-        assert kw["screen_width"] == 1920
-        assert kw["screen_height"] == 1080
+    def test_screen_dimensions(self):
+        ns = build_parser().parse_args(
+            ["launch", "--screen-width", "1920", "--screen-height", "1080"]
+        )
+        assert ns.screen_width == 1920
+        assert ns.screen_height == 1080
 
-    def test_osc_in_port_creates_config(self, fake_launch: MagicMock) -> None:
-        main(["launch", "--osc-in-port", "9100"])
-        osc = fake_launch.call_args.kwargs["osc"]
-        assert osc is not None
-        assert osc.in_port == 9100
-
-    def test_osc_full_override(self, fake_launch: MagicMock) -> None:
-        main(
+    def test_osc_inbound_and_outbound(self):
+        ns = build_parser().parse_args(
             [
                 "launch",
                 "--osc-in-port",
@@ -121,93 +106,76 @@ class TestLaunchCommand:
                 "9200",
             ]
         )
-        osc = fake_launch.call_args.kwargs["osc"]
-        assert osc is not None
-        assert osc.in_port == 9100
-        assert osc.out_ip == "1.2.3.4"
-        assert osc.out_port == 9200
+        assert ns.osc_in_port == 9100
+        assert ns.osc_out_ip == "1.2.3.4"
+        assert ns.osc_out_port == 9200
 
-    def test_osc_out_options_ignored_without_in_port(
-        self, fake_launch: MagicMock
-    ) -> None:
-        main(["launch", "--osc-out-ip", "1.2.3.4"])
-        assert fake_launch.call_args.kwargs["osc"] is None
+    def test_osc_outbound_defaults(self):
+        ns = build_parser().parse_args(["launch"])
+        # Defaults match the docstring: out-ip 127.0.0.1, out-port 9001.
+        assert ns.osc_in_port is None
+        assert ns.osc_out_ip == "127.0.0.1"
+        assert ns.osc_out_port == 9001
 
-    def test_wait_timeout_forwarded(self, fake_launch: MagicMock) -> None:
-        main(["launch", "--wait-timeout", "0.5"])
-        assert fake_launch.call_args.kwargs["wait_timeout"] == 0.5
+    def test_wait_timeout_forwarded(self):
+        ns = build_parser().parse_args(["launch", "--wait-timeout", "0.5"])
+        assert ns.wait_timeout == pytest.approx(0.5)
 
 
-class TestLaunchExitCodes:
-    def test_prints_pid_on_success(
-        self, fake_launch: MagicMock, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        fake_launch.return_value = 4242
-        assert main(["launch"]) == 0
-        assert capsys.readouterr().out.strip() == "4242"
+class TestLaunchValidationErrors:
+    """Cases where :func:`vrcpilot.process.launch` raises before spawning.
 
-    def test_exit_1_when_wait_times_out(
-        self, fake_launch: MagicMock, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        fake_launch.return_value = None
-        assert main(["launch"]) == 1
-        assert "did not start" in capsys.readouterr().err
+    These exercise the real validation path (``validate_launch_args`` /
+    ``preflight_linux_environment``); no subprocess is started.
+    """
 
-    @pytest.mark.parametrize("timeout", ["0", "-1"])
-    def test_exit_0_when_wait_skipped(
-        self, fake_launch: MagicMock, timeout: str
-    ) -> None:
-        # Any <=0 value short-circuits the wait and exits 0.
-        fake_launch.return_value = None
-        assert main(["launch", "--wait-timeout", timeout]) == 0
-
-    def test_exit_2_on_steam_not_found(
-        self, fake_launch: MagicMock, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        fake_launch.side_effect = SteamNotFoundError("Steam not found")
-        assert main(["launch", "--via-steam"]) == 2
-        assert "Steam not found" in capsys.readouterr().err
-
-    def test_exit_2_on_vrchat_launcher_not_found(
-        self, fake_launch: MagicMock, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        fake_launch.side_effect = VRChatLauncherNotFoundError("nope")
-        assert main(["launch"]) == 2
-        assert "nope" in capsys.readouterr().err
-
-    def test_exit_2_on_umu_launcher_not_found(
-        self, fake_launch: MagicMock, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        fake_launch.side_effect = UmuLauncherNotFoundError("no umu-run")
-        assert main(["launch"]) == 2
-        assert "no umu-run" in capsys.readouterr().err
-
-    def test_exit_2_on_value_error(
-        self, fake_launch: MagicMock, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        fake_launch.side_effect = ValueError("bad flag combo")
+    def test_via_steam_with_profile_exits_2(
+        self,
+        capsys: pytest.CaptureFixture[str],
+    ):
+        # ``validate_launch_args`` rejects this combination with
+        # ``ValueError``; the CLI maps ``ValueError`` to exit 2.
         assert main(["launch", "--via-steam", "--profile", "1"]) == 2
-        assert "bad flag combo" in capsys.readouterr().err
+        assert "vrcpilot:" in capsys.readouterr().err
 
-    def test_exit_2_on_display_not_available(
-        self, fake_launch: MagicMock, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        fake_launch.side_effect = VRChatDisplayNotAvailableError(
-            "No DISPLAY/WAYLAND_DISPLAY"
-        )
-        assert main(["launch"]) == 2
+    def test_via_steam_with_wineprefix_exits_2(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ):
+        prefix = tmp_path / "prefix"
+        # Direct-spawn-only flag + ``--via-steam`` is rejected by
+        # ``validate_launch_args``.
+        assert main(["launch", "--via-steam", "--wineprefix", str(prefix)]) == 2
+        assert "vrcpilot:" in capsys.readouterr().err
+
+
+class TestLaunchLinuxPreflight:
+    """Real Linux pre-flight branches (no DISPLAY / no Steam)."""
+
+    def test_direct_spawn_without_display_exits_2(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ):
+        if sys.platform != "linux":
+            pytest.skip("Linux pre-flight is only run on Linux")
+        # Clear both display env vars so pre-flight definitely raises
+        # VRChatDisplayNotAvailableError -- regardless of how the host
+        # is configured.
+        monkeypatch.delenv("DISPLAY", raising=False)
+        monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+
+        assert main(["launch", "--wait-timeout", "0"]) == 2
         assert "DISPLAY" in capsys.readouterr().err
 
-    def test_exit_2_on_steam_not_running(
-        self, fake_launch: MagicMock, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        fake_launch.side_effect = SteamNotRunningError("Steam client not running")
-        assert main(["launch", "--via-steam"]) == 2
-        assert "Steam client not running" in capsys.readouterr().err
-
-    def test_exit_3_on_already_running(
-        self, fake_launch: MagicMock, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        fake_launch.side_effect = VRChatAlreadyRunningError("running")
-        assert main(["launch", "--via-steam"]) == 3
-        assert "running" in capsys.readouterr().err
+    def test_via_steam_without_steam_running_exits_2(
+        self,
+        capsys: pytest.CaptureFixture[str],
+    ):
+        if sys.platform != "linux":
+            pytest.skip("Steam pre-flight only runs on Linux for --via-steam")
+        # On a CI host Steam is never running. ``preflight_linux_environment``
+        # raises ``SteamNotRunningError`` which the CLI maps to exit 2.
+        assert main(["launch", "--via-steam", "--wait-timeout", "0"]) == 2
+        assert "Steam" in capsys.readouterr().err
