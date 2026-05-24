@@ -61,18 +61,28 @@ def focus(*, pid: int | None = None) -> bool:
     """Bring the running VRChat window to the foreground, restoring it if
     minimized.
 
-    *pid* selects the target instance when multiple VRChat processes are
-    running. When omitted, :func:`vrcpilot.process.resolve_pid` chooses the
-    sole running instance.
-
     Only meaningful in Desktop mode — VR exclusive mode has no desktop
-    window to surface. Returns ``False`` (rather than raising) when VRChat
-    is not running, the window cannot be located, the platform call fails,
-    or the session is native Wayland (which also emits
-    :class:`RuntimeWarning`). Raises
-    :class:`vrcpilot.process.VRChatMultipleInstancesError` when *pid* is
-    omitted and multiple VRChat processes are running. Raises
-    :class:`NotImplementedError` on platforms other than Windows or Linux.
+    window to surface. On native Wayland this is unsupported and emits
+    :class:`RuntimeWarning`; XWayland is fine.
+
+    Args:
+        pid: Select the target instance when multiple VRChat processes
+            are running. When omitted,
+            :func:`vrcpilot.process.resolve_pid` chooses the sole
+            running instance.
+
+    Returns:
+        ``True`` once the platform foreground request has been issued;
+        ``False`` (rather than raising) when VRChat is not running, no
+        window owns the PID, the platform call fails, or the session is
+        native Wayland.
+
+    Raises:
+        vrcpilot.process.VRChatMultipleInstancesError: *pid* was omitted
+            and multiple VRChat processes are running — the caller must
+            disambiguate.
+        NotImplementedError: Invoked on a platform other than Windows
+            or Linux.
     """
     return _resolve_and_call("focus_window", pid=pid)
 
@@ -80,17 +90,19 @@ def focus(*, pid: int | None = None) -> bool:
 def is_foreground(*, pid: int | None = None) -> bool:
     """Return whether VRChat currently owns the foreground window.
 
-    See :func:`focus` for *pid* semantics and the Windows / Linux contract.
+    See :func:`focus` for *pid* semantics and the Windows / Linux
+    contract, including the native-Wayland and missing-VRChat cases
+    where this returns ``False``.
     """
     return _resolve_and_call("is_window_foreground", pid=pid)
 
 
 def unfocus(*, pid: int | None = None) -> bool:
-    """Send the running VRChat window to the bottom of the z-order, leaving
-    input focus where the caller had it.
+    """Send the VRChat window to the bottom of the z-order without transferring
+    input focus.
 
-    Useful for hiding VRChat without minimizing — no other window is
-    activated. See :func:`focus` for *pid* semantics and the Windows /
-    Linux contract.
+    Use this to hide VRChat without minimizing it — no other window is
+    activated, so the caller keeps focus wherever it was. See
+    :func:`focus` for *pid* semantics and the Windows / Linux contract.
     """
     return _resolve_and_call("unfocus_window", pid=pid)
