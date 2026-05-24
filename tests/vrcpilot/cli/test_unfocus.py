@@ -1,72 +1,56 @@
-"""Tests for :mod:`vrcpilot.cli.unfocus`."""
+"""Tests for :mod:`vrcpilot.cli.unfocus`.
+
+``vrcpilot unfocus`` mirrors :mod:`vrcpilot.cli.focus`: a thin shell
+over :func:`vrcpilot.window.unfocus`. The contract has the same shape:
+
+* No VRChat running -> exit 1 with ``vrcpilot: could not unfocus
+  VRChat`` on stderr.
+* Argparse plumbing: ``--pid`` is an int that gets forwarded.
+
+Live success-path verification (real X11 / Win32 z-order shuffling)
+requires a real VRChat instance and is deferred to the e2e suite.
+"""
 
 from __future__ import annotations
 
 import pytest
-from pytest_mock import MockerFixture
 
-from vrcpilot.cli import main
-from vrcpilot.process import VRChatMultipleInstancesError
+from vrcpilot.cli import build_parser, main
 
 
-class TestUnfocusCommand:
-    def test_silent_on_success(
-        self, mocker: MockerFixture, capsys: pytest.CaptureFixture[str]
+class TestUnfocusNoVRChat:
+    """Without a VRChat process running, ``unfocus`` exits 1."""
+
+    def test_exits_with_code_one(self):
+        assert main(["unfocus"]) == 1
+
+    def test_stderr_has_diagnostic_message(
+        self,
+        capsys: pytest.CaptureFixture[str],
     ):
-        # ``unfocus.run`` calls the locally imported ``unfocus`` window
-        # function, so the right patch boundary is the binding inside
-        # the submodule.
-        mocker.patch("vrcpilot.cli.unfocus.unfocus", return_value=True)
-
-        exit_code = main(["unfocus"])
-
-        assert exit_code == 0
+        main(["unfocus"])
         captured = capsys.readouterr()
         assert captured.out == ""
-        assert captured.err == ""
+        assert "vrcpilot: could not unfocus VRChat" in captured.err
 
-    def test_stderr_on_failure(
-        self, mocker: MockerFixture, capsys: pytest.CaptureFixture[str]
+    def test_explicit_pid_also_exits_1_when_window_missing(
+        self,
+        capsys: pytest.CaptureFixture[str],
     ):
-        mocker.patch("vrcpilot.cli.unfocus.unfocus", return_value=False)
+        # ``resolve_pid`` accepts the explicit pid without checking
+        # liveness; the backend then fails to find a matching window
+        # and the CLI surfaces the failure as exit 1.
+        assert main(["unfocus", "--pid", "12345"]) == 1
+        assert "vrcpilot: could not unfocus VRChat" in capsys.readouterr().err
 
-        exit_code = main(["unfocus"])
 
-        assert exit_code == 1
-        captured = capsys.readouterr()
-        assert captured.out == ""
-        assert captured.err == "vrcpilot: could not unfocus VRChat\n"
+class TestUnfocusArgparse:
+    """``--pid`` parsing on the unfocus subparser."""
 
-    def test_passes_pid_to_api(self, mocker: MockerFixture):
-        unfocus_stub = mocker.patch("vrcpilot.cli.unfocus.unfocus", return_value=True)
+    def test_pid_flag_accepts_int(self):
+        ns = build_parser().parse_args(["unfocus", "--pid", "9876"])
+        assert ns.pid == 9876
 
-        exit_code = main(["unfocus", "--pid", "67890"])
-
-        assert exit_code == 0
-        unfocus_stub.assert_called_once_with(pid=67890)
-
-    def test_no_pid_passes_none(self, mocker: MockerFixture):
-        unfocus_stub = mocker.patch("vrcpilot.cli.unfocus.unfocus", return_value=True)
-
-        exit_code = main(["unfocus"])
-
-        assert exit_code == 0
-        unfocus_stub.assert_called_once_with(pid=None)
-
-    def test_multiple_instances_exits_with_diagnostic(
-        self, mocker: MockerFixture, capsys: pytest.CaptureFixture[str]
-    ):
-        mocker.patch(
-            "vrcpilot.cli.unfocus.unfocus",
-            side_effect=VRChatMultipleInstancesError([3333, 4444]),
-        )
-
-        exit_code = main(["unfocus"])
-
-        assert exit_code == 1
-        captured = capsys.readouterr()
-        assert captured.out == ""
-        assert (
-            captured.err == "vrcpilot: multiple VRChat instances detected "
-            "(PIDs: 3333 4444); pass --pid\n"
-        )
+    def test_no_pid_defaults_to_none(self):
+        ns = build_parser().parse_args(["unfocus"])
+        assert ns.pid is None

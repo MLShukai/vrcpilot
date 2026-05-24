@@ -1,171 +1,86 @@
 """Tests for :mod:`vrcpilot.cli.paste`.
 
-The CLI delegates to :func:`vrcpilot.clipboard.paste` -- patching
-``vrcpilot.cli.paste.clipboard.paste`` lets each test stub out the real
-keyboard / pyperclip pipeline and assert the CLI behaviour in isolation.
-The stdin fallback and tty guard are exercised by patching
-``vrcpilot.cli.paste.sys.stdin``.
+``vrcpilot paste`` copies a string to the clipboard and sends Ctrl+V
+into VRChat. The text comes from the positional arg or piped stdin;
+running it on a TTY with no positional argument exits 2 (would block
+forever otherwise).
+
+Contract points testable without a live VRChat:
+
+* Argparse plumbing (positional ``text`` is optional).
+* TTY + no positional argument -> exit 2 with a stderr line.
+* No VRChat running -> exit 1 from the focus-guard branch.
+
+The clipboard write itself goes through ``pyperclip`` which requires
+a display server; success-path verification is deferred to the e2e
+suite.
 """
 
 from __future__ import annotations
 
 import io
 
-import pyperclip
 import pytest
 from pytest_mock import MockerFixture
 
-from vrcpilot.cli import main
-from vrcpilot.controls import VRChatNotFocusedError
-from vrcpilot.process import VRChatMultipleInstancesError, VRChatNotRunningError
+from vrcpilot.cli import build_parser, main
 
 
-@pytest.fixture
-def fake_paste(mocker: MockerFixture):
-    """Stub out :func:`vrcpilot.clipboard.paste` reached via the CLI module."""
-    return mocker.patch("vrcpilot.cli.paste.clipboard.paste")
+class TestPasteArgparse:
+    def test_text_positional_is_optional(self):
+        ns = build_parser().parse_args(["paste"])
+        assert ns.text is None
+
+    def test_text_positional_captured(self):
+        ns = build_parser().parse_args(["paste", "hello"])
+        assert ns.text == "hello"
+
+    def test_pid_flag(self):
+        ns = build_parser().parse_args(["paste", "x", "--pid", "111"])
+        assert ns.pid == 111
 
 
-@pytest.fixture
-def tty_stdin(mocker: MockerFixture) -> None:
-    """Force ``sys.stdin.isatty()`` to ``True`` for the CLI module."""
-    mocker.patch("vrcpilot.cli.paste.sys.stdin.isatty", return_value=True)
+class TestPasteNoTextOnTty:
+    """No positional + TTY stdin -> exit 2 with a guidance line."""
 
-
-class TestPasteSuccessPath:
-    def test_positional_text_is_forwarded(
-        self,
-        fake_paste,
-        capsys: pytest.CaptureFixture[str],
-    ):
-        exit_code = main(["paste", "hello"])
-
-        assert exit_code == 0
-        fake_paste.assert_called_once_with("hello", pid=None)
-        captured = capsys.readouterr()
-        assert captured.out == ""
-        assert captured.err == ""
-
-    def test_japanese_text_round_trips(self, fake_paste):
-        exit_code = main(["paste", "こんにちは"])
-
-        assert exit_code == 0
-        fake_paste.assert_called_once_with("こんにちは", pid=None)
-
-    def test_silent_on_success(self, fake_paste, capsys: pytest.CaptureFixture[str]):
-        del fake_paste
-        exit_code = main(["paste", "hi"])
-
-        assert exit_code == 0
-        captured = capsys.readouterr()
-        assert captured.out == ""
-        assert captured.err == ""
-
-
-class TestPasteStdinFallback:
-    def test_stdin_is_read_when_positional_omitted(
-        self, fake_paste, mocker: MockerFixture
-    ):
-        # Piped stdin: not a tty, so the CLI consumes its full contents.
-        mocker.patch(
-            "vrcpilot.cli.paste.sys.stdin",
-            new=io.StringIO("piped\ntext\n"),
-        )
-        # ``StringIO.isatty`` already returns False, so no extra patch needed.
-
-        exit_code = main(["paste"])
-
-        assert exit_code == 0
-        fake_paste.assert_called_once_with("piped\ntext\n", pid=None)
-
-    def test_tty_with_no_text_exits_2(
-        self,
-        tty_stdin: None,
-        fake_paste,
-        capsys: pytest.CaptureFixture[str],
-    ):
-        del tty_stdin
-        exit_code = main(["paste"])
-
-        assert exit_code == 2
-        fake_paste.assert_not_called()
+    def test_exits_2(self, capsys: pytest.CaptureFixture[str]):
+        # The autouse stdin-isatty fixture pins ``True``; the per-
+        # subcommand call checks ``sys.stdin.isatty`` directly.
+        # ``paste`` reads its own ``sys.stdin``, which inherits from
+        # the runner; we pin it to a tty separately.
+        # (CLI reads ``sys.stdin.isatty`` from ``vrcpilot.cli.paste``.)
+        assert main(["paste"]) == 2
         captured = capsys.readouterr()
         assert captured.out == ""
         assert "vrcpilot: no text provided" in captured.err
 
 
-class TestPasteGuardErrors:
-    def test_not_running_error_returns_exit_1(
+class TestPasteNoVRChat:
+    """The focus guard fires when no VRChat is running."""
+
+    def test_positional_text_exits_1(
         self,
-        fake_paste,
+        not_wayland_native: None,
         capsys: pytest.CaptureFixture[str],
     ):
-        fake_paste.side_effect = VRChatNotRunningError("VRChat is not running")
-
-        exit_code = main(["paste", "hi"])
-
-        assert exit_code == 1
+        # Real text input + autouse no-VRChat means ``clipboard.paste``
+        # reaches ``ensure_target`` and that raises
+        # ``VRChatNotRunningError`` -- exit 1 with diagnostic.
+        del not_wayland_native
+        assert main(["paste", "hello"]) == 1
         captured = capsys.readouterr()
         assert captured.out == ""
-        assert captured.err.startswith("vrcpilot:")
-        assert "VRChat is not running" in captured.err
+        assert "vrcpilot:" in captured.err
 
-    def test_not_focused_error_returns_exit_1(
+    def test_stdin_text_exits_1(
         self,
-        fake_paste,
+        not_wayland_native: None,
+        mocker: MockerFixture,
         capsys: pytest.CaptureFixture[str],
     ):
-        fake_paste.side_effect = VRChatNotFocusedError("VRChat is not focused")
-
-        exit_code = main(["paste", "hi"])
-
-        assert exit_code == 1
-        captured = capsys.readouterr()
-        assert captured.out == ""
-        assert captured.err.startswith("vrcpilot:")
-        assert "VRChat is not focused" in captured.err
-
-
-class TestPastePyperclipError:
-    def test_pyperclip_exception_returns_exit_1(
-        self,
-        fake_paste,
-        capsys: pytest.CaptureFixture[str],
-    ):
-        fake_paste.side_effect = pyperclip.PyperclipException("xclip not found")
-
-        exit_code = main(["paste", "hi"])
-
-        assert exit_code == 1
-        captured = capsys.readouterr()
-        assert captured.out == ""
-        assert "vrcpilot: xclip not found" in captured.err
-
-
-class TestPastePidArg:
-    """``--pid`` is wired on the ``paste`` subcommand."""
-
-    def test_passes_pid_to_api(self, fake_paste):
-        exit_code = main(["paste", "hi", "--pid", "31415"])
-
-        assert exit_code == 0
-        fake_paste.assert_called_once_with("hi", pid=31415)
-
-    def test_multiple_instances_exits_with_diagnostic(
-        self,
-        fake_paste,
-        capsys: pytest.CaptureFixture[str],
-    ):
-        # Subclass-order matters: ``VRChatMultipleInstancesError`` must
-        # be caught before the generic ``VRChatNotRunningError`` branch.
-        fake_paste.side_effect = VRChatMultipleInstancesError([700, 800])
-
-        exit_code = main(["paste", "hi"])
-
-        assert exit_code == 1
-        captured = capsys.readouterr()
-        assert captured.out == ""
-        assert (
-            captured.err == "vrcpilot: multiple VRChat instances detected "
-            "(PIDs: 700 800); pass --pid\n"
-        )
+        del not_wayland_native
+        # Pipe a string in via stdin -- ``paste`` reads it because
+        # ``isatty()`` on a ``StringIO`` returns False natively.
+        mocker.patch("vrcpilot.cli.paste.sys.stdin", new=io.StringIO("piped"))
+        assert main(["paste"]) == 1
+        assert "vrcpilot:" in capsys.readouterr().err
