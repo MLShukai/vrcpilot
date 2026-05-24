@@ -39,18 +39,18 @@ except Exception as _exc:  # noqa: BLE001
         allow_module_level=True,
     )
 
+from tests.helpers import has_pipewire  # noqa: E402
+
+# ``pactl`` is the spawn vehicle for the transient null-sink; ``has_pipewire``
+# only confirms the daemon side. Both are required.
 if shutil.which("pactl") is None:
     pytest.skip(
         "pactl is required to spawn a transient null-sink", allow_module_level=True
     )
 
-# Quick liveness check: a host without a running PulseAudio / PipeWire
-# server has pactl installed but ``pactl info`` returns non-zero. Skip
-# rather than time out per-test.
-_probe = subprocess.run(["pactl", "info"], capture_output=True, text=True)
-if _probe.returncode != 0:
+if not has_pipewire():
     pytest.skip(
-        f"no PulseAudio/PipeWire server reachable: {_probe.stderr.strip()}",
+        "no PipeWire daemon reachable for the transient null-sink",
         allow_module_level=True,
     )
 

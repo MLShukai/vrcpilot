@@ -27,6 +27,7 @@
 - [vrcpilot CLI で VRChat を操作する playbook](feedback_vrchat_cli_playbook.md) — SSH/.env 環境で起動 → メニュー → OCR → click → 移動 → terminate の実機検証済み手順
 - [Linux direct-spawn は GAMEID を渡さない](feedback_linux_direct_spawn_proton.md) — GAMEID=438100 を umu-run に渡すと ProtonFixes が壊れた global defaults を当てて wine 即死。`--app-id` は via_steam 専用
 - [許可済みコマンドを優先する](feedback_use_allowed_commands.md) — `.claude/settings.json` の allow に載った形で Bash/Read を組み立てる。確認プロンプトで自走が止まるのを防ぐ
+- [env var prefix で permission prompt が出る → export を使う](feedback_env_var_prefix_permission.md) — `env -u FOO bar` / `FOO=val bar` を繰り返すなら先に `export` / `unset` しておく
 
 ## project（実装上の固有事情）
 

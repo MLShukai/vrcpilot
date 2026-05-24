@@ -21,7 +21,6 @@ that every public ``Key`` has a backend mapping.
 
 from __future__ import annotations
 
-import os
 import sys
 
 import pytest
@@ -32,7 +31,9 @@ if sys.platform != "linux":
         allow_module_level=True,
     )
 
-if not os.access("/dev/uinput", os.W_OK):
+from tests.helpers import has_uinput  # noqa: E402
+
+if not has_uinput():
     pytest.skip(
         "/dev/uinput is not writable; see tests/e2e/keyboard.py for setup",
         allow_module_level=True,

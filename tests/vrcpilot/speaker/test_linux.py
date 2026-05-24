@@ -25,7 +25,6 @@ upstream and let CI go green while the real proc-tap path is broken.
 from __future__ import annotations
 
 import shutil
-import subprocess
 import sys
 
 import pytest
@@ -33,6 +32,7 @@ import pytest
 if not sys.platform.startswith("linux"):
     pytest.skip("vrcpilot.speaker.linux is Linux-only", allow_module_level=True)
 
+from tests.helpers import has_pipewire  # noqa: E402
 from vrcpilot.speaker.linux import PipeWireSpeakerBackend  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -98,14 +98,6 @@ def _pulsectl_importable() -> bool:
     return True
 
 
-def _pulse_server_reachable() -> bool:
-    """A PipeWire / PulseAudio server answers control queries."""
-    if shutil.which("pactl") is None:
-        return False
-    probe = subprocess.run(["pactl", "info"], capture_output=True, text=True)
-    return probe.returncode == 0
-
-
 class TestPipeWireSpeakerBackendAgainstRealDaemon:
     """Real PipeWire end-to-end.
 
@@ -113,7 +105,8 @@ class TestPipeWireSpeakerBackendAgainstRealDaemon:
 
     * pw-record / pw-link / pw-dump on PATH
     * pulsectl importable in the venv
-    * PipeWire / PulseAudio daemon reachable
+    * PipeWire daemon reachable (probed via ``has_pipewire`` /
+      ``pw-cli info 0``)
 
     The PID used here is the *current* process PID -- the backend
     binds its monitor to a null-sink and links any VRChat-like output
@@ -126,8 +119,8 @@ class TestPipeWireSpeakerBackendAgainstRealDaemon:
             pytest.skip("pw-record / pw-link / pw-dump must all be installed")
         if not _pulsectl_importable():
             pytest.skip("pulsectl is required for the real PipeWire backend")
-        if not _pulse_server_reachable():
-            pytest.skip("no PipeWire / PulseAudio server reachable")
+        if not has_pipewire():
+            pytest.skip("no PipeWire daemon reachable")
 
     def test_constructor_loads_and_close_unloads_real_null_sink(self) -> None:
         # We need a PID for the constructor -- our own process PID is

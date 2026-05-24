@@ -29,7 +29,6 @@ that owns the cursor.
 
 from __future__ import annotations
 
-import os
 import sys
 
 import pytest
@@ -40,13 +39,13 @@ if sys.platform != "linux":
         allow_module_level=True,
     )
 
-if not os.access("/dev/uinput", os.W_OK):
+from tests.helpers import has_uinput, has_x11_display  # noqa: E402
+
+if not has_uinput():
     pytest.skip(
         "/dev/uinput is not writable; see tests/e2e/mouse.py for setup",
         allow_module_level=True,
     )
-
-from tests.helpers import has_x11_display  # noqa: E402
 
 if not has_x11_display():
     pytest.skip(
