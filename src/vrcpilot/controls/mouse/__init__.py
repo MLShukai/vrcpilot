@@ -63,11 +63,19 @@ def click(
     *buttons: MouseButton,
     count: int = 1,
     duration: float = 0.0,
+    interval: float = 0.0,
     focus: bool = True,
     pid: int | None = None,
 ) -> None:
     """See :meth:`Mouse.click`."""
-    _get().click(*buttons, count=count, duration=duration, focus=focus, pid=pid)
+    _get().click(
+        *buttons,
+        count=count,
+        duration=duration,
+        interval=interval,
+        focus=focus,
+        pid=pid,
+    )
 
 
 def press(*buttons: MouseButton, focus: bool = True, pid: int | None = None) -> None:

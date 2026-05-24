@@ -32,6 +32,7 @@
 ## project（実装上の固有事情）
 
 - [keyboard.press の duration デフォルト 0.1](project_keyboard_press_duration.md) — VRChat/Unity が短すぎる keypress を取りこぼすので 0.0 に戻さない
+- [Linux uinput デバイスは初回入力が drop される](project_uinput_first_key_drop.md) — `LinuxKeyboard` / `LinuxMouse` の `__init__` で `time.sleep(0.5)` を入れて X11 binding 待ち。削らない
 - [pipewire null-sink module 廃止問題](project_pipewire_null_sink_module_removed.md) — `mic enable` が書き出す古い conf で PipeWire 1.0+ が起動不能になる。退避 + reset-failed で復旧、テンプレ自体は要修正
 
 ## reference（外部ツール・パス）

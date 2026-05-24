@@ -76,6 +76,16 @@ def register(subparsers: SubParsersAction) -> None:
         default=0.0,
         help="Down-to-up hold per click cycle, in seconds. Default: 0.0.",
     )
+    click_parser.add_argument(
+        "--interval",
+        type=float,
+        default=0.0,
+        help=(
+            "Inter-cycle gap between click cycles, in seconds. Use "
+            "0.02 - 0.05 for VRChat double-click on Linux (inputtino + "
+            "Wine). Default: 0.0."
+        ),
+    )
     add_pid_arg(click_parser)
 
     scroll_parser = actions.add_parser(
@@ -102,6 +112,7 @@ def run(args: argparse.Namespace) -> int:
                     *args.button,
                     count=args.count,
                     duration=args.duration,
+                    interval=args.interval,
                     pid=args.pid,
                 )
             case "scroll":

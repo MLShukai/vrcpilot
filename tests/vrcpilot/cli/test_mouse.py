@@ -55,6 +55,9 @@ class TestMouseArgparse:
         assert ns.button == []
         assert ns.count == 1
         assert ns.duration == pytest.approx(0.0)
+        # ``--interval`` defaults to 0.0 so omitting the flag is
+        # backwards-compatible with callers that predate it.
+        assert ns.interval == pytest.approx(0.0)
 
     def test_click_count_and_duration(self):
         ns = build_parser().parse_args(
@@ -62,6 +65,10 @@ class TestMouseArgparse:
         )
         assert ns.count == 3
         assert ns.duration == pytest.approx(0.25)
+
+    def test_click_interval_parsed_as_float(self):
+        ns = build_parser().parse_args(["mouse", "click", "--interval", "0.05"])
+        assert ns.interval == pytest.approx(0.05)
 
     def test_scroll_parses_amount_as_int(self):
         ns = build_parser().parse_args(["mouse", "scroll", "-5"])

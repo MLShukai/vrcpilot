@@ -11,11 +11,20 @@ import sys
 if sys.platform != "linux":
     raise ImportError("vrcpilot.controls.keyboard.linux is Linux-only")
 
+import time
 from typing import override
 
 import inputtino
 
 from vrcpilot.controls.keyboard.base import Key, Keyboard
+
+# Grace period after ``inputtino.Keyboard()`` creates the ``/dev/uinput``
+# device, before the first key event is allowed through. X11 / libinput
+# subscribes to new uinput devices asynchronously via udev, so events
+# issued inside this window are silently dropped — the kernel forwards
+# them to evdev, but no listener is yet bound. 0.5s gives ample margin
+# over the ~100-200ms typical hot-plug latency.
+_UINPUT_BIND_SETTLE: float = 0.5
 
 # Exhaustive Key -> inputtino.KeyCode map; tests assert
 # set(_INPUTTINO_CODES) == set(Key) so a missing entry surfaces
@@ -124,6 +133,7 @@ class LinuxKeyboard(Keyboard):
 
     def __init__(self) -> None:
         self._imp = inputtino.Keyboard()
+        time.sleep(_UINPUT_BIND_SETTLE)
 
     @override
     def _do_down(self, key: Key) -> None:

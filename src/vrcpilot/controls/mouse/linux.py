@@ -11,6 +11,7 @@ import sys
 if sys.platform != "linux":
     raise ImportError("vrcpilot.controls.mouse.linux is Linux-only")
 
+import time
 from typing import override
 
 import inputtino
@@ -21,6 +22,13 @@ from vrcpilot.controls.mouse.base import Mouse, MouseButton
 # inputtino's scroll API takes distance in 120-per-notch high-resolution
 # units; we expose plain notches and multiply on the way down.
 _SCROLL_NOTCH = 120
+
+# Grace period after ``inputtino.Mouse()`` creates the ``/dev/uinput``
+# device, before the first event is allowed through. Mirrors the same
+# concern as :data:`vrcpilot.controls.keyboard.linux._UINPUT_BIND_SETTLE`:
+# X11 / libinput subscribes to new uinput devices asynchronously via
+# udev, so events issued inside this window are silently dropped.
+_UINPUT_BIND_SETTLE: float = 0.5
 
 _BUTTON_MAP: dict[MouseButton, inputtino.MouseButton] = {
     MouseButton.LEFT: inputtino.MouseButton.LEFT,
@@ -38,6 +46,7 @@ class LinuxMouse(Mouse):
 
     def __init__(self) -> None:
         self._imp = inputtino.Mouse()
+        time.sleep(_UINPUT_BIND_SETTLE)
         # Match screenshot.py: explicit instantiate / close (not
         # the context manager) so test fakes can be plain mocks
         # without implementing __enter__ / __exit__.
