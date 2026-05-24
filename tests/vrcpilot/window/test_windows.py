@@ -1,106 +1,105 @@
-"""Tests for :mod:`vrcpilot.window.windows`.
+"""Tests for :mod:`vrcpilot.window.windows` (Win32 focus/unfocus backend).
 
 The module under test imports Windows-only DLLs (``pywintypes``,
-``win32gui``, ``win32api``) and raises ``ImportError`` on any other
+``win32gui``, ``win32api``) and raises ``ImportError`` on every other
 platform. A module-level skip up front keeps non-Windows runners from
-even attempting the import — anything below executes only on Windows.
+attempting the import.
 
-Backend helpers now receive an explicit ``pid=`` argument; the public
-dispatch layer (:mod:`vrcpilot.window`) is responsible for resolving it
-via :func:`vrcpilot.process.resolve_pid`. These tests therefore drive
-backend functions directly with a PID and patch ``find_vrchat_hwnd`` /
-Win32 APIs to exercise the remaining branches.
+Backend helpers now accept an explicit ``pid=`` (the public dispatch
+layer in :mod:`vrcpilot.window` resolves the PID). Tests pass either
+an unused PID -- exercising the "window not found" branch against the
+real ``find_vrchat_hwnd`` -- or the live tkinter window's PID --
+exercising the full focus/unfocus/is_foreground round-trip against the
+live Win32 API. No internal-function or Win32-surface mocking is used.
 """
 
 from __future__ import annotations
 
+import os
 import sys
 
 import pytest
 
 if sys.platform != "win32":
-    pytest.skip("Windows-only module", allow_module_level=True)
+    pytest.skip("vrcpilot.window.windows is Windows-only", allow_module_level=True)
 
-import pywintypes
-from pytest_mock import MockerFixture
+import tkinter
+from collections.abc import Iterator
 
-from vrcpilot.window.windows import focus_window, is_window_foreground, unfocus_window
+from vrcpilot.window.windows import (
+    focus_window,
+    is_window_foreground,
+    unfocus_window,
+)
+
+_UNUSED_PID = 99_999_999
+
+
+@pytest.fixture
+def tk_window() -> Iterator[tkinter.Tk]:
+    """Spawn a real Tk top-level window mapped on the Windows desktop.
+
+    ``update()`` forces the WM round-trip so the window shows up in
+    ``EnumWindows`` with a valid HWND owned by ``os.getpid()`` --
+    which is the PID the backend will look up. Destroyed on teardown.
+    """
+    root = tkinter.Tk()
+    root.geometry("320x240+50+60")
+    root.update_idletasks()
+    root.update()
+    try:
+        yield root
+    finally:
+        root.destroy()
 
 
 class TestFocusWindow:
-    def test_returns_false_when_hwnd_not_found(self, mocker: MockerFixture):
-        # PID is supplied directly now; backend no longer consults
-        # ``find_pid``. With ``find_vrchat_hwnd`` returning ``None`` the
-        # helper must report ``False`` without invoking any Win32 API.
-        mocker.patch("vrcpilot.window.windows.find_vrchat_hwnd", return_value=None)
+    def test_returns_false_when_no_window_owns_pid(self):
+        # Real ``EnumWindows`` walk against the live OS. No window owns
+        # ``_UNUSED_PID`` so ``find_vrchat_hwnd`` returns ``None`` and
+        # the helper short-circuits to False without invoking any Win32
+        # state-changing API.
+        assert focus_window(pid=_UNUSED_PID) is False
 
-        assert focus_window(pid=4242) is False
+    def test_returns_true_for_existing_window(self, tk_window: tkinter.Tk):
+        # Real focus round-trip: spawn a tk window, ask the backend to
+        # focus it. ``SetForegroundWindow`` succeeds for windows owned
+        # by the current process, so the helper must report True.
+        # (Cross-process focus is subject to Windows' foreground lock
+        # which is out of scope here -- see e2e suite for VRChat.)
+        _ = tk_window  # keep window alive for the duration of the call
 
-
-class TestUnfocusWindow:
-    def test_returns_false_when_hwnd_not_found(self, mocker: MockerFixture):
-        mocker.patch("vrcpilot.window.windows.find_vrchat_hwnd", return_value=None)
-
-        assert unfocus_window(pid=4242) is False
-
-    def test_returns_false_on_pywintypes_error(self, mocker: MockerFixture):
-        # ``unfocus_window`` has the simplest call chain among the two
-        # helpers (one Win32 call inside the ``try``); injecting
-        # ``pywintypes.error`` here documents the shared contract that
-        # any platform-level failure is converted to a ``False`` return
-        # rather than propagated.
-        mocker.patch("vrcpilot.window.windows.find_vrchat_hwnd", return_value=12345)
-        mocker.patch(
-            "vrcpilot.window.windows.win32gui.SetWindowPos",
-            side_effect=pywintypes.error(0, "SetWindowPos", "msg"),
-        )
-
-        assert unfocus_window(pid=4242) is False
+        assert focus_window(pid=os.getpid()) is True
 
 
 class TestIsWindowForeground:
-    def test_returns_false_when_hwnd_not_found(self, mocker: MockerFixture):
-        # VRChat process is running but the top-level HWND owned by it
-        # could not be located (e.g. the window is not yet created).
-        # The helper must report ``False`` without invoking
-        # ``GetForegroundWindow``.
-        mocker.patch("vrcpilot.window.windows.find_vrchat_hwnd", return_value=None)
+    def test_returns_false_when_no_window_owns_pid(self):
+        # Without an owning HWND there is nothing to compare against
+        # ``GetForegroundWindow`` -- helper must report False without
+        # calling the API.
+        assert is_window_foreground(pid=_UNUSED_PID) is False
 
-        assert is_window_foreground(pid=4242) is False
+    def test_returns_true_after_focusing_window(self, tk_window: tkinter.Tk):
+        # Focus the tk window then immediately ask whether it owns the
+        # foreground. Both calls hit the live Win32 API; this pins the
+        # contract that ``is_foreground`` agrees with the result of
+        # ``focus`` for windows owned by the current process.
+        _ = tk_window
+        assert focus_window(pid=os.getpid()) is True
 
-    def test_returns_true_when_hwnd_matches_foreground(self, mocker: MockerFixture):
-        # Happy path: the located HWND equals the OS-reported
-        # foreground HWND, so the helper reports ``True``.
-        mocker.patch("vrcpilot.window.windows.find_vrchat_hwnd", return_value=12345)
-        mocker.patch(
-            "vrcpilot.window.windows.win32gui.GetForegroundWindow",
-            return_value=12345,
-        )
+        assert is_window_foreground(pid=os.getpid()) is True
 
-        assert is_window_foreground(pid=4242) is True
 
-    def test_returns_false_when_hwnd_does_not_match_foreground(
-        self, mocker: MockerFixture
-    ):
-        # A different window owns the foreground - the helper reports
-        # ``False`` so callers know to call ``focus()``.
-        mocker.patch("vrcpilot.window.windows.find_vrchat_hwnd", return_value=12345)
-        mocker.patch(
-            "vrcpilot.window.windows.win32gui.GetForegroundWindow",
-            return_value=99999,
-        )
+class TestUnfocusWindow:
+    def test_returns_false_when_no_window_owns_pid(self):
+        # Real ``EnumWindows`` walk; nothing to unfocus -> False.
+        assert unfocus_window(pid=_UNUSED_PID) is False
 
-        assert is_window_foreground(pid=4242) is False
+    def test_returns_true_for_existing_window(self, tk_window: tkinter.Tk):
+        # ``SetWindowPos(HWND_BOTTOM, SWP_NOACTIVATE)`` succeeds against
+        # the live HWND, so the helper must report True. We do not
+        # assert post-call z-order because that depends on which other
+        # windows happen to be open on the runner.
+        _ = tk_window
 
-    def test_returns_false_on_pywintypes_error(self, mocker: MockerFixture):
-        # Any pywintypes failure during the foreground check must be
-        # converted to a ``False`` return rather than propagated, so
-        # the helper plays the same defensive contract as
-        # ``focus_window`` / ``unfocus_window``.
-        mocker.patch("vrcpilot.window.windows.find_vrchat_hwnd", return_value=12345)
-        mocker.patch(
-            "vrcpilot.window.windows.win32gui.GetForegroundWindow",
-            side_effect=pywintypes.error(0, "GetForegroundWindow", "msg"),
-        )
-
-        assert is_window_foreground(pid=4242) is False
+        assert unfocus_window(pid=os.getpid()) is True
