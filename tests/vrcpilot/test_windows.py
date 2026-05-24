@@ -36,6 +36,8 @@ if not has_working_tkinter():
 import tkinter
 from collections.abc import Iterator
 
+import win32gui
+
 from vrcpilot.windows import find_vrchat_hwnd, get_window_rect
 
 
@@ -103,20 +105,36 @@ class TestGetWindowRect:
     def test_returns_window_dimensions_for_real_hwnd(
         self, tk_window: tuple[tkinter.Tk, int, int]
     ):
-        # Real geometry round-trip: ask Tk for a 320x240 window, locate
-        # its HWND, then the production helper must report a rectangle
-        # whose width and height match. Position is WM-dependent (DWM
-        # frame margins, monitor placement) so only the size is pinned.
-        _root, width, height = tk_window
+        # ``get_window_rect`` returns the *outer* rect (title bar +
+        # borders included) because production uses it as the mss /
+        # windows-capture grab region for VRChat -- not the client area.
+        # We can't compare against ``Tk.geometry()`` directly (Tk sets
+        # client size) so use Win32's ``GetWindowRect`` /
+        # ``GetClientRect`` as independent oracles: pin the outer dims
+        # exactly against the WM, and verify the WM-reported client size
+        # is at least the requested Tk size (Tk is DPI-unaware so the
+        # WM may scale the client up on high-DPI hosts).
+        _root, client_w, client_h = tk_window
         hwnd = find_vrchat_hwnd(os.getpid())
         assert hwnd is not None
+
+        cleft, ctop, cright, cbottom = win32gui.GetClientRect(hwnd)
+        wm_client_w = cright - cleft
+        wm_client_h = cbottom - ctop
+        oleft, otop, oright, obottom = win32gui.GetWindowRect(hwnd)
+        wm_outer_w = oright - oleft
+        wm_outer_h = obottom - otop
 
         rect = get_window_rect(hwnd)
 
         assert rect is not None
         _x, _y, w, h = rect
-        assert w == width
-        assert h == height
+        # Production must report the outer rect (what mss.grab expects).
+        assert (w, h) == (wm_outer_w, wm_outer_h)
+        # Independent invariant: the WM client size is at least what Tk
+        # asked for, modulo per-monitor DPI scaling.
+        assert wm_client_w >= client_w
+        assert wm_client_h >= client_h
 
     def test_returns_none_after_window_destroyed(self):
         # Window destroyed mid-call: ``GetWindowRect`` raises
