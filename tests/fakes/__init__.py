@@ -44,7 +44,6 @@ from .capture import (
 )
 from .inputtino import FakeInputtinoKeyboard, FakeInputtinoMouse, FakeMouseButton
 from .ocr import FakeOCREngine
-from .osc import FakeUDPClient
 from .process import FakePopen, FakeProcess
 from .pydirectinput import FakePyDirectInput
 from .record_muxer import FakeMkvStdoutMuxer, FakeMp4FileMuxer, FakeWavFileMuxer
@@ -89,7 +88,6 @@ __all__ = [
     "FakeSoundCardSpeaker",
     "FakeSpeaker",
     "FakeSpeakerLoop",
-    "FakeUDPClient",
     "FakeWavFileMuxer",
     "FakeWindowsCapture",
     "FakeWindowsCaptureControl",
