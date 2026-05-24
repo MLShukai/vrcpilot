@@ -105,6 +105,7 @@ testpaths = "tests/"
 asyncio_default_fixture_loop_scope = "function"
 markers = [
   "e2e: scenarios that require a real VRChat instance; not collected by default",
+  "api_contract: pins for the published API surface (names, exception bases, type aliases); not behaviour tests",
 ]
 
 [tool.pyright]
