@@ -11,3 +11,4 @@ shared な前提 ([テスト戦略 4 区分と新モック方針](../../feedback
 - [Avoid object-typed fixture parameters](feedback_fixture_typing.md) — mock fixture パラメータに `: object` を付けない (pyright ignore ノイズの原因)
 - [自前 ABC fake は単一消費者でも tests/fakes/ に集約する](feedback_shared_fakes_in_tests_fakes.md) — 自前 ABC は単一消費者でも `tests/fakes/`。3rd-party 表面 fake は新規追加禁止
 - [3rd-party 表面 fake は cleanup target / 自前 ABC fake は使用面のみミラー](feedback_fakes_mirror_production.md) — 3rd-party 表面 fake は新規禁止 + 既存も整理対象。自前 ABC fake は production 呼び出し面のみミラー
+- [自分のコードの内部関数モック禁止の実例 (controls 周辺)](feedback_no_internal_function_mocks.md) — ensure_target / resolve_pid / window.\* / is_wayland_native / get_vrchat_window_rect / time.sleep は autouse fixture / 実 X11 / e2e で代用するパターン集
