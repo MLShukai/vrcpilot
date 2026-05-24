@@ -48,8 +48,18 @@ def tk_window() -> Iterator[tuple[tkinter.Tk, int, int]]:
     geometry. The owner PID equals ``os.getpid()``, which is what
     ``find_vrchat_hwnd`` matches against. Destroyed on teardown so
     other tests do not see a stray window.
+
+    The ``tkinter.Tk()`` call is wrapped in a try/except as a defensive
+    fallback: ``has_working_tkinter()`` at module level should already
+    skip the module on hosts where Tcl/Tk is broken, but the probe
+    caches its result and some Windows CI runners exhibit a flaky
+    "first Tk() works, second one raises" mode -- so we re-check here
+    and skip the individual test rather than erroring out.
     """
-    root = tkinter.Tk()
+    try:
+        root = tkinter.Tk()
+    except tkinter.TclError as exc:
+        pytest.skip(f"tkinter.Tk() failed at fixture time: {exc}")
     width, height = 320, 240
     root.geometry(f"{width}x{height}+50+60")
     root.update_idletasks()
@@ -115,7 +125,10 @@ class TestGetWindowRect:
         # window, capturing its HWND, destroying it, then asking for
         # geometry -- exactly the race the production handler exists
         # to absorb.
-        root = tkinter.Tk()
+        try:
+            root = tkinter.Tk()
+        except tkinter.TclError as exc:
+            pytest.skip(f"tkinter.Tk() failed at fixture time: {exc}")
         root.geometry("200x100+10+10")
         root.update_idletasks()
         root.update()

@@ -50,8 +50,18 @@ def tk_window() -> Iterator[tkinter.Tk]:
     ``update()`` forces the WM round-trip so the window shows up in
     ``EnumWindows`` with a valid HWND owned by ``os.getpid()`` --
     which is the PID the backend will look up. Destroyed on teardown.
+
+    The ``tkinter.Tk()`` call is wrapped in a try/except as a defensive
+    fallback: ``has_working_tkinter()`` at module level should already
+    skip the module on hosts where Tcl/Tk is broken, but the probe
+    caches its result and some Windows CI runners exhibit a flaky
+    "first Tk() works, second one raises" mode -- so we re-check here
+    and skip the individual test rather than erroring out.
     """
-    root = tkinter.Tk()
+    try:
+        root = tkinter.Tk()
+    except tkinter.TclError as exc:
+        pytest.skip(f"tkinter.Tk() failed at fixture time: {exc}")
     root.geometry("320x240+50+60")
     root.update_idletasks()
     root.update()
