@@ -1,10 +1,13 @@
-"""Smoke tests for :mod:`vrcpilot.types`.
+"""Tests for :mod:`vrcpilot.types`.
 
-The module hosts ``Polygon``, a Python 3.12 ``type``-statement alias.
-Runtime checks here only confirm that the alias is importable and that
-a 4-tuple of 2-tuples actually satisfies the shape downstream callers
-build. The static shape (4 corners, 2 floats each) is enforced by
-pyright; we keep the runtime test minimal.
+``vrcpilot.types`` holds shared type aliases used by both
+``vrcpilot.ocr`` and ``vrcpilot.detect``. The aliases are PEP 695
+``type`` statements: their static shape is enforced by pyright, but
+the *runtime* alias object also encodes the structure (via
+``__value__``), and downstream code reads that structure to do
+introspection (e.g. tooling, docs). This file pins the runtime
+structure so a refactor that silently changes the alias shape (e.g.
+adding a 5th corner or swapping ``float`` for ``int``) is caught.
 """
 
 from __future__ import annotations
@@ -14,24 +17,28 @@ from typing import get_args, get_origin
 from vrcpilot.types import Polygon
 
 
-class TestPolygonAlias:
-    def test_polygon_is_importable(self):
-        assert Polygon is not None
+class TestPolygonShape:
+    """``Polygon`` is a 4-corner polygon of 2D float coordinates.
 
-    def test_polygon_resolves_to_a_4_tuple_shape(self):
-        # ``type Polygon = tuple[..., ..., ..., ...]`` -> the underlying
-        # value is a generic alias whose origin is ``tuple`` and whose
-        # args are the four 2-tuple types.
+    The docstring in ``vrcpilot.types`` calls out the ordering as
+    ``TL, TR, BR, BL`` and "image-local pixels". Ordering is not
+    encoded in the type system (all four corners have the same
+    ``tuple[float, float]`` shape), so this file only pins what the
+    runtime alias can prove: arity 4 and a per-corner shape of
+    ``tuple[float, float]``.
+    """
+
+    def test_is_a_4_tuple_of_2d_float_corners(self) -> None:
+        # ``type Polygon = tuple[X, X, X, X]`` materialises at runtime
+        # as a generic alias whose ``__value__`` is the underlying
+        # ``tuple[...]`` annotation. ``get_origin`` / ``get_args``
+        # peel that back to ``tuple`` and the four corner types.
         underlying = Polygon.__value__
-        assert get_origin(underlying) is tuple
-        assert len(get_args(underlying)) == 4
 
-    def test_concrete_4_tuple_satisfies_shape(self):
-        polygon: Polygon = (
-            (0.0, 0.0),
-            (1.0, 0.0),
-            (1.0, 1.0),
-            (0.0, 1.0),
-        )
-        assert len(polygon) == 4
-        assert all(len(corner) == 2 for corner in polygon)
+        assert get_origin(underlying) is tuple
+
+        corners = get_args(underlying)
+        assert len(corners) == 4
+        for corner in corners:
+            assert get_origin(corner) is tuple
+            assert get_args(corner) == (float, float)
