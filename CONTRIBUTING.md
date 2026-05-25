@@ -97,6 +97,7 @@ Hotfixes target an already-released minor series and must **not** be developed o
 - Pre-release tags (`vX.Y.Za1`, `vX.Y.Zb1`, `vX.Y.Zrc1`) may be cut from either `main` or a `release/x.y` branch, depending on what is being validated.
 - They flow through the same workflow path and end up on PyPI just like stable releases, but `pip install vrcpilot` ignores them by default (users opt in with `pip install --pre vrcpilot`), so they are safe to publish without surprising downstream users.
 - Use pre-release tags freely to rehearse the publish pipeline itself — verifying Trusted Publishing, environments, the tag/version guard, and changelog extraction — before committing to a stable tag.
+- **In the `0.x` series, rehearsing every minor with an `rcN` tag is recommended but not mandatory.** While the project has no production users, small minors may be cut direct-to-stable (a botched `vX.Y.0` is recoverable by immediately tagging `vX.Y.1`). From `1.0.0` onwards, the rehearsal becomes mandatory — see [`docs/RELEASE.md`](docs/RELEASE.md) §4.
 
 ## Verifying changes
 
