@@ -9,11 +9,11 @@ exercises the file-mode side; for the stream-mode equivalents see
 
 Run with::
 
-    just e2e-test cli_record_av_ffmpeg
+    just e2e-test cli_record_ffmpeg
 
 VRChat is launched in Desktop mode at 1280x720 to match the other
 capture-related scenarios. The recorded mp4 lands at
-``_e2e_artifacts/cli_record_av_ffmpeg/<YYYYMMDD_HHMMSS>/cli_record_av.mp4``
+``_e2e_artifacts/cli_record_ffmpeg/<YYYYMMDD_HHMMSS>/cli_record_av.mp4``
 and a ``ffprobe`` round-trip verifies exactly one h264 video stream
 and one aac audio stream, with the container duration within
 tolerance of the wall-clock duration.
@@ -80,7 +80,7 @@ def _scenario() -> None:
 
     _helpers.warmup()
 
-    out_path = _helpers.scenario_dir("cli_record_av_ffmpeg") / "cli_record_av.mp4"
+    out_path = _helpers.scenario_dir("cli_record_ffmpeg") / "cli_record_av.mp4"
 
     # Neither --video nor --audio: both modalities are recorded into
     # the same mp4 container.
@@ -167,7 +167,7 @@ def _scenario() -> None:
 
 
 def main() -> int:
-    return _helpers.run_scenario("cli_record_av_ffmpeg", _scenario)
+    return _helpers.run_scenario("cli_record_ffmpeg", _scenario)
 
 
 if __name__ == "__main__":
