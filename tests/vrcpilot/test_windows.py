@@ -33,6 +33,7 @@ if not has_working_tkinter():
         allow_module_level=True,
     )
 
+import ctypes
 import tkinter
 from collections.abc import Iterator
 
@@ -114,14 +115,29 @@ class TestGetWindowRect:
         # exactly against the WM, and verify the WM-reported client size
         # is at least the requested Tk size (Tk is DPI-unaware so the
         # WM may scale the client up on high-DPI hosts).
+        #
+        # Both oracle calls run under ``SetThreadDpiAwarenessContext(-4)``
+        # (PER_MONITOR_AWARE_V2) to match the thread DPI context
+        # production switches into. Without this the WM virtualises the
+        # rect for a DPI-unaware caller and oracles disagree with
+        # production by the host's DPI scale factor (e.g. 175% -> 1.75x
+        # too small), failing the equality on any non-100% host. The
+        # literal ``-4`` mirrors production's pseudo-handle value rather
+        # than importing the private constant, so a production change to
+        # the awareness mode will force this test to be revisited.
         _root, client_w, client_h = tk_window
         hwnd = find_vrchat_hwnd(os.getpid())
         assert hwnd is not None
 
-        cleft, ctop, cright, cbottom = win32gui.GetClientRect(hwnd)
+        set_thread_dpi = ctypes.windll.user32.SetThreadDpiAwarenessContext
+        old_ctx = set_thread_dpi(-4)
+        try:
+            cleft, ctop, cright, cbottom = win32gui.GetClientRect(hwnd)
+            oleft, otop, oright, obottom = win32gui.GetWindowRect(hwnd)
+        finally:
+            set_thread_dpi(old_ctx)
         wm_client_w = cright - cleft
         wm_client_h = cbottom - ctop
-        oleft, otop, oright, obottom = win32gui.GetWindowRect(hwnd)
         wm_outer_w = oright - oleft
         wm_outer_h = obottom - otop
 
