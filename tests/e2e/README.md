@@ -101,9 +101,10 @@ uv run python tests/e2e/launch_terminate.py
 
 | 名前                      | 内容                                                                                                                                                                                                                                                                                     |
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cli_record_av`           | `vrcpilot record -o <mp4>` の既定 (映像 + 音声) ファイル出力経路。外部 encoder を介さず直接 mp4 に書き出す。`ffprobe` のみ使用（ffmpeg pipe なし）で h264 video stream 1 本 + aac audio stream 1 本と duration を確認                                                                    |
 | `cli_record_audio_ffmpeg` | `vrcpilot record --audio` を 2 出力経路で検証: (A) `-o <wav>` 直接保存 → `wave.open` で 48 kHz / stereo / 16-bit + RMS dBFS を確認、(B) stdout の自己記述 MKV を `ffmpeg -i - -c:a pcm_s16le` にパイプして WAV 再エンコード → `ffprobe` で pcm_s16le / 48 kHz / stereo / duration を確認 |
 | `cli_record_video_ffmpeg` | `vrcpilot record --video` の stdout MKV を `ffmpeg` にパイプして `.mp4` に `-c:v copy`。`ffprobe` で video stream が 1 本、audio stream が 0 本であることを確認                                                                                                                          |
-| `cli_record_ffmpeg`       | `vrcpilot record` の既定 (映像 + 音声) `-o <mp4>` ファイル出力経路。stream-mode 版は `cli_record_video_ffmpeg` / `cli_record_audio_ffmpeg` がカバー                                                                                                                                      |
+| `cli_record_ffmpeg`       | `vrcpilot record` の既定 (映像 + 音声) stdout MKV を `ffmpeg -i - -c:v copy -c:a copy` にパイプして `.mp4` に remux。`ffprobe` で h264 video 1 本 + aac audio 1 本 + duration を確認。file-mode 版は `cli_record_av` がカバー                                                            |
 
 ## 実行時間の目安
 
