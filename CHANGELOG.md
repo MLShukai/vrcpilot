@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Targeting `0.3.0`. Adds first-class multi-instance VRChat support: every PID-dependent Python API and CLI subcommand now takes an explicit target PID, and `launch()` defaults to spawning the EAC-aware `launch.exe` wrapper directly (Windows: `launch.exe`, Linux: `umu-run launch.exe`) instead of going through Steam.
+## [0.3.0] - 2026-05-25
+
+First-class multi-instance VRChat support: every PID-dependent Python API and CLI subcommand now takes an explicit target PID, and `launch()` defaults to spawning the EAC-aware `launch.exe` wrapper directly (Windows: `launch.exe`, Linux: `umu-run launch.exe`) instead of going through Steam. Linux also gets a fix for the long-standing "first synthetic key / mouse event silently dropped" issue, by waiting for the kernel to propagate the freshly created `/dev/uinput` device to X11 / libinput listeners before emitting the first event.
 
 ### Breaking
 
@@ -159,4 +161,5 @@ First public release candidate. Validates the end-to-end publish pipeline before
 [0.2.0]: https://github.com/MLShukai/vrcpilot/compare/v0.2.0rc1...v0.2.0
 [0.2.0rc1]: https://github.com/MLShukai/vrcpilot/compare/v0.1.0...v0.2.0rc1
 [0.2.1]: https://github.com/MLShukai/vrcpilot/compare/v0.2.0...v0.2.1
-[unreleased]: https://github.com/MLShukai/vrcpilot/compare/v0.2.1...HEAD
+[0.3.0]: https://github.com/MLShukai/vrcpilot/compare/v0.2.1...v0.3.0
+[unreleased]: https://github.com/MLShukai/vrcpilot/compare/v0.3.0...HEAD
