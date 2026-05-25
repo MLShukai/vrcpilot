@@ -49,7 +49,7 @@ __all__ = [
 # enough for focus/unfocus probes that only need the window to exist,
 # but synthetic input scenarios race the world load otherwise; 45s
 # leaves headroom even on first-run shader compilation.
-WARMUP_SECONDS: float = 45.0
+WARMUP_SECONDS: float = 30
 
 #: Directory used by e2e scenarios to drop visual artifacts (PNGs).
 #:
