@@ -59,7 +59,7 @@ ______________________________________________________________________
 
 Use this for any normal release: a first minor (`0.2.0`), a subsequent minor (`0.3.0`), or an in-series patch (`0.2.1`). Hotfixes have their own track in [Section 3](#3-hotfix-release-checklist).
 
-Every minor release **must be rehearsed** with a release candidate first; see [Section 4](#4-rehearsal-protocol). The steps below are the post-rehearsal flow for the stable tag.
+Once the project hits `1.0.0`, every minor release **must be rehearsed** with a release candidate first; see [Section 4](#4-rehearsal-protocol). In the `0.x` series rehearsal is recommended but optional — while there are no production users, the cost of cutting `vX.Y.0` directly without an `rcN` is bounded, and the rehearsal can be skipped for small, scoped minors. The steps below are the post-rehearsal flow for the stable tag (and also the direct-to-stable flow when rehearsal is skipped).
 
 ### 2.1 Prepare the release commit
 
@@ -180,7 +180,7 @@ ______________________________________________________________________
 
 ## 4. Rehearsal protocol
 
-Every new minor (`X.Y.0`, including `0.1.0`) is rehearsed with a release candidate before its stable tag is pushed. The rehearsal exists to surface authentication, environment, tag-guard, and CHANGELOG-extraction problems against the *real* infrastructure — not a mock.
+From `1.0.0` onwards, every new minor (`X.Y.0`) is rehearsed with a release candidate before its stable tag is pushed. In the `0.x` series the rehearsal is recommended but not mandatory — while the user base is empty or experimental, the operational cost of skipping it (a botched `vX.Y.0` is recoverable by tagging `vX.Y.1` immediately) is acceptable, and small minors may go direct-to-stable. When you do run a rehearsal, it exists to surface authentication, environment, tag-guard, and CHANGELOG-extraction problems against the *real* infrastructure — not a mock.
 
 ### 4.1 Cut an `rcN` tag
 
