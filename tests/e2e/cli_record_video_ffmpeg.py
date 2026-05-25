@@ -19,8 +19,8 @@ Run with::
 
 VRChat is launched in Desktop mode at 1280x720 to match the other
 capture-related scenarios. The encoded mp4 is written to
-``_e2e_artifacts/cli_record_video_ffmpeg_<YYYYMMDD_HHMMSS>.mp4`` and a
-``ffprobe`` round-trip verifies the file is a valid h264 mp4 with
+``_e2e_artifacts/cli_record_video_ffmpeg/<YYYYMMDD_HHMMSS>/cli_record_video_ffmpeg.mp4``
+and a ``ffprobe`` round-trip verifies the file is a valid h264 mp4 with
 roughly the expected duration.
 
 The pipeline is wired with the standard "tee a Popen pipe" idiom: we
@@ -36,7 +36,6 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -94,9 +93,9 @@ def _scenario() -> None:
 
     _helpers.warmup()
 
-    _helpers.ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_path = _helpers.ARTIFACT_DIR / f"cli_record_video_ffmpeg_{stamp}.mp4"
+    out_path = (
+        _helpers.scenario_dir("cli_record_video_ffmpeg") / "cli_record_video_ffmpeg.mp4"
+    )
 
     # Matroska is self-describing, so ffmpeg picks codec/resolution/fps
     # out of the header. ``-c:v copy`` keeps the H.264 elementary

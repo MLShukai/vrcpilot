@@ -7,8 +7,8 @@ keyboard module across two angles a human can verify by eye:
   After launch the menu is hidden, so a single ``Key.ESCAPE`` press
   shows it; another press hides it again. Repeating the pair across
   4 alternating steps proves the call is idempotent (same as the
-  ``focus_unfocus`` pattern), and a screenshot is dropped after each
-  step under ``_e2e_artifacts/`` for review.
+  ``focus_unfocus`` pattern), and each step's screenshot lands at
+  ``_e2e_artifacts/keyboard/<YYYYMMDD_HHMMSS>/<step>.png`` for review.
 * **A modifier combo** is sandwiched between the toggle steps in two
   forms back-to-back: the explicit ``down(SHIFT_LEFT)`` ->
   ``press(A)`` -> ``up(SHIFT_LEFT)`` triple, and the one-shot variadic

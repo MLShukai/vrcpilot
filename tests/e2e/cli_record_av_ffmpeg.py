@@ -13,10 +13,10 @@ Run with::
 
 VRChat is launched in Desktop mode at 1280x720 to match the other
 capture-related scenarios. The recorded mp4 lands at
-``_e2e_artifacts/cli_record_av_<YYYYMMDD_HHMMSS>.mp4`` and a
-``ffprobe`` round-trip verifies exactly one h264 video stream and one
-aac audio stream, with the container duration within tolerance of
-the wall-clock duration.
+``_e2e_artifacts/cli_record_av_ffmpeg/<YYYYMMDD_HHMMSS>/cli_record_av.mp4``
+and a ``ffprobe`` round-trip verifies exactly one h264 video stream
+and one aac audio stream, with the container duration within
+tolerance of the wall-clock duration.
 """
 
 from __future__ import annotations
@@ -24,7 +24,6 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -81,9 +80,7 @@ def _scenario() -> None:
 
     _helpers.warmup()
 
-    _helpers.ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_path = _helpers.ARTIFACT_DIR / f"cli_record_av_{stamp}.mp4"
+    out_path = _helpers.scenario_dir("cli_record_av_ffmpeg") / "cli_record_av.mp4"
 
     # Neither --video nor --audio: both modalities are recorded into
     # the same mp4 container.

@@ -23,7 +23,7 @@ Run with::
 VRChat is launched in Desktop mode (``no_vr=True``) to match the other
 audio-related scenarios and so this works on machines without an HMD.
 Both step artifacts land in
-``_e2e_artifacts/cli_record_<step>_<YYYYMMDD_HHMMSS>.wav``.
+``_e2e_artifacts/cli_record_ffmpeg/<YYYYMMDD_HHMMSS>/cli_record_<step>.wav``.
 
 The Step B pipeline uses the standard "tee a Popen pipe" idiom: open
 ``ffmpeg`` first with ``stdin=PIPE``, hand its write-end to the
@@ -40,7 +40,6 @@ import math
 import subprocess
 import sys
 import wave
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -158,10 +157,10 @@ def _assert_wav_contract(path: Path, *, label: str) -> int:
     return n_frames
 
 
-def _step_a_wav_file(stamp: str) -> None:
+def _step_a_wav_file() -> None:
     """Drive ``vrcpilot record --audio -o <wav>`` and validate the saved
     file."""
-    out_path = _helpers.ARTIFACT_DIR / f"cli_record_wav_{stamp}.wav"
+    out_path = _helpers.scenario_dir("cli_record_ffmpeg") / "cli_record_wav.wav"
 
     cmd = [
         "uv",
@@ -210,7 +209,7 @@ def _step_a_wav_file(stamp: str) -> None:
         _helpers.log(f"[Step A] RMS = {rms_db:.2f} dBFS")
 
 
-def _step_b_stdout_ffmpeg(stamp: str) -> None:
+def _step_b_stdout_ffmpeg() -> None:
     """Drive ``vrcpilot record --audio | ffmpeg -i - -c:a pcm_s16le <wav>``.
 
     The MKV stream emitted by ``vrcpilot record --audio`` carries an
@@ -219,7 +218,7 @@ def _step_b_stdout_ffmpeg(stamp: str) -> None:
     of the assertions can reuse the WAV-file contract checks from
     Step A.
     """
-    out_path = _helpers.ARTIFACT_DIR / f"cli_record_pipe_{stamp}.wav"
+    out_path = _helpers.scenario_dir("cli_record_ffmpeg") / "cli_record_pipe.wav"
 
     ffmpeg_cmd = [
         "ffmpeg",
@@ -356,11 +355,8 @@ def _scenario() -> None:
 
     _helpers.warmup()
 
-    _helpers.ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    _step_a_wav_file(stamp)
-    _step_b_stdout_ffmpeg(stamp)
+    _step_a_wav_file()
+    _step_b_stdout_ffmpeg()
 
 
 def main() -> int:

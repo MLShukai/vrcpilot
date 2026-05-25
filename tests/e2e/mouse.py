@@ -10,9 +10,9 @@ foreground before the click lands.
 
 The pattern follows :mod:`tests.e2e.focus_unfocus`: alternating
 operations (move-left -> click, move-right -> click, etc.) so two
-back-to-back identical calls do not look like a no-op, and a
-screenshot per step is dropped under ``_e2e_artifacts/`` for
-review.
+back-to-back identical calls do not look like a no-op, and each
+step's screenshot lands at
+``_e2e_artifacts/mouse/<YYYYMMDD_HHMMSS>/<step>.png`` for review.
 
 Run with::
 

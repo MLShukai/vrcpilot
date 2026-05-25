@@ -17,7 +17,7 @@ Run with::
     just e2e-test screenshot
 
 The captured image is written to
-``_e2e_artifacts/screenshot_vrchat_<YYYYMMDD_HHMMSS>.png`` for the
+``_e2e_artifacts/screenshot/<YYYYMMDD_HHMMSS>/vrchat.png`` for the
 human or Claude Code to open and verify. The window geometry and the
 captured-at timestamp are also logged.
 """

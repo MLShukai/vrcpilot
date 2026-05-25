@@ -31,14 +31,13 @@ regression -- the WGC / X11 Composite paths capture the window region
 only).
 
 The captured video is written to
-``_e2e_artifacts/capture_<YYYYMMDD_HHMMSS>.mp4``.
+``_e2e_artifacts/capture/<YYYYMMDD_HHMMSS>/capture.mp4``.
 """
 
 from __future__ import annotations
 
 import sys
 import time
-from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -93,9 +92,7 @@ def _scenario() -> None:
 
     _helpers.warmup()
 
-    _helpers.ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_path = _helpers.ARTIFACT_DIR / f"capture_{stamp}.mp4"
+    out_path = _helpers.scenario_dir("capture") / "capture.mp4"
 
     _helpers.log(
         f"opening CaptureLoop(fps={_TARGET_FPS:.1f}) and recording for "
