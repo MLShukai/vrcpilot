@@ -10,7 +10,8 @@ VRChat is naturally in the foreground, so calling ``focus()`` first
 would not prove anything; starting with ``unfocus()`` makes the very
 first transition meaningful, and repeating the pair verifies the calls
 are idempotent. A screenshot is saved after each step under
-``_e2e_artifacts/`` for visual inspection.
+``_e2e_artifacts/focus_unfocus/<YYYYMMDD_HHMMSS>/<step>.png`` (e.g.
+``1_unfocus.png``) for visual inspection.
 
 Run with::
 

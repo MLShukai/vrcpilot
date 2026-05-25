@@ -68,11 +68,11 @@ uv run python tests/e2e/launch_terminate.py
 
 ### ウィンドウ・画面
 
-| 名前            | 内容                                                                                                                              |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `focus_unfocus` | `vrcpilot.focus()` / `unfocus()` を交互に呼び、各操作後の screenshot を `_e2e_artifacts/` へ保存して目視確認できるようにする      |
-| `screenshot`    | `vrcpilot.take_screenshot()` が VRChat ウィンドウのみを切り出していること (デスクトップ背景や他アプリが混入していないこと) を確認 |
-| `capture`       | `vrcpilot.CaptureLoop` を 30fps で駆動し、e2e ローカルの PyAV writer 経由で MP4 を保存しつつ per-frame interval を記録            |
+| 名前            | 内容                                                                                                                                                             |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `focus_unfocus` | `vrcpilot.focus()` / `unfocus()` を交互に呼び、各操作後の screenshot を `_e2e_artifacts/focus_unfocus/<YYYYMMDD_HHMMSS>/` 配下へ保存して目視確認できるようにする |
+| `screenshot`    | `vrcpilot.take_screenshot()` が VRChat ウィンドウのみを切り出していること (デスクトップ背景や他アプリが混入していないこと) を確認                                |
+| `capture`       | `vrcpilot.CaptureLoop` を 30fps で駆動し、e2e ローカルの PyAV writer 経由で MP4 を保存しつつ per-frame interval を記録                                           |
 
 ### 認識系
 
@@ -109,6 +109,14 @@ uv run python tests/e2e/launch_terminate.py
 
 各シナリオおよそ 30 秒前後。内訳は PID 検出 (~数秒) + warmup (15-20 秒) +
 terminate / cleanup (数秒) 程度。
+
+## アーティファクト出力レイアウト
+
+screenshot や録画などのアーティファクトは `_e2e_artifacts/<scenario>/<YYYYMMDD_HHMMSS>/<label>.<ext>`
+の形式で出力される。同じシナリオを複数回流すと、scenario ディレクトリ配下に
+複数の timestamp ディレクトリが並ぶため、過去の実行結果が上書きされない。
+1 回のシナリオ実行内で複数のアーティファクトを書き出す場合は、それらすべて
+が同じ timestamp ディレクトリにまとまる (各実行ごとに 1 ディレクトリ)。
 
 ## CLI 経路をどこまで e2e に置くか
 

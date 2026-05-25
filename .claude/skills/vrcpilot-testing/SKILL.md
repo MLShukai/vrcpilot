@@ -202,8 +202,8 @@ if not has_x11_display():
   パターンの例
 - スクリーンショットを残す場合は
   `_helpers.save_monitor_screenshot(scenario, label)` を使い、
-  `_e2e_artifacts/`（gitignore 済み）に PNG が保存される。Claude Code は
-  その PNG を Read で開いて目視確認できる
+  `_e2e_artifacts/<scenario>/<YYYYMMDD_HHMMSS>/<label>.png`（gitignore 済み）
+  に PNG が保存される。Claude Code はその PNG を Read で開いて目視確認できる
 
 Claude 自身が e2e を流す運用は [memory/feedback_e2e_run.md](../../../memory/feedback_e2e_run.md) を参照。
 

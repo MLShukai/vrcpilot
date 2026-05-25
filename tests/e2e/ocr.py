@@ -25,11 +25,11 @@ Run with::
 
     just e2e-test ocr
 
-Artifacts written to ``_e2e_artifacts/``:
+Artifacts written under ``_e2e_artifacts/ocr/<YYYYMMDD_HHMMSS>/``:
 
-- ``ocr_screenshot_<YYYYMMDD_HHMMSS>.png`` -- the menu screenshot
-- ``ocr_viz_<YYYYMMDD_HHMMSS>.png`` -- the same capture with detected
-  text boxes drawn over it; open this to verify the boxes look sane
+- ``screenshot.png`` -- the menu screenshot
+- ``viz.png`` -- the same capture with detected text boxes drawn over
+  it; open this to verify the boxes look sane
 """
 
 from __future__ import annotations
