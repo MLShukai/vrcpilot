@@ -64,6 +64,14 @@ class TestLaunchArgparse:
         ns = build_parser().parse_args(["launch", "--proton-path", str(proton)])
         assert ns.proton_path == proton
 
+    def test_profile_defaults_to_zero(self):
+        # The default ``launch`` invocation must map to the Steam-shared
+        # slot (Linux: ``compatdata/<app_id>/pfx``; Windows: VRChat's
+        # default profile) so an unflagged CLI run matches what
+        # ``--via-steam`` would do.
+        ns = build_parser().parse_args(["launch"])
+        assert ns.profile == 0
+
     def test_profile_zero_accepted(self):
         ns = build_parser().parse_args(["launch", "--profile", "0"])
         assert ns.profile == 0

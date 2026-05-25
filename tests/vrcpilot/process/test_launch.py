@@ -232,12 +232,21 @@ class TestValidateLaunchArgsCrossPlatform:
             )
 
     def test_via_steam_with_profile_rejected(self):
-        # ``--profile`` via Steam belongs in Steam launch options, not
+        # ``--profile>0`` via Steam belongs in Steam launch options, not
         # in vrcpilot's argv (double-specification risk).
         with pytest.raises(ValueError, match="direct-spawn"):
             validate_launch_args(
                 via_steam=True, wineprefix=None, proton_path=None, profile=2
             )
+
+    def test_via_steam_with_profile_zero_is_accepted(self):
+        # ``profile=0`` is the new default and aliases the Steam-launched
+        # slot on both platforms, so it must remain compatible with
+        # ``via_steam=True`` — otherwise the default-args ``launch()`` /
+        # ``launch(via_steam=True)`` calls would never validate.
+        validate_launch_args(
+            via_steam=True, wineprefix=None, proton_path=None, profile=0
+        )
 
 
 class TestValidateLaunchArgsLinux:
@@ -268,6 +277,33 @@ class TestValidateLaunchArgsLinux:
         validate_launch_args(
             via_steam=False, wineprefix=None, proton_path=None, profile=2
         )
+
+
+@pytest.mark.api_contract
+class TestPublicExceptionSurface:
+    """The new ``profile=0`` -> Steam compatdata wiring adds a dedicated
+    exception class, and the import path must stay stable for callers that want
+    to ``except`` it.
+
+    This is a public API contract pin (Hyrum's-law mitigation), not a
+    behaviour test: the class name, its inheritance, and its module
+    home are all promises to downstream users. Marked
+    ``api_contract`` so the rationale for asserting on otherwise-trivial
+    ``issubclass`` is explicit.
+    """
+
+    def test_VRChatSteamCompatdataNotFoundError_is_importable_from_process(self):
+        # ``vrcpilot.process`` is the documented re-export home for
+        # process-related exceptions. Callers should never need to
+        # reach into ``vrcpilot.process.errors`` or
+        # ``vrcpilot.process.launch`` to grab it.
+        from vrcpilot.process import VRChatSteamCompatdataNotFoundError
+
+        # ``except RuntimeError`` callers must keep working. The whole
+        # process exception family is rooted at ``RuntimeError`` (see
+        # ``VRChatNotRunningError`` / ``VRChatLauncherNotFoundError``),
+        # and this new sibling must follow the same convention.
+        assert issubclass(VRChatSteamCompatdataNotFoundError, RuntimeError)
 
 
 class TestValidateLaunchArgsWindows:

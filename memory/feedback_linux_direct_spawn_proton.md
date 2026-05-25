@@ -28,6 +28,15 @@ metadata:
 
 ## 仮想 prefix の話 (補足)
 
-GAMEID を渡さない結果、umu-launcher は `~/.local/share/umu/...` 配下に独自の wine prefix を初期化する。Steam の `compatdata/438100/pfx` とは別なので、VRChat のデータ (Saved/, AppData/LocalLow/VRChat) は **direct-spawn 経路と via_steam=True 経路で別の場所に作られる**。これは複数アカウント運用 (`--profile N`) と整合的な設計で、同一アカウントを direct-spawn と Steam で行き来したいユーザーは `--wineprefix /home/<user>/.local/share/Steam/steamapps/compatdata/438100/pfx` で明示する必要がある。
+GAMEID を渡さない結果、Linux direct-spawn の WINEPREFIX は **`profile` 引数**で 4 系統に分岐する (2026-05-25 以降):
+
+1. `--wineprefix=<path>` が明示されていれば最優先で使う (override)
+2. `profile=0` のとき: `<library>/steamapps/compatdata/438100/pfx` を自動マッピングし、Steam 経由起動と同一 wineprefix を共有する。同一アカウント・ログイン状態・SaveData を `--via-steam` と direct-spawn で行き来できる。pfx が未初期化なら `VRChatSteamCompatdataNotFoundError` を fail-fast (silent fallback なし)
+3. `profile >= 1` のとき: `$XDG_DATA_HOME/vrcpilot/profiles/<N>/wineprefix` に vrcpilot-managed prefix を自動生成 (複数アカウント運用)
+4. `profile=None` のとき: WINEPREFIX 未設定 (umu-launcher が `~/.local/share/umu/...` のデフォルト prefix を使う)
+
+つまり「Steam と direct-spawn で同一アカウントを使い回したい」要求は `--profile 0` で標準対応されている。`--wineprefix /home/<user>/.local/share/Steam/steamapps/compatdata/438100/pfx` の明示指定は依然 override として有効だが、通常は不要。
+
+詳細: \[\[linux-profile-zero-steam-share\]\]
 
 関連: \[\[memory/feedback_vrchat_cli_playbook.md\]\]

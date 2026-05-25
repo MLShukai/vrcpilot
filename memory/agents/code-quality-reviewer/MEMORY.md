@@ -9,3 +9,4 @@
 - [重複抽出のタイミング](feedback_dedupe_threshold.md) — 2 つ目を見て I/F が固まってから helper 化。extractor 固有 kwarg で肥大しそうなら 3 つ目まで待つ
 - [Producer/consumer exception planting needs same condition](feedback_producer_consumer_exception_race.md) — drain/listener が exception を slot に積むなら、書き込みは consumer が wait する Condition の内側で。check-then-wait は race
 - [hot-loop で resolve_pid 禁止 (focus=False)](feedback_hot_loop_no_resolve_pid.md) — controls/clipboard の focus=False 経路では ensure_target/resolve_pid を完全 skip。psutil.process_iter のコスト回避
+- [cross-module helper は `_` prefix を付けない](feedback_cross_module_helper_no_underscore.md) — pyright が reportPrivateUsage + reportUnusedFunction を同時に出す。非 `_` 命名 + `__all__` 非登録で両立

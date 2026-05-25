@@ -11,7 +11,11 @@ import os
 import shutil
 from pathlib import Path
 
-from .errors import UmuLauncherNotFoundError, VRChatDisplayNotAvailableError
+from .errors import (
+    UmuLauncherNotFoundError,
+    VRChatDisplayNotAvailableError,
+    VRChatSteamCompatdataNotFoundError,
+)
 
 
 def find_umu_launcher(override: Path | None = None) -> Path:
@@ -43,6 +47,26 @@ def find_umu_launcher(override: Path | None = None) -> Path:
     return Path(located)
 
 
+def steam_compatdata_pfx(launcher: Path, app_id: int) -> Path:
+    """Return the Steam-managed Proton prefix for VRChat as a path.
+
+    Assumes ``launcher`` is ``<library>/steamapps/common/VRChat/launch.exe``
+    (the standard layout :func:`vrcpilot.process.executable.find_vrchat_launcher`
+    returns). The Steam library root is recovered by stripping the three
+    intermediate directories (``steamapps/common/VRChat``) plus the
+    filename, and the prefix lives at
+    ``<library>/steamapps/compatdata/<app_id>/pfx``.
+
+    Path-only: existence is the caller's concern (the launch flow raises
+    :class:`VRChatSteamCompatdataNotFoundError` when missing).
+    """
+    # parents[3] strips launch.exe + VRChat + common + steamapps, leaving
+    # the library root. Equivalent to .parent.parent.parent.parent but
+    # the indexed form makes the "how many levels" claim self-checking.
+    library = launcher.parents[3]
+    return library / "steamapps" / "compatdata" / str(app_id) / "pfx"
+
+
 def profile_wineprefix(profile: int) -> Path:
     """Return the vrcpilot-managed ``$WINEPREFIX`` path for a profile slot.
 
@@ -52,6 +76,54 @@ def profile_wineprefix(profile: int) -> Path:
     """
     base = Path(os.environ.get("XDG_DATA_HOME") or "~/.local/share").expanduser()
     return base / "vrcpilot" / "profiles" / str(profile) / "wineprefix"
+
+
+def resolve_direct_spawn_wineprefix(
+    *,
+    launcher: Path,
+    app_id: int,
+    wineprefix: Path | None,
+    profile: int | None,
+) -> Path | None:
+    """Pick the ``$WINEPREFIX`` to export for a Linux direct-spawn run.
+
+    Encodes the priority order shared by :func:`vrcpilot.process.launch`:
+
+    1. Explicit ``wineprefix`` override wins unconditionally.
+    2. ``profile == 0`` reuses Steam's own ``compatdata/<app_id>/pfx``
+       so login state and SaveData line up with a ``--via-steam`` run.
+       Raises :class:`VRChatSteamCompatdataNotFoundError` (no silent
+       fallback to a fresh prefix) when that path does not exist yet.
+    3. ``profile >= 1`` maps to a vrcpilot-managed per-profile prefix
+       under :func:`profile_wineprefix`, creating the directory on
+       demand so umu-run can populate it.
+    4. ``profile is None`` (no prefix flag, no profile flag) returns
+       ``None`` -- the caller leaves ``$WINEPREFIX`` unset and umu-run
+       falls back to its default location.
+
+    Raises:
+        VRChatSteamCompatdataNotFoundError: ``profile == 0`` but the
+            Steam-managed prefix has not been initialised. The message
+            tells the user how to bootstrap it (run ``--via-steam``
+            once) or override (``--wineprefix=<path>``).
+    """
+    if wineprefix is not None:
+        return wineprefix
+    if profile == 0:
+        steam_pfx = steam_compatdata_pfx(launcher, app_id)
+        if not steam_pfx.is_dir():
+            raise VRChatSteamCompatdataNotFoundError(
+                "Steam-managed wineprefix for VRChat is missing: "
+                f"{steam_pfx}. Run `vrcpilot launch --via-steam` "
+                "once to initialise it, or pass --wineprefix=<path> "
+                "to override."
+            )
+        return steam_pfx
+    if profile is not None:
+        generated = profile_wineprefix(profile)
+        generated.mkdir(parents=True, exist_ok=True)
+        return generated
+    return None
 
 
 def preflight_linux_environment(*, via_steam: bool) -> None:

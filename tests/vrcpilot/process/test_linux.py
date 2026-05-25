@@ -24,6 +24,7 @@ from vrcpilot.process.linux import (  # noqa: E402
     find_umu_launcher,
     preflight_linux_environment,
     profile_wineprefix,
+    steam_compatdata_pfx,
 )
 
 
@@ -148,3 +149,68 @@ class TestProfileWineprefix:
         result = profile_wineprefix(0)
 
         assert result == tmp_path / "vrcpilot" / "profiles" / "0" / "wineprefix"
+
+
+class TestSteamCompatdataPfx:
+    """``steam_compatdata_pfx`` derives the Steam-managed Proton prefix path
+    from a VRChat ``launch.exe`` location.
+
+    Spec: ``profile=0`` on Linux opts into sharing the wineprefix that
+    Steam already manages for VRChat (so login state and SaveData line
+    up with a ``--via-steam`` run). The path layout that Steam uses is
+    ``<library>/steamapps/compatdata/<app_id>/pfx``, with the same
+    ``<library>`` root that hosts ``steamapps/common/VRChat/launch.exe``.
+    This helper is the pure path-derivation step of that lookup; the
+    existence check (and the resulting
+    :class:`VRChatSteamCompatdataNotFoundError`) happens at the call
+    site inside :func:`vrcpilot.process.launch`.
+    """
+
+    def test_derives_pfx_under_same_library_as_launcher(self, tmp_path: Path):
+        # The launcher lives at the canonical Steam-library layout
+        # ``<library>/steamapps/common/VRChat/launch.exe``. The Proton
+        # prefix Steam maintains for the same app sits sibling under
+        # ``<library>/steamapps/compatdata/<app_id>/pfx``. Both legs
+        # share the same ``<library>`` root, which is what makes
+        # profile=0 (= "reuse Steam's prefix") work without the user
+        # spelling the prefix out.
+        library = tmp_path / "SteamLibrary"
+        launcher = library / "steamapps" / "common" / "VRChat" / "launch.exe"
+
+        result = steam_compatdata_pfx(launcher, 438100)
+
+        assert result == library / "steamapps" / "compatdata" / "438100" / "pfx"
+
+    def test_app_id_is_stringified_in_path(self, tmp_path: Path):
+        # ``<app_id>`` becomes a path component, so it must render as
+        # the decimal string ``"438100"`` rather than e.g. ``b'438100'``
+        # or a Path-coerced form.
+        library = tmp_path / "SteamLibrary"
+        launcher = library / "steamapps" / "common" / "VRChat" / "launch.exe"
+
+        result = steam_compatdata_pfx(launcher, 12345)
+
+        assert result.parent.name == "12345"
+        assert result.name == "pfx"
+
+    def test_does_not_check_existence(self, tmp_path: Path):
+        # Pure path-derivation: passing a launcher path that does not
+        # exist must NOT raise. The existence gate (and the resulting
+        # ``VRChatSteamCompatdataNotFoundError``) belongs at the
+        # ``launch()`` call site, not here -- tests at that layer want
+        # to drive both "prefix present" and "prefix missing" branches
+        # without having to fabricate a launcher first.
+        missing_launcher = (
+            tmp_path / "nonexistent" / "steamapps" / "common" / "VRChat" / "launch.exe"
+        )
+        assert not missing_launcher.exists()
+
+        result = steam_compatdata_pfx(missing_launcher, 438100)
+
+        assert result == (
+            tmp_path / "nonexistent" / "steamapps" / "compatdata" / "438100" / "pfx"
+        )
+        # The returned path is also non-existent: the function does not
+        # create it, so a caller can probe ``is_dir()`` to decide
+        # whether to fail fast.
+        assert not result.exists()
