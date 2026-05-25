@@ -1,38 +1,24 @@
-"""E2E scenario: ``vrcpilot record`` (default AV) piped into ``ffmpeg``.
+"""E2E scenario: ``vrcpilot record`` in default (video+audio) file mode.
 
-Validates the Matroska self-describing pipe contract for the default
-(video + audio) code path of the unified ``vrcpilot record`` CLI:
-with neither ``--video`` nor ``--audio`` and no ``-o``, the command
-writes a Matroska (MKV) byte stream to stdout carrying both an
-H.264 video track and an AAC audio track. Because Matroska carries
-codec, resolution, frame-rate, pixel-format and audio parameters in
-its own header, ``ffmpeg -i - -c:v copy -c:a copy <out>.mp4`` just
-remuxes the two elementary streams straight into a fresh ``.mp4``
-container — no transcoding, no extra rawvideo / framerate flags on
-the ffmpeg side.
-
-This is the AV counterpart to the modality-specific stream-mode
-scenarios :mod:`cli_record_video_ffmpeg` and
-:mod:`cli_record_audio_ffmpeg`; the file-mode AV path (``-o
-<path.mp4>``, no external encoder) is covered by :mod:`cli_record_av`.
+Validates the ``--video`` / ``--audio``-both-absent code path of the
+unified ``vrcpilot record`` CLI: with neither flag set and ``-o
+<path.mp4>`` provided, the command writes H.264 video and AAC audio
+into a single ``.mp4`` file directly (no external encoder in the
+pipeline). This scenario exercises the file-mode side only — the
+stream-mode "pipe into ffmpeg" equivalents live in
+:mod:`cli_record_ffmpeg` (AV), :mod:`cli_record_video_ffmpeg`
+(video-only) and :mod:`cli_record_audio_ffmpeg` (audio-only).
 
 Run with::
 
-    just e2e-test cli_record_ffmpeg
+    just e2e-test cli_record_av
 
 VRChat is launched in Desktop mode at 1280x720 to match the other
-capture-related scenarios. The remuxed mp4 lands at
-``_e2e_artifacts/cli_record_ffmpeg/<YYYYMMDD_HHMMSS>/cli_record_ffmpeg.mp4``
+capture-related scenarios. The recorded mp4 lands at
+``_e2e_artifacts/cli_record_av/<YYYYMMDD_HHMMSS>/cli_record_av.mp4``
 and a ``ffprobe`` round-trip verifies exactly one h264 video stream
 and one aac audio stream, with the container duration within
 tolerance of the wall-clock duration.
-
-The pipeline is wired with the standard "tee a Popen pipe" idiom: we
-open ``ffmpeg`` first with ``stdin=PIPE``, hand its write-end to the
-``vrcpilot record`` Popen as its ``stdout``, then close our own
-reference to ``ffmpeg.stdin`` so ``vrcpilot`` becomes the sole writer.
-When the recording duration elapses ``vrcpilot`` exits, the pipe sees
-EOF, and ``ffmpeg`` flushes and exits cleanly.
 """
 
 from __future__ import annotations
@@ -53,14 +39,13 @@ import _helpers  # noqa: E402
 #: container duration.
 _DURATION_SECONDS: float = 5.0
 
-#: Target frame rate stored in the MKV header by ``vrcpilot record``
-#: and faithfully copied to the mp4 by ffmpeg.
+#: Target frame rate stored in the mp4 container.
 _TARGET_FPS: float = 30.0
 
-#: Tolerance around ``_DURATION_SECONDS`` when checking the remuxed
-#: mp4's container duration. Wide enough to absorb worker-thread
-#: warm-up jitter and the final partial-frame flush, narrow enough to
-#: catch a "ffmpeg never received a frame" regression.
+#: Tolerance around ``_DURATION_SECONDS`` when checking the mp4's
+#: container duration. Wide enough to absorb worker-thread warm-up
+#: jitter and the final partial-frame flush, narrow enough to catch a
+#: "vrcpilot never recorded anything" regression.
 _DURATION_TOLERANCE_SECONDS: float = 1.5
 
 
@@ -97,29 +82,11 @@ def _scenario() -> None:
 
     _helpers.warmup()
 
-    out_path = _helpers.scenario_dir("cli_record_ffmpeg") / "cli_record_ffmpeg.mp4"
+    out_path = _helpers.scenario_dir("cli_record_av") / "cli_record_av.mp4"
 
-    # Matroska is self-describing, so ffmpeg picks codecs/resolution/fps
-    # out of the header. ``-c:v copy -c:a copy`` keeps both the H.264
-    # video and AAC audio elementary streams intact instead of
-    # re-encoding.
-    ffmpeg_cmd = [
-        "ffmpeg",
-        "-y",
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-i",
-        "-",
-        "-c:v",
-        "copy",
-        "-c:a",
-        "copy",
-        str(out_path),
-    ]
-    # Neither --video nor --audio: both modalities are streamed into
-    # the same MKV pipe.
-    vrcpilot_cmd = [
+    # Neither --video nor --audio: both modalities are recorded into
+    # the same mp4 container.
+    cmd = [
         "uv",
         "run",
         "vrcpilot",
@@ -128,47 +95,28 @@ def _scenario() -> None:
         f"{_TARGET_FPS}",
         "--duration",
         f"{_DURATION_SECONDS}",
+        "-o",
+        str(out_path),
     ]
-    _helpers.log(f"$ {' '.join(vrcpilot_cmd)} | {' '.join(ffmpeg_cmd)}")
+    _helpers.log(f"$ {' '.join(cmd)}")
 
-    ffmpeg = subprocess.Popen(
-        ffmpeg_cmd,
-        stdin=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    assert ffmpeg.stdin is not None  # for type narrowing
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if result.stderr.strip():
+        _helpers.log(f"  vrcpilot stderr: {result.stderr.strip()}")
+    assert (
+        result.returncode == 0
+    ), f"vrcpilot record exit code: expected 0, got {result.returncode}"
 
-    vrc = subprocess.Popen(
-        vrcpilot_cmd,
-        stdout=ffmpeg.stdin,
-        stderr=subprocess.PIPE,
-    )
+    stdout_line = result.stdout.strip()
+    expected_line = str(out_path.resolve())
+    assert (
+        stdout_line == expected_line
+    ), f"stdout: expected exactly {expected_line!r}, got {stdout_line!r}"
 
-    # Hand sole ownership of the write-end to vrcpilot. Without this
-    # close(), ffmpeg's stdin would never see EOF after vrcpilot exits.
-    ffmpeg.stdin.close()
-
-    vrc_stderr = vrc.stderr.read() if vrc.stderr is not None else b""
-    vrc_rc = vrc.wait()
-    ffmpeg_stderr = ffmpeg.stderr.read() if ffmpeg.stderr is not None else b""
-    ffmpeg_rc = ffmpeg.wait()
-
-    if vrc_stderr:
-        _helpers.log(
-            f"  vrcpilot stderr: {vrc_stderr.decode(errors='replace').strip()}"
-        )
-    if ffmpeg_stderr:
-        _helpers.log(
-            f"  ffmpeg stderr: {ffmpeg_stderr.decode(errors='replace').strip()}"
-        )
-
-    assert vrc_rc == 0, f"vrcpilot record exit code: expected 0, got {vrc_rc}"
-    assert ffmpeg_rc == 0, f"ffmpeg exit code: expected 0, got {ffmpeg_rc}"
-
-    assert out_path.exists(), f"ffmpeg did not write {out_path}"
+    assert out_path.exists(), f"vrcpilot did not write {out_path}"
     size = out_path.stat().st_size
     assert size > 0, f"output mp4 is empty: {out_path}"
-    _helpers.log(f"saved remuxed av mp4: {out_path} ({size} bytes)")
+    _helpers.log(f"saved av mp4: {out_path} ({size} bytes)")
 
     info = _ffprobe_format(out_path)
     streams_raw: Any = info.get("streams", [])
@@ -221,7 +169,7 @@ def _scenario() -> None:
 
 
 def main() -> int:
-    return _helpers.run_scenario("cli_record_ffmpeg", _scenario)
+    return _helpers.run_scenario("cli_record_av", _scenario)
 
 
 if __name__ == "__main__":
