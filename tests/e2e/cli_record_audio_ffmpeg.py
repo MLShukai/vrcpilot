@@ -18,12 +18,12 @@ record`` CLI:
 
 Run with::
 
-    just e2e-test cli_record_ffmpeg
+    just e2e-test cli_record_audio_ffmpeg
 
 VRChat is launched in Desktop mode (``no_vr=True``) to match the other
 audio-related scenarios and so this works on machines without an HMD.
 Both step artifacts land in
-``_e2e_artifacts/cli_record_ffmpeg/<YYYYMMDD_HHMMSS>/cli_record_<step>.wav``.
+``_e2e_artifacts/cli_record_audio_ffmpeg/<YYYYMMDD_HHMMSS>/cli_record_<step>.wav``.
 
 The Step B pipeline uses the standard "tee a Popen pipe" idiom: open
 ``ffmpeg`` first with ``stdin=PIPE``, hand its write-end to the
@@ -160,7 +160,7 @@ def _assert_wav_contract(path: Path, *, label: str) -> int:
 def _step_a_wav_file() -> None:
     """Drive ``vrcpilot record --audio -o <wav>`` and validate the saved
     file."""
-    out_path = _helpers.scenario_dir("cli_record_ffmpeg") / "cli_record_wav.wav"
+    out_path = _helpers.scenario_dir("cli_record_audio_ffmpeg") / "cli_record_wav.wav"
 
     cmd = [
         "uv",
@@ -218,7 +218,7 @@ def _step_b_stdout_ffmpeg() -> None:
     of the assertions can reuse the WAV-file contract checks from
     Step A.
     """
-    out_path = _helpers.scenario_dir("cli_record_ffmpeg") / "cli_record_pipe.wav"
+    out_path = _helpers.scenario_dir("cli_record_audio_ffmpeg") / "cli_record_pipe.wav"
 
     ffmpeg_cmd = [
         "ffmpeg",
@@ -360,7 +360,7 @@ def _scenario() -> None:
 
 
 def main() -> int:
-    return _helpers.run_scenario("cli_record_ffmpeg", _scenario)
+    return _helpers.run_scenario("cli_record_audio_ffmpeg", _scenario)
 
 
 if __name__ == "__main__":

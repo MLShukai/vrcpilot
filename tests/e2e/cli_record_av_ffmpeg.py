@@ -5,7 +5,7 @@ unified ``vrcpilot record`` CLI: with neither flag set, the command
 records H.264 video and AAC audio into a single ``.mp4`` file (or
 into a MKV stdout stream when ``-o`` is omitted). This scenario
 exercises the file-mode side; for the stream-mode equivalents see
-:mod:`cli_record_video_ffmpeg` and :mod:`cli_record_ffmpeg`.
+:mod:`cli_record_video_ffmpeg` and :mod:`cli_record_audio_ffmpeg`.
 
 Run with::
 
