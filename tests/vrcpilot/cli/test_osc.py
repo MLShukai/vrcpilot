@@ -25,11 +25,47 @@ import pytest
 from pytest_mock import MockerFixture
 from pythonosc.dispatcher import Dispatcher
 from pythonosc.osc_server import BlockingOSCUDPServer
+from pythonosc.udp_client import SimpleUDPClient
 
 from vrcpilot.cli import main
 from vrcpilot.cli.osc import AXIS_NAMES, HOLD_NAMES, TAP_NAMES
 from vrcpilot.osc import OscSender
 from vrcpilot.osc.controller import InputController
+
+# --- Warmup tuning constants -------------------------------------------------
+# Windows loopback UDP exhibits a "first-packet drop" on freshly bound
+# ephemeral ports: the kernel / Windows Filtering Platform initialises
+# packet-inspection state on the first inbound datagram and silently
+# drops it ~100% of the time on some hosts. Subsequent packets flow
+# normally as long as the destination socket stays warm.
+#
+# To keep every CLI test deterministic the recorder fires its own OSC
+# datagrams at itself until ``_WARMUP_HITS_REQUIRED`` consecutive
+# packets round-trip, then clears the buffer so the test body sees a
+# clean slate. One observed packet is not enough on its own: under load
+# Windows can intermittently drop the *second* packet too when source
+# / destination flow state is still cold, so we require two observed
+# datagrams before declaring the path open.
+#
+# - _WARMUP_ADDRESS: distinct from any production OSC address; the
+#   buffer is cleared before yielding so warmup never leaks into
+#   ``self.sent``, but the distinct name aids debugging if it ever did.
+# - _WARMUP_HITS_REQUIRED: how many warmup packets must be observed
+#   before considering the recorder ready. Two observed packets is
+#   empirically enough; raising further only slows fixture setup.
+# - _WARMUP_ATTEMPTS: hard cap on how many packets we will send. Sized
+#   for the "first 1-2 drop, then they flow" pattern with generous
+#   slack for slow / loaded hosts. The total budget is
+#   ``_WARMUP_ATTEMPTS * _WARMUP_POLL_TIMEOUT`` (~3 s) of wall clock.
+# - _WARMUP_POLL_TIMEOUT: per-attempt wait. Loopback delivery is
+#   sub-ms when it works at all, so 300 ms is generous.
+# - _WARMUP_POLL_INTERVAL: how often we re-check ``self.sent`` inside
+#   one attempt. 10 ms matches ``wait_for_message_count``.
+_WARMUP_ADDRESS = "/__warmup__"
+_WARMUP_HITS_REQUIRED = 2
+_WARMUP_ATTEMPTS = 10
+_WARMUP_POLL_TIMEOUT = 0.3
+_WARMUP_POLL_INTERVAL = 0.01
 
 
 class OscRecorder:
@@ -49,6 +85,7 @@ class OscRecorder:
         self._server = BlockingOSCUDPServer(("127.0.0.1", 0), self._dispatcher)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
+        self._warmup()
 
     @property
     def port(self) -> int:
@@ -57,6 +94,40 @@ class OscRecorder:
 
     def _record(self, address: str, *args: object) -> None:
         self.sent.append((address, tuple(args)))
+
+    def _warmup(self) -> None:
+        """Force-open the loopback UDP path before yielding to the test.
+
+        See the module-level constants for the rationale: Windows can
+        drop the first one or two datagrams on a freshly bound
+        ephemeral port. We send OSC packets at ourselves until
+        :data:`_WARMUP_HITS_REQUIRED` datagrams round-trip, then clear
+        :attr:`sent` so the test body sees an empty buffer.
+
+        Raises:
+            RuntimeError: All warmup attempts elapsed without enough
+                datagrams being observed. The recorder is unusable at
+                that point, so failing loudly is preferable to silently
+                producing flaky tests.
+        """
+        client = SimpleUDPClient("127.0.0.1", self.port)
+        try:
+            for _ in range(_WARMUP_ATTEMPTS):
+                client.send_message(_WARMUP_ADDRESS, 1)
+                deadline = time.monotonic() + _WARMUP_POLL_TIMEOUT
+                while time.monotonic() < deadline:
+                    if len(self.sent) >= _WARMUP_HITS_REQUIRED:
+                        self.sent.clear()
+                        return
+                    time.sleep(_WARMUP_POLL_INTERVAL)
+            raise RuntimeError(
+                "OscRecorder warmup failed: only observed "
+                f"{len(self.sent)}/{_WARMUP_HITS_REQUIRED} loopback "
+                f"datagrams after {_WARMUP_ATTEMPTS} attempts of "
+                f"{_WARMUP_POLL_TIMEOUT}s each on port {self.port}"
+            )
+        finally:
+            client.close()
 
     def wait_for_message_count(self, count: int, timeout: float = 2.0) -> None:
         """Block until :attr:`sent` reaches ``count`` messages or timeout.
