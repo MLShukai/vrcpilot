@@ -41,6 +41,20 @@ class UmuLauncherNotFoundError(RuntimeError):
     """Raised when Linux direct-spawn cannot find ``umu-run`` on PATH."""
 
 
+class VRChatSteamCompatdataNotFoundError(RuntimeError):
+    """Raised on Linux + direct-spawn + ``profile=0`` when the Steam-managed
+    ``compatdata/<app_id>/pfx`` directory does not exist.
+
+    ``profile=0`` opts into sharing the wineprefix that Steam itself uses
+    for VRChat (so the launched session sees the same login / SaveData as a
+    ``--via-steam`` run). That prefix only materialises after Steam has
+    launched VRChat at least once; before then the path simply does not
+    exist. We fail fast instead of silently falling back to a fresh prefix
+    so the user is told to either run ``--via-steam`` once or pass
+    ``--wineprefix`` explicitly.
+    """
+
+
 class VRChatDisplayNotAvailableError(RuntimeError):
     """Raised when ``launch()`` (direct-spawn) is invoked on Linux without a
     graphical display attached.

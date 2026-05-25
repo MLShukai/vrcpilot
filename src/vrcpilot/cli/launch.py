@@ -23,6 +23,7 @@ from vrcpilot.process import (
     VRChatAlreadyRunningError,
     VRChatDisplayNotAvailableError,
     VRChatLauncherNotFoundError,
+    VRChatSteamCompatdataNotFoundError,
     launch,
 )
 from vrcpilot.steam import SteamNotFoundError, SteamNotRunningError
@@ -103,13 +104,15 @@ def register(subparsers: SubParsersAction) -> None:
     launch_parser.add_argument(
         "--profile",
         type=_profile_value,
-        default=None,
+        default=0,
         metavar="N",
         help=(
             "Pass --profile=N to VRChat (separates SaveData / cache). "
-            "Non-negative integer. On Linux additionally maps to a "
-            "vrcpilot-managed WINEPREFIX (overridden by --wineprefix). "
-            "Not compatible with --via-steam."
+            "Non-negative integer; defaults to 0 so an unflagged launch "
+            "matches a --via-steam run (same account). On Linux "
+            "--profile=0 shares the Steam-managed wineprefix; --profile>0 "
+            "maps to a vrcpilot-managed WINEPREFIX (overridden by "
+            "--wineprefix). --profile>0 is not compatible with --via-steam."
         ),
     )
     launch_parser.add_argument(
@@ -176,9 +179,10 @@ def run(args: argparse.Namespace) -> int:
     * 0: success (PID printed on stdout) or wait was skipped
     * 1: wait timed out without observing a new PID
     * 2: Steam / ``launch.exe`` / ``umu-run`` not found, invalid flag
-      combination, or Linux pre-flight failed (no
+      combination, Linux pre-flight failed (no
       ``DISPLAY`` / ``WAYLAND_DISPLAY`` for direct-spawn, or Steam
-      client not running for ``--via-steam``)
+      client not running for ``--via-steam``), or ``--profile=0`` on
+      Linux without an initialised Steam compatdata prefix
     * 3: :class:`VRChatAlreadyRunningError` (currently only reachable
       via the ``--via-steam`` route)
     """
@@ -214,6 +218,7 @@ def run(args: argparse.Namespace) -> int:
         UmuLauncherNotFoundError,
         VRChatDisplayNotAvailableError,
         VRChatLauncherNotFoundError,
+        VRChatSteamCompatdataNotFoundError,
     ) as exc:
         print(f"vrcpilot: {exc}", file=sys.stderr)
         return 2

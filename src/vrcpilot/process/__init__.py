@@ -9,6 +9,7 @@ from .errors import (
     VRChatLauncherNotFoundError,
     VRChatMultipleInstancesError,
     VRChatNotRunningError,
+    VRChatSteamCompatdataNotFoundError,
 )
 from .launch import (
     VRCHAT_STEAM_APP_ID,
@@ -48,6 +49,7 @@ __all__ = [
     "VRChatLauncherNotFoundError",
     "VRChatMultipleInstancesError",
     "VRChatNotRunningError",
+    "VRChatSteamCompatdataNotFoundError",
     "wait_for_no_pid",
     "wait_for_pid",
 ]

@@ -43,21 +43,24 @@ import _helpers  # noqa: E402
 # ``$XDG_DATA_HOME/vrcpilot/profiles/<N>/wineprefix`` on first use. That
 # initial Wine/Proton boot can take well over the default 30 s PID wait,
 # so allow more headroom; subsequent runs hit the cached prefix and
-# return quickly.
+# return quickly. ``profile=0`` is deliberately avoided here because on
+# Linux it points at the Steam-managed ``compatdata/438100/pfx``, which
+# is the *shared* prefix rather than an isolated one — this scenario is
+# about isolation, so we use slots 1 and 2.
 _LAUNCH_WAIT_TIMEOUT: float = 180.0
 
 
 def _scenario() -> None:
-    _helpers.log("launching profile=0 (no_vr=True)")
-    pid_a = vrcpilot.launch(profile=0, no_vr=True, wait_timeout=_LAUNCH_WAIT_TIMEOUT)
-    assert pid_a is not None, "profile=0 launch did not observe a PID before timeout"
-    _helpers.log(f"profile=0 PID = {pid_a}")
-
     _helpers.log("launching profile=1 (no_vr=True)")
-    pid_b = vrcpilot.launch(profile=1, no_vr=True, wait_timeout=_LAUNCH_WAIT_TIMEOUT)
-    assert pid_b is not None, "profile=1 launch did not observe a PID before timeout"
-    assert pid_b != pid_a, f"profile=1 returned the same PID as profile=0: {pid_b}"
-    _helpers.log(f"profile=1 PID = {pid_b}")
+    pid_a = vrcpilot.launch(profile=1, no_vr=True, wait_timeout=_LAUNCH_WAIT_TIMEOUT)
+    assert pid_a is not None, "profile=1 launch did not observe a PID before timeout"
+    _helpers.log(f"profile=1 PID = {pid_a}")
+
+    _helpers.log("launching profile=2 (no_vr=True)")
+    pid_b = vrcpilot.launch(profile=2, no_vr=True, wait_timeout=_LAUNCH_WAIT_TIMEOUT)
+    assert pid_b is not None, "profile=2 launch did not observe a PID before timeout"
+    assert pid_b != pid_a, f"profile=2 returned the same PID as profile=1: {pid_b}"
+    _helpers.log(f"profile=2 PID = {pid_b}")
 
     # Single warmup after both are alive -- launch() already waited for
     # each PID to exist, so this only buys time for both processes to
