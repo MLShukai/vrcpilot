@@ -37,6 +37,7 @@ __all__ = [
     "run_scenario",
     "save_image",
     "save_monitor_screenshot",
+    "scenario_dir",
     "wait_for_no_pid",
     "wait_for_pid",
     "warmup",
@@ -52,17 +53,68 @@ WARMUP_SECONDS: float = 45.0
 
 #: Directory used by e2e scenarios to drop visual artifacts (PNGs).
 #:
-#: Located at ``<repo>/_e2e_artifacts/`` and gitignored. Scenarios may
-#: write directly with :func:`save_monitor_screenshot` /
-#: :func:`save_image`, or read this constant when they need a custom
-#: filename pattern. The directory is created lazily by the helpers
-#: themselves, so callers do not need to ensure existence first.
+#: Located at ``<repo>/_e2e_artifacts/`` and gitignored. The preferred
+#: way to write artifacts is via :func:`scenario_dir` (or the
+#: :func:`save_monitor_screenshot` / :func:`save_image` wrappers that
+#: build on it), which nests outputs as
+#: ``_e2e_artifacts/<scenario>/<YYYYMMDD_HHMMSS>/<file>``. The constant
+#: is retained for back-compat and for the rare case where a scenario
+#: needs to compute paths outside the scenario/datetime layout. The
+#: directory is created lazily by the helpers themselves, so callers do
+#: not need to ensure existence first.
 ARTIFACT_DIR: Path = Path(__file__).resolve().parents[2] / "_e2e_artifacts"
+
+#: Process-scoped cache mapping scenario name -> resolved output dir.
+#:
+#: Populated lazily by :func:`scenario_dir`. The cache lives for the
+#: lifetime of the Python process, so repeated calls from within a
+#: single scenario reuse the same timestamp. ``tests/e2e/all.py``
+#: launches each scenario in its own subprocess, which means each
+#: scenario invocation starts with an empty cache and therefore gets a
+#: fresh timestamped directory.
+_SCENARIO_DIRS: dict[str, Path] = {}
 
 
 def log(msg: str) -> None:
     stamp = datetime.now().strftime("%H:%M:%S")
     print(f"[{stamp}] {msg}", flush=True)
+
+
+def scenario_dir(scenario: str) -> Path:
+    """Return the per-run output directory for *scenario*, creating it once.
+
+    On the first call for a given *scenario* name in this Python
+    process, capture the current wall-clock as ``YYYYMMDD_HHMMSS``,
+    build ``ARTIFACT_DIR / scenario / <stamp>``, ``mkdir`` it with
+    ``parents=True, exist_ok=True``, and cache the result. Subsequent
+    calls for the same *scenario* name return the cached path unchanged
+    so every artifact written by one scenario run lands in the same
+    timestamped directory. Different *scenario* names get independent
+    timestamps.
+
+    ``tests/e2e/all.py`` runs each scenario in its own subprocess, so a
+    fresh Python process means a fresh cache, which means each scenario
+    invocation gets its own ``<YYYYMMDD_HHMMSS>`` directory
+    automatically — no per-run reset is required.
+
+    Callers do not need to ``mkdir`` the returned path themselves; the
+    helper does it on first use.
+
+    Args:
+        scenario: Scenario identifier used as the first path segment
+            (e.g. ``"capture"``, ``"focus_unfocus"``).
+
+    Returns:
+        Absolute :class:`~pathlib.Path` to the per-run output directory.
+    """
+    cached = _SCENARIO_DIRS.get(scenario)
+    if cached is not None:
+        return cached
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out = ARTIFACT_DIR / scenario / stamp
+    out.mkdir(parents=True, exist_ok=True)
+    _SCENARIO_DIRS[scenario] = out
+    return out
 
 
 def ensure_no_vrchat() -> None:
@@ -101,18 +153,18 @@ def save_monitor_screenshot(scenario: str, label: str) -> Path:
     The save location is also emitted via :func:`log`.
 
     Args:
-        scenario: Scenario identifier used as a filename prefix to keep
-            artifacts grouped per script (e.g. ``"focus_unfocus"``).
+        scenario: Scenario identifier used as the per-scenario
+            directory name (e.g. ``"focus_unfocus"``).
         label: Step name within the scenario (e.g. ``"focus"``,
-            ``"unfocus"``); becomes the second filename segment.
+            ``"unfocus"``); becomes the file name.
 
     Returns:
-        Absolute :class:`~pathlib.Path` to the saved PNG. The filename
-        pattern is ``{scenario}_{label}_{YYYYMMDD_HHMMSS}.png``.
+        Absolute :class:`~pathlib.Path` to the saved PNG. The output
+        path is ``_e2e_artifacts/<scenario>/<YYYYMMDD_HHMMSS>/{label}.png``;
+        the timestamp segment is shared by every artifact written by
+        the same scenario run (see :func:`scenario_dir`).
     """
-    ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    path = ARTIFACT_DIR / f"{scenario}_{label}_{stamp}.png"
+    path = scenario_dir(scenario) / f"{label}.png"
     with mss.mss() as sct:
         img = sct.grab(sct.monitors[0])
     mss.tools.to_png(img.rgb, img.size, output=str(path))
@@ -127,25 +179,25 @@ def save_image(scenario: str, label: str, image: Image.Image) -> Path:
     whole desktop with mss, while this one persists an image the
     scenario already has in hand (e.g. a ``vrcpilot.Capture`` frame
     converted via ``Image.fromarray``, or a
-    ``vrcpilot.take_screenshot()`` result). Both share the same naming
-    convention so artifacts from a single scenario sort together
-    chronologically.
+    ``vrcpilot.take_screenshot()`` result). Both share the same
+    ``scenario/<YYYYMMDD_HHMMSS>/`` layout so artifacts from a single
+    scenario run group together under one timestamped directory.
 
     Args:
-        scenario: Scenario identifier used as filename prefix
-            (e.g. ``"capture"``).
+        scenario: Scenario identifier used as the per-scenario
+            directory name (e.g. ``"capture"``).
         label: Step name within the scenario
-            (e.g. ``"first"``, ``"last"``).
+            (e.g. ``"first"``, ``"last"``); becomes the file name.
         image: Image to save. Format is inferred from the ``.png``
             suffix.
 
     Returns:
-        Absolute :class:`~pathlib.Path` to the saved PNG. The pattern
-        is ``{scenario}_{label}_{YYYYMMDD_HHMMSS}.png``.
+        Absolute :class:`~pathlib.Path` to the saved PNG. The output
+        path is ``_e2e_artifacts/<scenario>/<YYYYMMDD_HHMMSS>/{label}.png``;
+        the timestamp segment is shared by every artifact written by
+        the same scenario run (see :func:`scenario_dir`).
     """
-    ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out = ARTIFACT_DIR / f"{scenario}_{label}_{stamp}.png"
+    out = scenario_dir(scenario) / f"{label}.png"
     image.save(out)
     return out
 

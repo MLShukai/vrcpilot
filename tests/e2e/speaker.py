@@ -23,7 +23,7 @@ Run with::
 
 VRChat is launched in Desktop mode with ``no_vr=True`` so the scenario
 can run on machines without an HMD. The recording is written to
-``_e2e_artifacts/speaker_<YYYYMMDD_HHMMSS>.wav``.
+``_e2e_artifacts/speaker/<YYYYMMDD_HHMMSS>/speaker.wav``.
 
 NOTE: on this first pass the scenario does not assert any RMS
 threshold — VRChat's default world audio level varies between
@@ -38,7 +38,6 @@ import math
 import sys
 import time
 import wave
-from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -125,9 +124,7 @@ def _scenario() -> None:
 
     _helpers.warmup()
 
-    _helpers.ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_path = _helpers.ARTIFACT_DIR / f"speaker_{stamp}.wav"
+    out_path = _helpers.scenario_dir("speaker") / "speaker.wav"
 
     _helpers.log(
         f"opening SpeakerLoop(chunk_seconds={_CHUNK_SECONDS:.3f}) and recording "
