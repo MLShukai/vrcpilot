@@ -109,22 +109,30 @@ class FakeSpeaker:
 class FakeSpeakerLoop:
     """Stand-in for :class:`vrcpilot.speaker.SpeakerLoop`.
 
-    Replaces the real loop in CLI tests where exercising the worker
-    thread is not the point. ``start()`` synchronously emits a fixed
-    number of chunks into the user callback so end-to-end behaviour
-    of consumers (sinks, signal handlers) can still be verified.
+    Replaces the real loop in CLI / Router tests where exercising the
+    worker thread is not the point. ``start()`` synchronously emits a
+    fixed number of chunks into the user callback so end-to-end
+    behaviour of consumers (sinks, signal handlers, the Router relay
+    seam) can still be verified.
 
     Class-level state (:attr:`instances` / :attr:`frames_per_start` /
-    :attr:`samples_per_frame` / :attr:`init_side_effect`) is mutable
-    so tests can configure behaviour before construction. Reset
-    between tests by the ``record_fakes``-style fixture in your local
-    conftest.
+    :attr:`samples_per_frame` / :attr:`init_side_effect` /
+    :attr:`start_side_effect` / :attr:`stop_side_effect`) is mutable
+    so tests can configure behaviour before construction. Reset between
+    tests by the ``record_fakes``-style fixture in your local conftest.
+
+    The ``stop()`` / ``close()`` / :attr:`is_running` surface mirrors the
+    real :class:`SpeakerLoop` lifecycle so a :class:`Router` driven
+    against this fake can exercise its own start/stop/double-stop /
+    cleanup-on-failure paths verbatim.
     """
 
     instances: list[FakeSpeakerLoop] = []
     frames_per_start: int = 3
     samples_per_frame: int = 1024
     init_side_effect: BaseException | None = None
+    start_side_effect: BaseException | None = None
+    stop_side_effect: BaseException | None = None
 
     def __init__(
         self,
@@ -141,15 +149,49 @@ class FakeSpeakerLoop:
         self.read_timeout = read_timeout
         self.pid = pid
         self.start_calls = 0
+        self.stop_calls = 0
+        self.close_calls = 0
+        # Mirrors SpeakerLoop.is_running: True between start() and
+        # stop()/close(). Router consults this through its own
+        # is_running property.
+        self._running: bool = False
         FakeSpeakerLoop.instances.append(self)
+
+    @property
+    def is_running(self) -> bool:
+        return self._running
 
     def start(self) -> None:
         self.start_calls += 1
+        if FakeSpeakerLoop.start_side_effect is not None:
+            # Failure must not leave the loop "running"; Router uses
+            # is_running to decide whether to roll the player back.
+            self._running = False
+            raise FakeSpeakerLoop.start_side_effect
+        self._running = True
         chunk = np.zeros(
             (FakeSpeakerLoop.samples_per_frame, CHANNELS), dtype=np.float32
         )
         for _ in range(FakeSpeakerLoop.frames_per_start):
             self.callback(chunk)
+
+    def stop(self) -> None:
+        """Mirror :meth:`SpeakerLoop.stop` one-shot exception surfacing.
+
+        First call after a configured ``stop_side_effect`` re-raises the
+        exception and clears it (second stop is benign), matching the
+        production contract the Router relies on for double-stop safety.
+        """
+        self.stop_calls += 1
+        self._running = False
+        exc = FakeSpeakerLoop.stop_side_effect
+        if exc is not None:
+            FakeSpeakerLoop.stop_side_effect = None
+            raise exc
+
+    def close(self) -> None:
+        self.close_calls += 1
+        self.stop()
 
     def __enter__(self) -> Self:
         return self
@@ -161,6 +203,7 @@ class FakeSpeakerLoop:
         exc_tb: TracebackType | None,
     ) -> None:
         del exc_type, exc_val, exc_tb
+        self.close()
 
 
 class FakeMic:

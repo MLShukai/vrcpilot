@@ -69,6 +69,7 @@
       "Bash(false)",
       "Bash(test:*)",
       "Bash(wait:*)",
+      "Bash(tee:*)",
       "Bash([:*)",
       "Bash(git status:*)",
       "Bash(git log:*)",
@@ -165,7 +166,8 @@
       "WebSearch",
       "WebFetch",
       "Bash(git cherry-pick *)",
-      "Bash(git worktree *)"
+      "Bash(git worktree *)",
+      "Bash(tasklist)"
     ],
     "deny": [
       "Read(~/.ssh/**)",

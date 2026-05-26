@@ -15,7 +15,6 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-import yaml
 from argcomplete.completers import FilesCompleter
 from numpy.typing import NDArray
 from PIL import Image
@@ -32,6 +31,7 @@ from ._common import (
     SubParsersAction,
     add_screenshot_input_arg,
     attach_completer,
+    emit_yaml,
     resolve_screenshot,
 )
 
@@ -200,5 +200,5 @@ def run(args: argparse.Namespace) -> int:
     if viz_path is not None:
         payload["viz_path"] = str(viz_path.resolve())
 
-    sys.stdout.write(yaml.safe_dump(payload, sort_keys=False, default_flow_style=False))
+    emit_yaml(payload)
     return 0

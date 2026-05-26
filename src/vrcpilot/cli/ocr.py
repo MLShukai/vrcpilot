@@ -9,11 +9,9 @@ or piped stdin; OCR never captures a fresh shot itself. See
 from __future__ import annotations
 
 import argparse
-import sys
 from datetime import datetime
 from pathlib import Path
 
-import yaml
 from argcomplete.completers import FilesCompleter
 from PIL import Image
 
@@ -24,6 +22,7 @@ from ._common import (
     SubParsersAction,
     add_screenshot_input_arg,
     attach_completer,
+    emit_yaml,
     resolve_screenshot,
 )
 
@@ -128,5 +127,5 @@ def run(args: argparse.Namespace) -> int:
     if viz_path is not None:
         payload["viz_path"] = str(viz_path.resolve())
 
-    sys.stdout.write(yaml.safe_dump(payload, sort_keys=False, default_flow_style=False))
+    emit_yaml(payload)
     return 0
