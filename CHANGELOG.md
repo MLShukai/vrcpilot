@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **`vrcpilot.find_pid` / `vrcpilot.process.find_pid`** has been removed (deprecated in `0.3.0`, scheduled for removal in `0.4.0`). Migrate to `vrcpilot.find_pids()` (returns the full PID list, newest first), `vrcpilot.process.resolve_pid(pid)` (single resolution with multi-instance diagnostics), or pass `pid=` to the specific API you are calling. A typical replacement for the legacy `find_pid()` call is `next(iter(find_pids()), None)`.
+
 ### Added
 
 - **`vrcpilot.speaker.routing` subpackage and `vrcpilot speaker` CLI**: PID 単位の VRChat 出力音声を任意のスピーカーデバイスへユーザー空間でリレーする cross-platform 機能。`AudioDevice` / `list_devices` / `default_device` / `find_device` / `Router` / `route` / `AudioRoutingError` / `DeviceNotFoundError` の 8 シンボルを公開。Windows は proc-tap、Linux は PipeWire native の既存 PID-scoped capture をそのまま使い、`soundcard` で出力先デバイスへ転送する素直な合成。OS policy (`IAudioPolicyConfig` / EarTrumpet) に依存しないため、同じ `VRChat.exe` の多重起動でも per-PID 分離が成立する。CLI は `vrcpilot speaker list` (出力デバイスを YAML で列挙) と `vrcpilot speaker route --pid N [--device <id|name>] [--chunk-seconds 0.02] [--blocksize N]` (foreground リレー、Ctrl+C で停止) の 2 アクション。`--device` 省略時は OS 既定スピーカーへ流す。仮想スピーカーデバイス (VB-Cable / Voicemeeter / VAC / PipeWire null-sink) のセットアップと、補助 GUI ツール (Windows: EarTrumpet、Linux: pavucontrol / Helvum / qpwgraph) との組み合わせパターンを [`docs/virtual-audio.md`](docs/virtual-audio.md) にまとめた。

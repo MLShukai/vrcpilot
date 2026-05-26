@@ -1,7 +1,7 @@
 """E2E scenario: launch VRChat via the API and terminate it cleanly.
 
 Drives the public ``vrcpilot`` API through a single happy-path round trip
-(``launch`` -> wait for PID -> warmup -> ``find_pid`` again -> ``terminate``)
+(``launch`` -> wait for PID -> warmup -> ``find_pids`` again -> ``terminate``)
 to confirm the default launch flow works against a real VRChat install.
 
 Run with::
@@ -28,12 +28,12 @@ def _scenario() -> None:
 
     _helpers.warmup()
 
-    pid_after = vrcpilot.find_pid()
-    assert pid_after == pid, (
+    pids_after = vrcpilot.find_pids()
+    assert pids_after == [pid], (
         f"VRChat PID changed or disappeared after warmup "
-        f"(before={pid}, after={pid_after})"
+        f"(before={pid}, after={pids_after})"
     )
-    _helpers.log(f"VRChat still alive after warmup (pid={pid_after})")
+    _helpers.log(f"VRChat still alive after warmup (pid={pids_after[0]})")
 
     _helpers.log("terminating VRChat")
     assert vrcpilot.terminate(), "vrcpilot.terminate() returned [] (no VRChat killed)"

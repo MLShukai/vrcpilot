@@ -8,7 +8,7 @@ The autouse :func:`_no_real_vrchat` fixture patches
 ``vrcpilot.process.pid.psutil.process_iter`` *for environment
 isolation*, not for behavioural mocking. A developer machine that
 happens to be running VRChat would otherwise leak that PID into every
-test through :func:`vrcpilot.find_pid`, producing different results
+test through :func:`vrcpilot.find_pids`, producing different results
 between CI (no VRChat) and local runs (VRChat present). This is
 infrastructure isolation, equivalent in spirit to ``tmp_path`` or
 ``Xvfb`` -- not a per-test mock.
@@ -16,7 +16,7 @@ infrastructure isolation, equivalent in spirit to ``tmp_path`` or
 This exception is **scoped to this conftest only**. Per-test files
 under ``tests/vrcpilot/`` MUST NOT patch ``psutil.process_iter``,
 ``psutil.Process``, or any other 3rd-party surface for behavioural
-verification. Tests that need to exercise :func:`vrcpilot.find_pid`
+verification. Tests that need to exercise :func:`vrcpilot.find_pids`
 against a specific process state should spawn a real subprocess and
 verify the observable behaviour, or escalate to the orchestrator
 when no real-resource path exists.

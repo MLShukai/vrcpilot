@@ -8,7 +8,7 @@ on. These pins exist so any unintended drift in the top-level surface
 shows up as a failing test rather than a Hyrum's-law surprise.
 
 Behavioural tests for individual symbols live next to the modules they
-come from (e.g. ``tests/vrcpilot/process/`` for ``find_pid``).
+come from (e.g. ``tests/vrcpilot/process/`` for ``find_pids``).
 """
 
 from __future__ import annotations
@@ -56,7 +56,6 @@ EXPECTED_PUBLIC_SURFACE: frozenset[str] = frozenset(
         "CaptureLoop",
         "clipboard",
         "detect",
-        "find_pid",
         "find_pids",
         "focus",
         "is_foreground",
@@ -136,6 +135,9 @@ class TestPublicSurface:
             "find_vrchat_launcher",
             "find_umu_launcher",
             "resolve_pid",
+            # Removed in 0.4.0 (deprecated in 0.3.0); ``find_pids`` is the
+            # canonical replacement.
+            "find_pid",
             # Launcher-discovery / environment-validation exceptions —
             # too narrow for top-level; callers catch the broader
             # ``VRChatNotRunningError`` / ``VRChatMultipleInstancesError``.
