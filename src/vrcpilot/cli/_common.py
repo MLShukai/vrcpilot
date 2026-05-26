@@ -11,7 +11,9 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import Any
 
+import yaml
 from argcomplete.completers import FilesCompleter
 
 from vrcpilot.process import VRChatMultipleInstancesError
@@ -135,3 +137,27 @@ def resolve_screenshot(args: argparse.Namespace) -> Screenshot | None:
         file=sys.stderr,
     )
     return None
+
+
+def emit_yaml(payload: Any) -> None:
+    """Dump ``payload`` as YAML to stdout, preserving non-ASCII characters.
+
+    ``yaml.safe_dump(..., allow_unicode=True)`` returns a ``str``; writing
+    that via ``sys.stdout.write`` re-encodes through the terminal's
+    codepage (cp932 on Japanese-locale Windows), so consumers downstream
+    of a pipe or file redirect end up with cp932 bytes instead of the
+    UTF-8 they expect. Write the encoded bytes through ``sys.stdout.buffer``
+    when available; fall back to ``write`` for pytest ``capsys`` which
+    replaces ``sys.stdout`` with a buffer-less stand-in.
+    """
+    text = yaml.safe_dump(
+        payload,
+        sort_keys=False,
+        default_flow_style=False,
+        allow_unicode=True,
+    )
+    buffer = getattr(sys.stdout, "buffer", None)
+    if buffer is None:
+        sys.stdout.write(text)
+    else:
+        buffer.write(text.encode("utf-8"))

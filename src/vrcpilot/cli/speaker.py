@@ -26,8 +26,6 @@ import argparse
 import sys
 import time
 
-import yaml
-
 from vrcpilot.process import VRChatMultipleInstancesError
 from vrcpilot.speaker.routing import (
     AudioRoutingError,
@@ -36,7 +34,7 @@ from vrcpilot.speaker.routing import (
     route,
 )
 
-from ._common import SubParsersAction
+from ._common import SubParsersAction, emit_yaml
 
 #: Exceptions the spec (§4.3 exit-code table) maps to exit 1 with a
 #: single ``vrcpilot: <msg>`` stderr line. ``DeviceNotFoundError`` /
@@ -129,7 +127,7 @@ def _run_list() -> int:
             {"id": d.id, "name": d.name, "is_default": d.is_default} for d in devices
         ]
     }
-    sys.stdout.write(yaml.safe_dump(payload, sort_keys=False, default_flow_style=False))
+    emit_yaml(payload)
     return 0
 
 
