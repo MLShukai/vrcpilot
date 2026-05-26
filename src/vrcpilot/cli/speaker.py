@@ -1,19 +1,23 @@
 """``vrcpilot speaker`` subcommand: list / route output devices.
 
+Owns the output-side audio concern — which physical device a given
+VRChat instance's audio plays into. Application-audio *capture* is a
+separate concern owned by ``vrcpilot record``; this CLI does the
+device-selection / per-PID relay half. See ``docs/virtual-audio.md``
+for end-to-end usage scenarios (multi-instance routing, virtual-cable
+setups).
+
 Two actions:
 
-* ``list`` — emits a YAML payload describing every available output
-  speaker (default first, then name-sorted) to stdout.
-* ``route`` — opens a PID-scoped audio relay from one VRChat instance
-  to a chosen output device and blocks until ``Ctrl+C``.
+* ``list`` — YAML inventory of output devices (default first, then
+  name-sorted) on stdout.
+* ``route`` — open a PID-scoped audio relay to a chosen output device
+  and block until ``Ctrl+C``.
 
-Application-audio *capture* is owned by ``vrcpilot record``; this
-subcommand owns the output-side concern (which device VRChat audio
-plays into), hence the shorter ``speaker`` name.
-
-Unlike most PID-dependent subcommands, ``route`` requires ``--pid``;
-the spec calls for explicit multi-instance handling so we do **not**
-go through :func:`vrcpilot.cli._common.add_pid_arg` here.
+Unlike most PID-dependent subcommands, ``route`` requires ``--pid``
+explicitly; multi-instance handling is the entire reason this command
+exists, so silently picking a single instance via
+:func:`vrcpilot.cli._common.add_pid_arg` would defeat the point.
 """
 
 from __future__ import annotations
@@ -108,7 +112,12 @@ def register(subparsers: SubParsersAction) -> None:
 
 
 def _run_list() -> int:
-    """Emit the device list YAML; map runtime failures to exit 1."""
+    """Emit the device-list YAML on stdout.
+
+    Returns 0 on success, or 1 with a single ``vrcpilot: <msg>``
+    stderr line when device enumeration itself fails (missing audio
+    backend, soundcard import failure, ``AudioRoutingError``).
+    """
     try:
         devices = list_devices()
     except (OSError, ImportError, AudioRoutingError) as exc:
@@ -125,7 +134,15 @@ def _run_list() -> int:
 
 
 def _run_route(args: argparse.Namespace) -> int:
-    """Open a PID-scoped relay and block until ``Ctrl+C`` or failure."""
+    """Open a PID-scoped relay and block until ``Ctrl+C`` or failure.
+
+    Prints a single ``route: pid=<PID> device=<NAME!r>`` summary to
+    stderr on entry, appending `` (system default)`` when ``--device``
+    was omitted, then sleeps in 500 ms ticks so SIGINT lands on the
+    Python interpreter promptly. ``KeyboardInterrupt`` is the
+    nominal exit path (return 0); :data:`_ROUTE_RUNTIME_ERRORS` collapse
+    to exit 1 with a single ``vrcpilot: <msg>`` stderr line.
+    """
     pid: int = args.pid
     device: str | None = args.device
 

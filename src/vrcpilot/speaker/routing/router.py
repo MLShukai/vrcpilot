@@ -60,24 +60,48 @@ def _open_player(
 class Router:
     """Relay one VRChat PID's audio to a chosen output device.
 
+    Constructing the ``Router`` resolves ``device`` to an
+    :class:`AudioDevice` but does *not* open any audio stream;
+    :meth:`start` is what acquires resources. Use either the explicit
+    ``start()`` / ``stop()`` pair, the :meth:`close` alias, or the
+    context manager - all three are interchangeable.
+
     Lifecycle:
-        ``start()`` opens the output player first, then spawns the inner
-        :class:`SpeakerLoop`; on capture-side failure the player is
-        rolled back before the original exception propagates. ``stop()``
-        tears down both even if the loop's worker raised - the player
-        cleanup runs in ``finally``, the worker exception is re-raised
-        after. The instance is re-startable: ``stop()`` followed by
-        ``start()`` builds a fresh ``SpeakerLoop`` / player pair.
+        :meth:`start` opens the output player first, then spawns the
+        inner :class:`SpeakerLoop`. If the capture side fails, the
+        already-opened player is rolled back before the original
+        exception propagates so a partial start leaves no resource
+        attached. :meth:`stop` tears both down: the worker stop call
+        sits in ``try``, the player ``__exit__`` in ``finally``, so the
+        player is always released even when the loop's worker thread
+        re-raises a captured exception (e.g. VRChat died mid-relay).
+        Double-``start()`` and double-``stop()`` are intentional no-ops
+        (F2.3 / F2.5). After a successful ``stop()`` the instance is
+        re-startable: a fresh ``SpeakerLoop`` and player pair are
+        created on the next ``start()`` (F2.13), which is what makes
+        re-entering the ``with`` block well-defined.
+
+    Threading:
+        ``start`` / ``stop`` are expected to be called from the main
+        thread. :meth:`_on_frames` runs on the ``SpeakerLoop`` worker
+        thread; it reads the player slot via a single snapshot so a
+        callback racing with ``stop()`` simply sees ``None`` and skips
+        without locking.
 
     Args:
-        pid: Target VRChat PID. Forwarded to the inner ``SpeakerLoop``.
-        device: ``None`` to pick the OS default, ``str`` for
-            :func:`find_device` lookup, or an :class:`AudioDevice` to
-            use directly.
-        chunk_seconds: Forwarded to ``SpeakerLoop``; must be ``> 0``
-            (validated downstream).
+        pid: Target VRChat PID. Forwarded to the inner ``SpeakerLoop``;
+            ``None`` is *not* accepted here - multi-instance setups
+            must name the PID explicitly.
+        device: ``None`` to pick the OS default (resolved via
+            :func:`default_device`), ``str`` to resolve through
+            :func:`find_device`, or an :class:`AudioDevice` to use
+            directly.
+        chunk_seconds: Forwarded to ``SpeakerLoop`` (capture-side tick
+            in seconds). Must be ``> 0``; validated by ``SpeakerLoop``
+            at ``start()`` time, not at construction.
         blocksize: Forwarded to ``soundcard.Speaker.player`` (output
-            buffer size in frames). ``None`` lets ``soundcard`` choose.
+            buffer size in frames). ``None`` lets ``soundcard`` pick
+            the backend default.
     """
 
     _pid: int
@@ -118,15 +142,22 @@ class Router:
     def start(self) -> None:
         """Open the output player and start the capture loop.
 
-        No-op when already running (F2.3). On capture-side failure the
-        output player is cleaned up before the exception propagates.
+        Player is opened *before* the loop so the very first callback
+        the worker thread fires already has a ready output stream. No-op
+        when already running (F2.3). On capture-side failure the
+        output player is rolled back before the exception propagates,
+        leaving the instance in a clean stopped state.
 
         Raises:
             RuntimeError: ``SpeakerLoop`` / ``Speaker`` failed to start
-                (e.g. VRChat not running).
-            ValueError: ``chunk_seconds <= 0``.
-            OSError: ``soundcard`` failed to open the player.
-            NotImplementedError: Host is neither Windows nor Linux.
+                (e.g. VRChat process not running).
+            ValueError: ``chunk_seconds <= 0`` (surfaced by
+                ``SpeakerLoop.__init__``).
+            OSError: ``soundcard`` failed to open the player (device
+                disappeared between resolution and ``start()``,
+                libpulse / WASAPI runtime error, etc.).
+            NotImplementedError: Host is neither Windows nor Linux
+                (surfaced by ``Speaker`` backend dispatch).
         """
         if self.is_running:
             return
@@ -158,12 +189,16 @@ class Router:
         Order (F2.4 / §8.2): the ``SpeakerLoop.stop()`` call lives in a
         ``try`` block; the player ``__exit__`` lives in ``finally`` so
         it always runs. Any worker exception surfaced by
-        ``SpeakerLoop.stop()`` is re-raised *after* the player is
-        cleaned up.
+        ``SpeakerLoop.stop()`` (e.g. VRChat died mid-relay) is
+        re-raised *after* the player is cleaned up.
 
-        No-op when already stopped (F2.5). The ``SpeakerLoop`` clears
-        its captured exception after re-raising, so a second ``stop()``
-        following an exception-bearing first one runs cleanly (F2.12).
+        No-op when already stopped (F2.5). The internal slots are
+        cleared up front so a callback firing concurrently with
+        ``stop()`` sees a ``None`` player and skips its ``play()`` call
+        instead of touching a half-closed stream. The ``SpeakerLoop``
+        clears its captured exception after re-raising, so a second
+        ``stop()`` following an exception-bearing first one runs
+        cleanly (F2.12).
         """
         # Snapshot then clear up front so a callback firing concurrently
         # with stop() sees a ``None`` player and skips its play() call
@@ -186,6 +221,7 @@ class Router:
         self.stop()
 
     def __enter__(self) -> Self:
+        """Call :meth:`start` and return ``self``."""
         self.start()
         return self
 
@@ -195,6 +231,13 @@ class Router:
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
+        """Call :meth:`stop`; never swallow exceptions from the body.
+
+        Returns ``None`` (not ``False``) so any in-flight exception
+        keeps propagating, and a worker-thread exception re-raised by
+        ``stop()`` itself replaces - rather than masks - the body's
+        exception via the standard ``__exit__`` chaining rules.
+        """
         del exc_type, exc_val, exc_tb
         self.stop()
 
@@ -221,11 +264,17 @@ def route(
     chunk_seconds: float = 0.02,
     blocksize: int | None = None,
 ) -> Router:
-    """Construct and ``start()`` a :class:`Router`.
+    """Construct and :meth:`Router.start` in one call.
 
-    Caller owns the lifecycle (``stop()`` / ``close()`` / ``with``).
-    Any exception from ``Router.start()`` propagates; no router is
-    returned in that case.
+    Convenience for the common case of "open a relay and let me hold
+    the handle". The returned :class:`Router` is already running; the
+    caller owns the lifecycle from here on (call :meth:`Router.stop`,
+    :meth:`Router.close`, or use the ``with`` block). If
+    :meth:`Router.start` raises, the exception propagates and no
+    :class:`Router` is returned - there is nothing for the caller to
+    clean up because ``start()`` rolled back the partial player itself.
+
+    See :class:`Router` for the meaning of each argument.
     """
     router = Router(
         pid,
