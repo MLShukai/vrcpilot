@@ -16,3 +16,4 @@ shared な前提 ([テスト戦略 4 区分と新モック方針](../../feedback
 - [unused PID で dispatch + backend を end-to-end 駆動する](feedback_unused_pid_integration_pattern.md) — `pid=99_999_999` で `resolve_pid` short-circuit → 実 backend が走り False/None を返す。internal モック不要
 - [tkinter stub window で X11 / Win32 backend を integration-real テスト](feedback_tkinter_stub_window_pattern.md) — `tkinter.Tk()` を spawn、PID match で find_vrchat\_\* が拾える。FakeXDisplay / mocker.patch 不要
 - [自分のコードの内部関数モック禁止の実例 (controls 周辺)](feedback_no_internal_function_mocks.md) — ensure_target / resolve_pid / window.\* / is_wayland_native / get_vrchat_window_rect / time.sleep は autouse fixture / 実 X11 / e2e で代用するパターン集
+- [PipeWireSpeakerBackend で caplog を使う時は \_\_init\_\_ を包む](feedback_caplog_pulsectl_event_loop.md) — pulsectl の event loop thread と sync API は同時に叩けない。診断ログの assertion は constructor 内 synchronous phase を caplog で観測する

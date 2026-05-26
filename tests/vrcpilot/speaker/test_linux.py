@@ -36,7 +36,6 @@ from vrcpilot.speaker.linux import (  # noqa: E402
     _REQUIRED_CLIS,
     PipeWireSpeakerBackend,
     _extract_tap_pid,
-    _loopback_args,
     _null_sink_args,
     _pw_record_argv,
     _tap_sink_name,
@@ -104,16 +103,6 @@ class TestHelperFunctions:
         assert "channels=2" in args
         assert "format=float32le" in args
 
-    def test_loopback_args_targets_per_pid_monitor_and_default_sink(
-        self,
-    ) -> None:
-        args = _loopback_args(4242, "alsa_output.user_default")
-        assert "source=vrcpilot_tap_4242.monitor" in args
-        assert "sink=alsa_output.user_default" in args
-        assert "source_dont_move=true" in args
-        assert "sink_dont_move=true" in args
-        assert "latency_msec=20" in args
-
     def test_pw_record_argv_targets_per_pid_monitor(self) -> None:
         argv = _pw_record_argv(4242)
         assert argv[0] == "pw-record"
@@ -138,10 +127,16 @@ class TestHelperFunctions:
                 "channels=2 sink_name=vrcpilot_tap_42",
                 42,
             ),
+            # ``module-loopback`` is no longer one of ours — the
+            # backend's tap routing is null-sink only, so the helper
+            # must ignore loopback modules even when their argument
+            # contains a ``vrcpilot_tap_<pid>`` token (e.g. a stale
+            # third-party loopback that happens to reference our
+            # monitor).
             (
                 "module-loopback",
                 "source=vrcpilot_tap_88.monitor sink=foo",
-                88,
+                None,
             ),
             # Adjacent-PID disambiguation: 1234 must not match 12345.
             (
@@ -202,10 +197,10 @@ class TestPipeWireSpeakerBackendAgainstRealDaemon:
       ``pw-cli info 0``)
 
     The PID used here is the *current* process PID -- the backend
-    creates a per-pid null-sink + loopback and moves any VRChat-like
-    sink_inputs onto the tap (none, in a normal CI run), so the test
-    only validates that the constructor and close cycle survive the
-    real plumbing.
+    creates a per-pid null-sink and moves any VRChat-like sink_inputs
+    onto the tap (none, in a normal CI run), so the test only
+    validates that the constructor and close cycle survive the real
+    plumbing.
     """
 
     def setup_method(self) -> None:
@@ -220,9 +215,8 @@ class TestPipeWireSpeakerBackendAgainstRealDaemon:
         # We need a PID for the constructor -- our own process PID is
         # fine because the move-streams step only touches VRChat-like
         # sink_inputs, and we have none. The interesting bit is that
-        # the backend's real null-sink + loopback load + atexit
-        # cleanup succeeds against a live PipeWire daemon (1.0+
-        # syntax compatibility).
+        # the backend's real null-sink load + atexit cleanup succeeds
+        # against a live PipeWire daemon (1.0+ syntax compatibility).
         import os
 
         my_pid = os.getpid()
@@ -250,17 +244,28 @@ class TestPipeWireSpeakerBackendAgainstRealDaemon:
                 "sink_name=vrcpilot_tap" in arg for arg in args_after
             ), "vrcpilot_tap null-sink must be unloaded after backend.close"
 
-    def test_loopback_is_loaded_for_current_pid(self) -> None:
-        """The loopback bridging tap.monitor → default sink must exist during
-        the backend's lifetime and disappear at close."""
+    def test_no_loopback_module_is_loaded_for_current_pid(self) -> None:
+        """The backend must NOT load a ``module-loopback`` for the per-PID tap.
+
+        Phase A of the per-PID isolation fix removed the
+        ``module-loopback`` that previously bridged
+        ``vrcpilot_tap_<pid>.monitor`` back into the default sink. The
+        loopback was suspected of cross-contaminating two VRChat
+        instances' audio (their WAVs came out bit-identical), and live
+        monitoring during recording is a deliberate UX regression
+        documented in ``CHANGELOG.md``. This test pins the absence: a
+        regression that re-introduces the loopback module must trip
+        here, both **while** the backend is alive and **after**
+        ``close()``.
+        """
         import os
 
         my_pid = os.getpid()
+        target = f"source=vrcpilot_tap_{my_pid}.monitor"
         backend = PipeWireSpeakerBackend(pid=my_pid)
         try:
             import pulsectl  # type: ignore[import-not-found]
 
-            target = f"source=vrcpilot_tap_{my_pid}.monitor"
             with pulsectl.Pulse("vrcpilot-test-probe-lb") as p:
                 modules = list(p.module_list())
                 loopback_args = [
@@ -268,13 +273,14 @@ class TestPipeWireSpeakerBackendAgainstRealDaemon:
                     for m in modules
                     if getattr(m, "name", None) == "module-loopback"
                 ]
-                assert any(target in arg for arg in loopback_args), (
-                    f"module-loopback for {target} must be loaded during "
-                    f"backend lifetime; saw {loopback_args}"
+                assert not any(target in arg for arg in loopback_args), (
+                    f"no module-loopback for {target} should be loaded "
+                    f"during backend lifetime; saw {loopback_args}"
                 )
         finally:
             backend.close()
 
+        # Belt-and-braces: still absent after close.
         with pulsectl.Pulse("vrcpilot-test-probe-lb2") as p:
             modules_after = list(p.module_list())
             args_after = [
@@ -282,9 +288,10 @@ class TestPipeWireSpeakerBackendAgainstRealDaemon:
                 for m in modules_after
                 if getattr(m, "name", None) == "module-loopback"
             ]
-            assert not any(
-                f"source=vrcpilot_tap_{my_pid}.monitor" in arg for arg in args_after
-            ), "module-loopback must be unloaded after backend.close"
+            assert not any(target in arg for arg in args_after), (
+                f"no module-loopback for {target} should remain after "
+                f"backend.close; saw {args_after}"
+            )
 
     def test_read_returns_empty_chunk_when_no_audio_routes_to_tap(self) -> None:
         # No VRChat = no audio routed to the tap. Within the read
@@ -311,8 +318,8 @@ class TestPipeWireSpeakerBackendAgainstRealDaemon:
     def test_close_is_idempotent_against_real_daemon(self) -> None:
         # ExitStack rollback paths and __exit__ chains both call
         # close; the wrapper must guard double-close so the underlying
-        # pw-record terminate / null-sink unload / loopback unload
-        # runs once even under repeated close.
+        # pw-record terminate / null-sink unload runs exactly once
+        # even under repeated close.
         import os
 
         my_pid = os.getpid()
@@ -322,8 +329,8 @@ class TestPipeWireSpeakerBackendAgainstRealDaemon:
         backend.close()
 
     def test_two_backends_have_independent_per_pid_taps(self) -> None:
-        """Two backends with distinct PIDs each own a private sink + loopback
-        and neither close path tramples the other's modules."""
+        """Two backends with distinct PIDs each own a private null-sink and
+        neither close path tramples the other's module."""
         import os
 
         import pulsectl  # type: ignore[import-not-found]
@@ -419,3 +426,147 @@ class TestPipeWireSpeakerBackendAgainstRealDaemon:
                     p.module_unload(stale_module_id)
                 except Exception:  # noqa: BLE001
                     pass
+
+    def test_diagnostic_log_emits_summary_for_non_vrchat_pid(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The sink_input scan must emit a contract-shaped INFO summary on
+        every construction.
+
+        Phase A pins the diagnostic-log contract for
+        :meth:`PipeWireSpeakerBackend._enumerate_vrchat_sink_inputs`:
+        every call ends with a ``sink_input scan summary`` INFO line
+        carrying ``self_pid``, ``matched=[...]``, ``ambiguous=[...]``
+        and ``total_candidates=<n>``. The constructor invokes the scan
+        exactly once via ``_move_existing_streams_to_tap``, so capture
+        spans construction.
+
+        We use the current process PID (which is not a VRChat PID), so
+        the contract holds independent of whether the host happens to
+        be running a VRChat instance:
+
+        * ``matched=[]`` — no sink_input has our ``application.process.id``.
+        * ``ambiguous=[]`` — a real VRChat on the host carries its own
+          ``process.id`` and is classified ``skipped-no-vrchat-marker``,
+          not ``ambiguous``.
+        * ``self_pid=<our pid>`` — the summary echoes back the PID this
+          backend instance was constructed with.
+
+        ``total_candidates=`` is just checked for presence with a digit
+        suffix rather than a fixed value, because that count depends on
+        whether the developer host is running VRChat. The contract is
+        about the field being emitted; the integer is observational.
+        Internal-method access for the diagnostic contract follows the
+        same pattern as the stale-tap-sweep test in this class.
+        """
+        import os
+        import re
+
+        my_pid = os.getpid()
+        # Capture spans the constructor because the constructor is the
+        # only safe place to observe the synchronous scan: once the
+        # event listener thread is running, pulsectl forbids blocking
+        # calls from other threads.
+        with caplog.at_level("INFO", logger="vrcpilot.speaker.linux"):
+            caplog.clear()
+            backend = PipeWireSpeakerBackend(pid=my_pid)
+            try:
+                summaries = [
+                    rec.getMessage()
+                    for rec in caplog.records
+                    if rec.name == "vrcpilot.speaker.linux"
+                    and rec.levelname == "INFO"
+                    and "sink_input scan summary" in rec.getMessage()
+                ]
+            finally:
+                backend.close()
+
+        assert len(summaries) == 1, (
+            f"expected exactly one 'sink_input scan summary' INFO line "
+            f"per construction; got {summaries}"
+        )
+        msg = summaries[0]
+        # Substring checks pin the contract without depending on
+        # whitespace or trailing-field order.
+        assert "matched=[]" in msg, msg
+        assert "ambiguous=[]" in msg, msg
+        assert f"self_pid={my_pid}" in msg, msg
+        # ``total_candidates=<digit(s)>`` must be present so the field
+        # is part of the contract even though the integer is
+        # environment-dependent.
+        assert re.search(r"total_candidates=\d+", msg) is not None, msg
+
+    def test_no_post_move_verify_log_when_no_matching_sink_inputs(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The ``sink_input_move post-verify`` log must only fire for streams
+        that were actually moved.
+
+        Phase A (A-6) introduces a post-move re-query log that runs
+        only after a successful ``sink_input_move``. When this backend
+        is constructed against a non-VRChat PID (the test process's
+        own PID), no sink_input matches ``self_pid``, so
+        ``_move_existing_streams_to_tap`` makes zero move calls and
+        therefore zero post-verify log lines should appear. A VRChat
+        instance on the host (matching some other PID) is still
+        classified ``skipped-no-vrchat-marker`` rather than moved
+        because its ``application.process.id`` is not ours, so the
+        contract holds whether or not the developer machine happens to
+        be running VRChat. This is the regression detector for "the
+        post-verify log accidentally fires even when zero streams were
+        moved".
+        """
+        import os
+
+        my_pid = os.getpid()
+        # Capture spans construction; the constructor is where the
+        # synchronous move attempt happens, before the event listener
+        # thread is started.
+        with caplog.at_level("INFO", logger="vrcpilot.speaker.linux"):
+            caplog.clear()
+            backend = PipeWireSpeakerBackend(pid=my_pid)
+            backend.close()
+
+        post_verify_lines = [
+            rec.getMessage()
+            for rec in caplog.records
+            if rec.name == "vrcpilot.speaker.linux"
+            and "sink_input_move post-verify" in rec.getMessage()
+        ]
+        assert post_verify_lines == [], (
+            f"no 'sink_input_move post-verify' log should fire when no "
+            f"VRChat sink_inputs match this backend's pid; saw "
+            f"{post_verify_lines}"
+        )
+
+    def test_pw_record_stderr_drain_thread_is_joined_on_close(self) -> None:
+        """``pw-record`` stderr drain thread must not outlive ``close()``.
+
+        Phase A (A-7) adds a stderr drain thread alongside the stdout
+        drain so ``pw-record`` warning lines surface to the
+        ``vrcpilot.speaker.linux`` logger. Like the stdout drain it
+        must be joined cleanly during teardown; a leaked stderr thread
+        would survive ``backend.close()`` and keep the subprocess pipe
+        open. We check the contract behaviourally: after ``close()``,
+        no ``threading.Thread`` attribute on the backend may be alive.
+        This avoids hard-coding the private attribute name (the field
+        could be ``_drain_err_thread`` or similar) while still pinning
+        the join requirement.
+        """
+        import os
+        import threading as _threading
+
+        my_pid = os.getpid()
+        backend = PipeWireSpeakerBackend(pid=my_pid)
+        backend.close()
+
+        live_threads = [
+            (attr, value)
+            for attr in vars(backend)
+            for value in (getattr(backend, attr),)
+            if isinstance(value, _threading.Thread) and value.is_alive()
+        ]
+        assert live_threads == [], (
+            f"no Thread attribute on the backend should remain alive "
+            f"after close(); leaked: {live_threads}"
+        )

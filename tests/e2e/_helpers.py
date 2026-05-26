@@ -8,6 +8,7 @@ scenarios stay readable.
 
 from __future__ import annotations
 
+import logging
 import sys
 import time
 from collections.abc import Callable
@@ -210,6 +211,17 @@ def run_scenario(name: str, body: Callable[[], None]) -> int:
     Either way :func:`ensure_no_vrchat` runs both before and after, and a
     final ``PASS:`` / ``FAIL:`` line is emitted.
     """
+    # Lift the root logger to INFO so library diagnostics (e.g. the
+    # PipeWire speaker backend's per-sink_input scan lines) reach the
+    # scenario's stderr. ``force=True`` overrides any prior
+    # ``basicConfig`` so a re-run within the same process still picks
+    # up the format change. pytest's ``log_cli`` does not apply here:
+    # e2e scenarios run as scripts, not under pytest.
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(name)s] %(levelname)s %(message)s",
+        force=True,
+    )
     log(f"=== scenario: {name} ===")
     log("pre-cleanup")
     ensure_no_vrchat()

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Linux: VRChat 音声録音中、default sink への loopback bridge を廃止しました。** 録音中は VRChat 音がユーザの耳に届かなくなります (`Speaker.close()` 後は PulseAudio の自動再ルーティングで default sink に戻ります)。これは per-PID 分離不具合 (2 VRChat 並列録音で WAV が bit-identical になる) の切り分けに伴う一時的な UX 変更です。
+
 ### Added
 
 - **`vrcpilot linux-mic` gains `--suffix <NAME>` / `--all`**, primarily so multiple AI agent instances can run in parallel with each instance owning a dedicated virtual mic instead of fighting over a single shared `VRCPilotMic`. Suffixed sinks (e.g. `VRCPilotMic_bot`) can now be registered side-by-side; omitting `--suffix` preserves the original `VRCPilotMic` sink name. `status --all` / `unregister --all` enumerate / bulk-remove every `vrcpilot-mic*.conf` under the PipeWire config directory.

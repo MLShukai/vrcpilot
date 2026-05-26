@@ -17,7 +17,7 @@ docstring / コメント記述専任エージェントが Google-style docstring
 - [CLI run() exit-code block style](project_cli_exit_code_block_style.md) — single-exit one-liner vs bulleted multi-exit block; pick the second whenever there are 2+ non-zero codes
 - [vrcpilot.osc subpackage docstring conventions](project_osc_subpackage.md) — OSC `i`/`f` tag intent, `client=` test seam, `INT_RANGE`/`FLOAT_RANGE`/`CHATBOX_MAX_LENGTH` constants
 - [vrcpilot.speaker subpackage docstring conventions](project_speaker_subpackage.md) — PID-isolated capture intent, lazy backend dispatch rationale, drain-all read contract
-- [vrcpilot.speaker.linux per-PID design docstring patterns](project_speaker_linux_per_pid.md) — routing replacement vs addition, LIFO teardown, trailing-`\s` anchor, ExitStack callback-name preservation
+- [vrcpilot.speaker.linux per-PID design docstring patterns](project_speaker_linux_per_pid.md) — Phase A null-sink-only routing (no loopback), diagnostic contract (candidate / post-verify / pw-record stderr), teardown order, trailing-`\s` anchor, ExitStack callback-name preservation
 - [tests/e2e/ docstring style](project_tests_e2e_docstring_style.md) — scenarios open with "E2E scenario:" + Run with:: block + prerequisites; helpers stay out of that pattern
 - [tests/fakes/ docstring style](project_tests_fakes_docstring_style.md) — name the production ABC, why fake vs real, which test tier uses it; reaffirm 3rd-party surfaces are not faked
 - [User-docs drift audit checklist](project_user_docs_drift_audit.md) — 5 recurring drift sources to cross-check before declaring a README / CONTRIBUTING / tests/e2e/README polish pass complete

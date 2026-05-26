@@ -2,11 +2,10 @@
 
 Drives :class:`vrcpilot.speaker.SpeakerLoop` against **two concurrently
 running VRChat clients** to confirm the per-PID PipeWire null-sink +
-module-loopback + ``sink_input_move`` design in
-:mod:`vrcpilot.speaker.linux` produces an **independent** WAV stream
-for each VRChat process. Without per-PID isolation both recordings
-would converge on the same mixed audio; with it, each WAV carries the
-audio of exactly one VRChat instance.
+``sink_input_move`` design in :mod:`vrcpilot.speaker.linux` produces
+an **independent** WAV stream for each VRChat process. Without per-PID
+isolation both recordings would converge on the same mixed audio;
+with it, each WAV carries the audio of exactly one VRChat instance.
 
 Two-instance launch
 -------------------
@@ -34,15 +33,32 @@ then joins. The per-PID :class:`_pyav_recorder.WavAudioRecorder`
 context manager guarantees PipeWire resources are released even if a
 worker thread raises.
 
-Observation, not threshold assertion
-------------------------------------
+Isolation assertion
+-------------------
 
-VRChat's audio level depends on world / volume mixer / user settings,
-so this scenario follows :mod:`tests.e2e.speaker`'s policy of logging
-the RMS dBFS for each WAV rather than asserting a hard floor. PASS
-means both recordings completed and the per-PID files were written
-without an exception escaping the scenario body; a human spot-checks
-the audible content by playing the WAVs back.
+Phase A of the per-PID isolation fix elevates the PASS criteria from
+"both files were written" to "the files contain *distinct* audio":
+
+1. Both WAVs contain at least one frame (``frames > 0``).
+2. The MD5 hash of each WAV's PCM data is **different**. Two
+   bit-identical files are the exact symptom that motivated the Phase
+   A rework (see ``CHANGELOG.md``), so this assertion is the primary
+   detector for a regressed routing path.
+3. The Pearson correlation of the two int16 sample streams (truncated
+   to the shorter file's length, computed in float64) is below 0.95.
+   MD5 catches bit-identical clones; correlation catches the looser
+   "same audio with slight timing jitter" symptom that any future
+   additive-duplication regression (a re-introduced bridge, a shared
+   monitor source, etc.) could produce. Computed by hand rather than
+   :func:`numpy.corrcoef` so a zero-norm signal returns ``0.0``
+   instead of NaN.
+
+RMS dBFS is still logged for each file but **not asserted**: VRChat's
+absolute level depends on world / mixer / user settings, so it stays a
+human-readable sanity number. The scenario also logs both PIDs,
+both output paths, both MD5 hex digests, and the correlation
+coefficient before the assertions run so a FAIL post-mortem can read
+the observed values without re-running.
 
 Artifacts land at
 ``_e2e_artifacts/speaker_multi_instance/<YYYYMMDD_HHMMSS>/<pid>.wav``.
@@ -54,6 +70,7 @@ Run with::
 
 from __future__ import annotations
 
+import hashlib
 import math
 import sys
 import threading
@@ -72,8 +89,8 @@ import _helpers  # noqa: E402
 import _pyav_recorder  # noqa: E402
 
 #: Wall-clock duration of each recording. 10 s comfortably outlasts
-#: per-pid sink load + sink_input move + loopback creation while
-#: keeping the scenario brisk enough to iterate on.
+#: per-pid null-sink load + ``sink_input_move`` + post-verify on both
+#: instances while keeping the scenario brisk enough to iterate on.
 _DURATION_SECONDS: float = 10.0
 
 #: SpeakerLoop tick period. Matches :mod:`tests.e2e.speaker` so the two
@@ -127,6 +144,66 @@ def _rms_dbfs(path: Path) -> float:
         return float("-inf")
     # Full-scale int16 is 32768 in magnitude (``[-32768, 32767]``).
     return 20.0 * math.log10(rms / 32768.0)
+
+
+def _md5_of_wav(path: Path) -> str:
+    """Return the MD5 hex digest of *path*'s PCM data chunk.
+
+    Only the ``data`` chunk is hashed: the RIFF / ``fmt`` headers carry
+    a length field that depends on the number of recorded frames, so
+    hashing the whole file would mask audio-identity differences
+    behind a header-length mismatch (or vice versa). ``wave.open`` is
+    the real stdlib parser -- no 3rd-party surface is mocked.
+
+    The hash is **not** used for any security-sensitive purpose; it is
+    purely an audio-content equality probe, so ``usedforsecurity=False``
+    silences linters that would otherwise flag MD5.
+    """
+    with wave.open(str(path), "rb") as reader:
+        n_frames = reader.getnframes()
+        raw = reader.readframes(n_frames)
+    return hashlib.md5(raw, usedforsecurity=False).hexdigest()
+
+
+def _read_int16_samples(path: Path) -> NDArray[np.int16]:
+    """Return *path*'s PCM frames as a 1-D ``int16`` array.
+
+    Stereo (2-channel) frames are kept interleaved; the consumer only
+    needs a comparable sample stream, not channel-separated views. Empty
+    files return an empty array rather than raising so the correlation
+    helper can short-circuit on zero norm.
+    """
+    with wave.open(str(path), "rb") as reader:
+        n_frames = reader.getnframes()
+        raw = reader.readframes(n_frames)
+    if n_frames == 0 or not raw:
+        return np.zeros((0,), dtype=np.int16)
+    return np.frombuffer(raw, dtype=np.int16)
+
+
+def _pearson_correlation(a: NDArray[np.int16], b: NDArray[np.int16]) -> float:
+    """Pearson correlation of two ``int16`` sample arrays.
+
+    Truncates both arrays to the shorter length so a one-frame size
+    mismatch (e.g. the recorders started a tick apart) does not break
+    the calculation. Computed in ``float64`` with explicit mean
+    subtraction and dot-product / norm so a degenerate zero-norm input
+    returns ``0.0`` rather than NaN. :func:`numpy.corrcoef` would
+    return NaN in that case, which is harder to assert against -- the
+    explicit form is the more useful primitive for an isolation check.
+    """
+    n = min(a.size, b.size)
+    if n == 0:
+        return 0.0
+    x = a[:n].astype(np.float64)
+    y = b[:n].astype(np.float64)
+    x = x - x.mean()
+    y = y - y.mean()
+    nx = float(np.linalg.norm(x))
+    ny = float(np.linalg.norm(y))
+    if nx == 0.0 or ny == 0.0:
+        return 0.0
+    return float(np.dot(x, y) / (nx * ny))
 
 
 def _record_one(pid: int, out_path: Path, result: dict[str, int]) -> None:
@@ -223,17 +300,52 @@ def _scenario() -> None:
         first_pid = next(iter(errors))
         raise errors[first_pid]
 
+    # Frame counts are observed per-PID and reported before the
+    # isolation assertions so a FAIL post-mortem has the raw numbers.
+    frames_per_pid: dict[int, int] = {}
     for pid, path in ((pid_a, path_a), (pid_b, path_b)):
         rms_db = _rms_dbfs(path)
         rms_label = (
             "-inf dBFS (pure silence)" if math.isinf(rms_db) else f"{rms_db:.2f} dBFS"
         )
         frames = results[pid].get("frames", 0)
+        frames_per_pid[pid] = frames
         _helpers.log(f"pid={pid} frames={frames} -> {path} (RMS = {rms_label})")
 
+    # --- Isolation assertions ---------------------------------------
+    # See the module docstring's "Isolation assertion" section for why
+    # each of these must hold. Log every observation *before* the
+    # assert so a failure leaves the actual MD5 / correlation values
+    # in the run log.
+    frames_a = frames_per_pid[pid_a]
+    frames_b = frames_per_pid[pid_b]
+    assert frames_a > 0, f"pid={pid_a} recorded 0 frames; capture did not run"
+    assert frames_b > 0, f"pid={pid_b} recorded 0 frames; capture did not run"
+
+    md5_a = _md5_of_wav(path_a)
+    md5_b = _md5_of_wav(path_b)
+    _helpers.log(f"pid={pid_a} md5={md5_a}")
+    _helpers.log(f"pid={pid_b} md5={md5_b}")
+
+    samples_a = _read_int16_samples(path_a)
+    samples_b = _read_int16_samples(path_b)
+    corr = _pearson_correlation(samples_a, samples_b)
+    _helpers.log(f"pearson correlation (pid={pid_a} vs pid={pid_b}) = {corr:.3f}")
+
+    assert md5_a != md5_b, (
+        f"both WAVs are bit-identical (MD5={md5_a}) — per-PID isolation "
+        f"failed; the two recordings captured the same audio stream"
+    )
+    assert abs(corr) < 0.95, (
+        f"Pearson correlation {corr:.3f} ≥ 0.95 — WAVs look like the "
+        f"same audio (md5_a={md5_a}, md5_b={md5_b}); per-PID isolation "
+        f"is leaking even though the byte streams differ"
+    )
+
     _helpers.log(
-        "scenario complete; play both WAVs back to confirm each file "
-        "matches its instance's audio rather than a mixed blend."
+        "scenario complete; per-PID isolation asserts passed. Play "
+        "both WAVs back to spot-check that each one matches its "
+        "instance's audio (audible content is still a human check)."
     )
 
 
