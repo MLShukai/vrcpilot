@@ -185,4 +185,9 @@ ______________________________________________________________________
 3. それでも不安定なら `--blocksize 2048` 等で出力バッファを大きく取る。
 4. 体感レイテンシが大きすぎると感じる場合は逆に `--chunk-seconds 0.01` まで下げる余地もある (CPU 負荷と underrun リスクとのトレードオフ)。
 
-**実測レイテンシの目安: TBD (Phase 6 で実機検証後に追記)**
+### 実測の目安 (Phase 6 e2e 観察)
+
+- **Windows 11 (Ryzen / Realtek + VB-Cable + DELL モニタ出力)**: 既定 `chunk_seconds=0.02` で underrun なし。VRChat の起動・ミュート切替・UI 効果音などのトランジェントを目安に「会話のレイテンシ感」程度の遅れに留まり、`record` 経由のキャプチャ波形と並べて聴感差は感じにくいレンジ。
+- 同条件で 2 多重 VRChat (`--profile 0` / `--profile 1`) を起動し、PID#1 → Realtek 内蔵スピーカー、PID#2 → VB-Cable In 16ch へ独立にリレーした際、両方の経路が proc-tap → soundcard の合成で互いに干渉なく独立に流れることを確認 (OS policy 非依存の per-PID 分離が成立)。
+- `integration_real` マーカー付きの単体テスト (`uv run pytest -m integration_real tests/vrcpilot/speaker/routing/`) は 26 件すべて 2-3 秒 で green。Router の start/stop 周回や空フレーム透過は実 soundcard 越しに収束する。
+- **既知の制約**: route 実行中に VRChat プロセスが死亡しても、CLI は `time.sleep` ループに留まる (内部 SpeakerLoop の例外は次回 `Router.stop()` で初めて surface する仕様)。ユーザーは Ctrl+C で能動的に停止する必要がある。将来の改善余地 (route ループ内で `Router.is_running` を polling) は本リリース範囲外。
