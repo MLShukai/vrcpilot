@@ -10,7 +10,9 @@
 - [Producer/consumer exception planting needs same condition](feedback_producer_consumer_exception_race.md) — drain/listener が exception を slot に積むなら、書き込みは consumer が wait する Condition の内側で。check-then-wait は race
 - [hot-loop で resolve_pid 禁止 (focus=False)](feedback_hot_loop_no_resolve_pid.md) — controls/clipboard の focus=False 経路では ensure_target/resolve_pid を完全 skip。psutil.process_iter のコスト回避
 - [cross-module helper は `_` prefix を付けない](feedback_cross_module_helper_no_underscore.md) — pyright が reportPrivateUsage + reportUnusedFunction を同時に出す。非 `_` 命名 + `__all__` 非登録で両立
+- [named callback helper は caller 1 つでインライン化](feedback_named_callback_helper_inline.md) — ExitStack frame 名は wrapper 名で担保される。共有 body は caller ≥ 2 でないと無価値
 
 ## project（vrcpilot 固有の確立パターン）
 
 - [pulsectl session pattern](project_pulsectl_session_pattern.md) — `vrcpilot.mic.linux._pulse_session(client_name)` で `open_pulse_control` → `try/finally close` の boilerplate を集約。pulsectl を使う新規コードはこの CM を経由する
+- [speaker.linux seams / log contract](project_speaker_linux_seams.md) — PipeWire backend の pinned seam・ログ prefix 契約・pure helper 一覧。リファクタ前に触ってよい/だめな境界を確認

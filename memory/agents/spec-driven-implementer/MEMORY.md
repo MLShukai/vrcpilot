@@ -21,3 +21,4 @@ shared な規約 ([private モジュール規約](../../feedback_private_module_
 ## reference
 
 - [soundcard library quirks](reference_soundcard_quirks.md) — argv probe crashes on empty argv, no public Speaker type, player()/recorder() are context managers, fakes carry `FakeSoundCard*` prefix
+- [pw-link/pw-record behavior](reference_pw_link_behavior.md) — for 2 same-named VRChat nodes only GLOBAL PORT ID linking is deterministic + collision-free; port-NAME picks one producer always; capture needs explicit port-id link (--target name → default sink); pw-dump shapes
