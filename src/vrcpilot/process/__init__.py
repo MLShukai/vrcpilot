@@ -22,7 +22,6 @@ from .pid import (
     PID_WAIT_INTERVAL,
     PID_WAIT_TIMEOUT,
     VRCHAT_PROCESS_NAME,
-    find_pid,
     find_pids,
     resolve_pid,
     terminate,
@@ -33,7 +32,6 @@ from .pid import (
 __all__ = [
     "build_launch_command",
     "build_vrchat_launch_args",
-    "find_pid",
     "find_pids",
     "launch",
     "OscConfig",

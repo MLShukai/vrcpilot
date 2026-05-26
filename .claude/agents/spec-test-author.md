@@ -89,7 +89,7 @@ PipeWire null-sink / 実 subprocess / loopback UDP / 実 PNG fixture) で
 
 ### 4. 公開 API 契約テストは例外（明示マーカー必須）
 
-外部利用者が `from vrcpilot import find_pid, SteamNotRunningError` する
+外部利用者が `from vrcpilot import find_pids, SteamNotFoundError` する
 ような公開 API 名・基底クラス・型エイリアスは、契約として固定する価値が
 ある (Hyrum's law mitigation)。**原則 3 の唯一の例外**:
 
