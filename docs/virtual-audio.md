@@ -1,41 +1,43 @@
-# 仮想オーディオガイド
+# Virtual Audio Guide
 
-VRChat の出力音声を PID 単位で別デバイスへ振り分けるためのガイド。`vrcpilot speaker` の使い方、補助ツールとの組み合わせ、レイテンシ調整の指針をまとめる。CLI のフラグ単位の詳細は [`cli.ja.md`](cli.ja.md) を、Python API は [`python-api.ja.md`](python-api.ja.md) を参照。
+**English** | [日本語](virtual-audio.ja.md)
 
-______________________________________________________________________
-
-## 概要
-
-VRChat を多重起動 (multi-instance) したとき、各 PID の出力音声を別々の物理 / 仮想スピーカーへ分離したい、というのが本機能の解決対象。OS レベルのアプリ別出力先割り当て (Windows の `IAudioPolicyConfig`、EarTrumpet) は内部で **exe path ベースの AppIdentity** に解決されるため、同一 `VRChat.exe` を多重起動した場合の per-PID 分離を API 仕様レベルで保証できない。さらに VRChat は `start_protected_game.exe` 経由で本体プロセスを生やすため、ポリシー登録系の API は soft fail することがある。
-
-vrcpilot は既に **PID 単位の音声キャプチャ** を持っている (Windows: proc-tap、Linux: PipeWire native、いずれも 48 kHz / stereo / float32)。これを `soundcard` で任意の出力デバイスへユーザー空間でリレーすれば、OS policy に依存せず per-PID 分離が成立する。クライアント改造 (EAC 違反) も不要。
+How to fan VRChat's output audio out to different devices per PID. This page covers `vrcpilot speaker`, how it composes with third-party helpers, and how to tune latency. For the flag-level CLI reference see [`cli.md`](cli.md); for the equivalent Python API see [`python-api.md`](python-api.md).
 
 ______________________________________________________________________
 
-## 仕組み
+## Overview
+
+The problem this feature solves: when you run multiple VRChat instances at once (multi-instance), you want each PID's audio to land on a different physical or virtual speaker. OS-level per-application output routing (Windows' `IAudioPolicyConfig`, EarTrumpet) ultimately resolves apps by their **exe-path-based AppIdentity**, so there is no API-level guarantee that two instances of the same `VRChat.exe` can be split per PID. On top of that, VRChat spawns the real process through `start_protected_game.exe`, which makes those policy-registration APIs prone to soft-failing.
+
+vrcpilot already has **per-PID audio capture** (Windows: proc-tap, Linux: PipeWire native, both 48 kHz / stereo / float32). Relaying that into an arbitrary output device through `soundcard` in user space yields per-PID separation without depending on any OS policy, and without modifying the client (which would be an EAC violation).
+
+______________________________________________________________________
+
+## How it works
 
 ```
 VRChat (PID=N) ──[proc-tap / PipeWire capture]──> vrcpilot.Speaker
                                                          │
                                                          ▼
-                                          soundcard.Player (任意の出力デバイス)
+                                          soundcard.Player (any output device)
 ```
 
-キャプチャ → 出力の素直な合成。OS のポリシーには触れない。Windows / Linux で同じコードパスを共有する (platform 別ファイルは持たない)。
+A straightforward capture-then-playback pipeline. OS-level audio policy is never touched. Windows and Linux share the same code path (there is no per-platform file).
 
-トレードオフはレイテンシ追加。総追加レイテンシは `chunk_seconds` (キャプチャ側) と `blocksize` (出力側) で調整する。既定は `chunk_seconds=0.02` (20 ms) で低レイテンシ寄り。
+The tradeoff is added latency. Total added latency is governed by `chunk_seconds` on the capture side and `blocksize` on the output side. The default `chunk_seconds=0.02` (20 ms) is tuned for low latency.
 
 ______________________________________________________________________
 
-## 基本的な使い方
+## Basic usage
 
-### デバイス列挙
+### Enumerate devices
 
 ```bash
-uv run vrcpilot speaker list
+vrcpilot speaker list
 ```
 
-stdout に YAML で出力スピーカー一覧が出る。`is_default: true` のものが OS 既定。
+Prints the available output speakers as YAML on stdout. The entry with `is_default: true` is the OS default.
 
 ```yaml
 devices:
@@ -47,49 +49,49 @@ devices:
     is_default: false
 ```
 
-### リレー開始
+### Start a relay
 
 ```bash
-uv run vrcpilot speaker route --pid 12345 --device "CABLE Input"
+vrcpilot speaker route --pid 12345 --device "CABLE Input"
 ```
 
-`--pid` は必須 (多重起動を扱う前提なので自動 resolve はしない)。`--device` には `list` で得た `id` か `name` の完全一致、もしくは部分一致 (大文字小文字無視) を渡す。曖昧マッチで複数ヒットした場合はエラー終了する。
+`--pid` is required (multi-instance is the assumed scenario, so the PID is never auto-resolved). `--device` accepts either an exact match on the `id` or `name` from `list`, or a case-insensitive substring match. If a fuzzy match resolves to more than one device the command errors out.
 
-foreground 動作。Ctrl+C で停止し exit code 0 で抜ける。VRChat プロセスが落ちた場合は exit code 1 で停止する。
+The command runs in the foreground. Ctrl+C stops it and exits with code 0. If the VRChat process dies the relay stops with exit code 1.
 
-`--device` を省略すると **OS 既定スピーカー** が選ばれる。route 開始時に解決後のデバイス名が stderr に `route: pid=12345 device='Speakers (Realtek)' (system default)` の形で 1 行表示される。
+Omitting `--device` selects the **OS default speaker**. When the relay starts the resolved device name is printed once to stderr as `route: pid=12345 device='Speakers (Realtek)' (system default)`.
 
-### レイテンシ調整
+### Tune latency
 
 ```bash
-uv run vrcpilot speaker route --pid 12345 --device "CABLE Input" \
+vrcpilot speaker route --pid 12345 --device "CABLE Input" \
     --chunk-seconds 0.05 --blocksize 1024
 ```
 
-- `--chunk-seconds` (既定 `0.02`): キャプチャ単位の秒数。小さいほど低レイテンシ、大きいほど underrun (音の途切れ) に強い。
-- `--blocksize` (既定 `None` = soundcard デフォルト): 出力側バッファのフレーム数。
+- `--chunk-seconds` (default `0.02`): capture chunk size in seconds. Smaller means lower latency; larger means more headroom against underruns (audio dropouts).
+- `--blocksize` (default `None` = soundcard default): output buffer size in frames.
 
 ______________________________________________________________________
 
-## 仮想スピーカーデバイス
+## Virtual speaker devices
 
-**仮想スピーカーは任意**。物理スピーカーへ直接リレーしても動作する。多重インスタンス分離や他ツール (DAW、配信ソフト) との連携が必要な場合だけ仮想デバイスを導入する。
+**Virtual speakers are optional.** Relaying directly to a physical speaker works fine. Reach for a virtual device only when you actually need multi-instance separation, or integration with another tool such as a DAW or streaming software.
 
 ### Windows
 
-代表的な仮想ケーブル系ツール (いずれも導入後に Windows の再起動が必要なものが多い):
+Common virtual-cable tools (most require a reboot after installation):
 
-- [VB-Audio Virtual Cable](https://vb-audio.com/Cable/) — 単一の `CABLE Input → CABLE Output` ペアを提供。多重 cable が必要なら有償の `CABLE A/B/C/D` 版を使う。
-- [VB-Audio Voicemeeter Banana](https://vb-audio.com/Voicemeeter/banana.htm) — 3 系統入力 + 仮想 cable 2 系統。ミックスやモニタリングが要るなら有力。
-- [Virtual Audio Cable (VAC)](https://vac.muzychenko.net/en/) — 有償。任意数の仮想 cable を立てられる。
+- [VB-Audio Virtual Cable](https://vb-audio.com/Cable/) — provides a single `CABLE Input → CABLE Output` pair. For multiple cables use the paid `CABLE A/B/C/D` editions.
+- [VB-Audio Voicemeeter Banana](https://vb-audio.com/Voicemeeter/banana.htm) — 3 input strips plus 2 virtual cables. A solid choice when you also need mixing or monitoring.
+- [Virtual Audio Cable (VAC)](https://vac.muzychenko.net/en/) — paid; create as many virtual cables as you want.
 
-インストール後、`uv run vrcpilot speaker list` の出力に新しいデバイスが現れることを確認。
+After install, confirm the new device shows up in `vrcpilot speaker list`.
 
 ### Linux
 
-PipeWire は仮想 sink を動的に立てられる。**事前に常駐 daemon を導入する必要はない**。
+PipeWire can spin up virtual sinks on demand. **There is no need to install a long-running daemon up front.**
 
-その場で 1 つ作る:
+Create one ad hoc:
 
 ```bash
 pactl load-module module-null-sink \
@@ -97,65 +99,65 @@ pactl load-module module-null-sink \
     sink_properties=device.description=VRChat_PID_1
 ```
 
-`uv run vrcpilot speaker list` の出力に `VRChat_PID_1` が現れる。アンロードは:
+`VRChat_PID_1` will then appear in `vrcpilot speaker list`. Unload with:
 
 ```bash
 pactl unload-module $(pactl list short modules | grep vrchat_pid_1 | cut -f1)
 ```
 
-永続化したい場合は `~/.config/pipewire/pipewire.conf.d/` 配下に config を置く。`vrcpilot linux-mic register` 系の機構も同じ仕組みを使っているので、実装例として参考になる ([`mic/linux.py`](../src/vrcpilot/mic/linux.py))。
+To persist the sink across reboots, drop a config under `~/.config/pipewire/pipewire.conf.d/`. The `vrcpilot linux-mic register` family uses the same mechanism, so [`mic/linux.py`](../src/vrcpilot/mic/linux.py) is a useful reference implementation.
 
 ______________________________________________________________________
 
-## mic 側との衝突に注意
+## Avoiding feedback loops with `vrcpilot mic`
 
-`vrcpilot mic` は **VB-Audio Virtual Cable の `CABLE Input` を既に使用している**。ここに route 先として同じ cable を指定すると、
+`vrcpilot mic` already **uses VB-Audio Virtual Cable's `CABLE Input`**. Routing speaker output to that same cable closes the loop:
 
 ```
 VRChat → speaker route → CABLE Input ─┐
                                               │
-            CABLE Output → VRChat マイク入力 ←┘ (VRChat 側で設定済み)
+            CABLE Output → VRChat mic input ←┘ (configured inside VRChat)
 ```
 
-というフィードバックループが成立し、自分の音声が自分に戻ってエコー・ハウリングが発生する。
+Your own audio comes back to you as echo / howling.
 
-回避策:
+Workarounds:
 
-- 別の仮想 cable を使う (`CABLE-A Input` / `CABLE-B Input` などの追加版を導入)。
-- Voicemeeter / VAC で別系統を構築する。
-- そもそも仮想デバイスを使わず、物理スピーカーへ直接 route する。
+- Use a different virtual cable (install the paid editions for `CABLE-A Input` / `CABLE-B Input` and friends).
+- Build a separate path through Voicemeeter or VAC.
+- Skip virtual devices entirely and route directly to a physical speaker.
 
-Linux でも同じ。`VRCPilotMic` (mic 側) と route 先 sink は別の sink にする。
-
-______________________________________________________________________
-
-## Windows 補助ツール: EarTrumpet 連携
-
-[EarTrumpet](https://eartrumpet.app/) は Windows のアプリ毎オーディオを GUI で管理できる無料 OSS ツール (Microsoft Store / GitHub release から入手可)。vrcpilot と組み合わせる典型パターンは 2 つ:
-
-**用途 1: 単一インスタンスで vrcpilot route を使わない**
-
-VRChat を 1 つしか立てないなら、EarTrumpet で `VRChat.exe` の出力先デバイスを直接指定するのが最も手軽。`vrcpilot speaker route` は不要。
-
-**用途 2: 多重 VRChat で hybrid 構成**
-
-EarTrumpet で「VRChat 全体」を仮想 cable (`CABLE Input` 等) に流しておき、各 PID は `vrcpilot speaker route --pid <N> --device <出力先>` で個別に振り分ける。
-
-### 注意
-
-EarTrumpet は内部で `IAudioPolicyConfig` を使っている。これは exe path ベースの AppIdentity 解決を行うので、**同一 `VRChat.exe` の多重起動を per-PID 分離する目的には使えない**。多重インスタンス分離は引き続き vrcpilot relay が担う。
+The same applies on Linux: keep the `VRCPilotMic` (mic side) and the relay destination on separate sinks.
 
 ______________________________________________________________________
 
-## Linux 補助ツール: PipeWire 系 GUI
+## Windows: EarTrumpet integration
 
-PipeWire 環境では以下の GUI ツールがアプリ単位ルーティングに使える。
+[EarTrumpet](https://eartrumpet.app/) is a free OSS tool (Microsoft Store / GitHub releases) that exposes per-application audio in a GUI. Two patterns combine well with vrcpilot:
 
-- [pavucontrol](https://freedesktop.org/software/pulseaudio/pavucontrol/) — PulseAudio (PipeWire の Pulse 互換層) 向けの GUI。Playback タブからアプリ単位で sink を選べる。UX は EarTrumpet に最も近い。
-- [Helvum](https://gitlab.freedesktop.org/pipewire/helvum) — PipeWire ネイティブのグラフエディタ。stream ↔ sink を線で結ぶ。
-- [qpwgraph](https://gitlab.freedesktop.org/rncbc/qpwgraph) — Helvum と同系統のグラフエディタ。Qt ベースで Helvum より高機能。
+**Pattern 1: single instance, no vrcpilot route**
 
-インストール例:
+If you only ever run one VRChat instance, point `VRChat.exe` directly to your output device through EarTrumpet. `vrcpilot speaker route` is not needed.
+
+**Pattern 2: multi-instance hybrid**
+
+Use EarTrumpet to send "all VRChat" to a virtual cable (e.g. `CABLE Input`), then split the individual PIDs back out with `vrcpilot speaker route --pid <N> --device <output>` per instance.
+
+### Caveat
+
+EarTrumpet drives `IAudioPolicyConfig` under the hood, which resolves AppIdentity from the exe path. That means **it cannot separate multiple instances of the same `VRChat.exe` per PID**. Per-instance separation remains vrcpilot relay's job.
+
+______________________________________________________________________
+
+## Linux: PipeWire GUI helpers
+
+On PipeWire the following GUI tools handle per-application routing.
+
+- [pavucontrol](https://freedesktop.org/software/pulseaudio/pavucontrol/) — GUI for PulseAudio (PipeWire's Pulse compatibility layer). The Playback tab lets you pick a sink per application. The closest UX equivalent to EarTrumpet.
+- [Helvum](https://gitlab.freedesktop.org/pipewire/helvum) — a PipeWire-native graph editor. Wire streams to sinks with cables.
+- [qpwgraph](https://gitlab.freedesktop.org/rncbc/qpwgraph) — same lineage as Helvum, Qt-based, more featureful.
+
+Install examples:
 
 ```bash
 # Debian / Ubuntu
@@ -168,26 +170,26 @@ sudo dnf install pavucontrol helvum qpwgraph
 sudo pacman -S pavucontrol helvum qpwgraph
 ```
 
-### 注意
+### Caveat
 
-PipeWire の手動結線は **VRChat 再起動で剥がれる**。インスタンスを立て直すたびに GUI で結線し直すことになるので、永続的な per-PID 分離は vrcpilot relay 推奨。GUI ツールは「単一インスタンス」または「hybrid 構成 (vrcpilot route と併用)」向け。
+Manual PipeWire wiring **comes undone every time VRChat restarts** — you would re-draw the cables in the GUI on every instance relaunch. For durable per-PID separation, prefer vrcpilot relay. The GUI tools are best suited to "single instance" or "hybrid setup (alongside vrcpilot route)".
 
 ______________________________________________________________________
 
-## レイテンシ調整ガイド
+## Latency tuning
 
-既定は `chunk_seconds=0.02` (20 ms)、`blocksize=None` (soundcard デフォルト) で低レイテンシ寄りに振っている。
+Defaults are `chunk_seconds=0.02` (20 ms) and `blocksize=None` (soundcard default), biased toward low latency.
 
-判断フロー:
+Decision flow:
 
-1. まず既定で route してみる。
-2. 音が途切れる (underrun) / プチプチ鳴る場合は `--chunk-seconds 0.05` 程度まで段階的に上げる。
-3. それでも不安定なら `--blocksize 2048` 等で出力バッファを大きく取る。
-4. 体感レイテンシが大きすぎると感じる場合は逆に `--chunk-seconds 0.01` まで下げる余地もある (CPU 負荷と underrun リスクとのトレードオフ)。
+1. Try the defaults first.
+2. If audio drops out (underrun) or you hear crackles, raise `--chunk-seconds` step by step up to around `0.05`.
+3. Still unstable? Increase the output buffer with `--blocksize 2048` or similar.
+4. If the perceived latency is too high, you can also push `--chunk-seconds` down to `0.01` (tradeoff: more CPU load and higher underrun risk).
 
-### 実測の目安 (Phase 6 e2e 観察)
+### Phase 6 e2e observations
 
-- **Windows 11 (Ryzen / Realtek + VB-Cable + DELL モニタ出力)**: 既定 `chunk_seconds=0.02` で underrun なし。VRChat の起動・ミュート切替・UI 効果音などのトランジェントを目安に「会話のレイテンシ感」程度の遅れに留まり、`record` 経由のキャプチャ波形と並べて聴感差は感じにくいレンジ。
-- 同条件で 2 多重 VRChat (`--profile 0` / `--profile 1`) を起動し、PID#1 → Realtek 内蔵スピーカー、PID#2 → VB-Cable In 16ch へ独立にリレーした際、両方の経路が proc-tap → soundcard の合成で互いに干渉なく独立に流れることを確認 (OS policy 非依存の per-PID 分離が成立)。
-- `integration_real` マーカー付きの単体テスト (`uv run pytest -m integration_real tests/vrcpilot/speaker/routing/`) は 26 件すべて 2-3 秒 で green。Router の start/stop 周回や空フレーム透過は実 soundcard 越しに収束する。
-- **既知の制約**: route 実行中に VRChat プロセスが死亡しても、CLI は `time.sleep` ループに留まる (内部 SpeakerLoop の例外は次回 `Router.stop()` で初めて surface する仕様)。ユーザーは Ctrl+C で能動的に停止する必要がある。将来の改善余地 (route ループ内で `Router.is_running` を polling) は本リリース範囲外。
+- **Windows 11 (Ryzen / Realtek + VB-Cable + DELL monitor output)**: no underruns at the default `chunk_seconds=0.02`. Judging from transients such as VRChat launch sounds, mute toggles, and UI SFX, the perceived delay stays in the "conversational latency" range; A/B-ing against a `record`-captured waveform reveals little audible difference.
+- Under the same conditions, two concurrent VRChat instances (`--profile 0` / `--profile 1`) were relayed independently — PID#1 to the built-in Realtek speakers, PID#2 to VB-Cable In 16ch. Both paths flowed through proc-tap → soundcard without interfering with each other, confirming per-PID separation that does not rely on any OS policy.
+- The `integration_real` unit tests (`pytest -m integration_real tests/vrcpilot/speaker/routing/`) — 26 in total — all stay green in 2-3 seconds. Router start/stop cycling and empty-frame passthrough converge over real `soundcard` devices.
+- **Known limitation**: if the VRChat process dies while a relay is running, the CLI stays parked in its `time.sleep` loop (internal `SpeakerLoop` exceptions only surface on the next `Router.stop()` by design). The user has to stop it explicitly with Ctrl+C. A future improvement (polling `Router.is_running` from the route loop) is out of scope for this release.

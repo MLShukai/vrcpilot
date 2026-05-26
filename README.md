@@ -17,6 +17,7 @@ Python automation toolkit for the VRChat desktop client on Windows / Linux. It c
 - **Window control** — focus / unfocus the VRChat window and check its foreground state (Win32 / X11 / XWayland).
 - **Screen capture** — `Capture` / `CaptureLoop` for streaming video frames and `take_screenshot` for one-off captures that round-trip through YAML.
 - **Audio capture** — `Speaker` / `SpeakerLoop` for VRChat-only audio (native PipeWire pipeline on Linux; `proc-tap` process loopback on Windows).
+- **Per-PID audio routing** — `vrcpilot speaker route` and `vrcpilot.speaker.routing` relay one VRChat instance's output audio to an independent OS output device in user space, so multi-instance VRChat setups can each be pinned to a different physical speaker or virtual cable without relying on OS-level per-app policy. Cross-platform (Windows / Linux). See [`docs/virtual-audio.md`](docs/virtual-audio.md).
 - **Unified recording** — `vrcpilot record` writes MP4 (video and/or audio) or WAV (audio only) to a file, or streams a self-describing Matroska (MKV) byte stream to stdout for piping into `ffmpeg` etc.
 - **OCR** — pluggable `OCREngine` ABC with the default `RapidOCREngine`. `ocr()` returns word-level results in VRChat window-local coordinates that feed straight into `mouse.move()`.
 - **Image-template detection** — `TemplateDetectEngine` using OpenCV `TM_CCOEFF_NORMED`. Detections use the same coordinate schema as OCR.
@@ -240,12 +241,13 @@ with vrcpilot.Mic(sample_rate=48000, channels=1) as mic:
 | `osc`        | Send VRChat OSC messages: `send` / `axis` / `tap` / `hold` / `chatbox` / `typing` / `avatar`                                                                                                                              |
 | `mic`        | Stream WAV / raw s16le PCM into a virtual mic device (Windows + VB-Cable, Linux + PipeWire); defaults to reading stdin                                                                                                    |
 | `linux-mic`  | Register / unregister / inspect the `VRCPilotMic` PipeWire virtual mic (Linux only). `--suffix NAME` targets `VRCPilotMic_<NAME>`; `--all` applies to every registered sink. See [`docs/cli.md`](docs/cli.md) for details |
+| `speaker`    | `list` enumerates output audio devices; `route --pid PID [--device NAME]` relays one VRChat instance's audio to a given output device (foreground, Ctrl+C to stop). See [`docs/virtual-audio.md`](docs/virtual-audio.md)  |
 
 ## Shell Completion
 
 `vrcpilot` supports tab completion through [`argcomplete`](https://pypi.org/project/argcomplete/). The following items can be completed:
 
-- Subcommands (`launch` / `pid` / `terminate` / `focus` / `unfocus` / `screenshot` / `record` / `mouse` / `keyboard` / `paste` / `ocr` / `detect` / `osc` / `mic` / `linux-mic`)
+- Subcommands (`launch` / `pid` / `terminate` / `focus` / `unfocus` / `screenshot` / `record` / `mouse` / `keyboard` / `paste` / `ocr` / `detect` / `osc` / `mic` / `linux-mic` / `speaker`)
 - Options (`--steam-path`, etc.)
 - Options that take file paths (`.exe` for `--steam-path`, `.png` for `--query`, etc.)
 
