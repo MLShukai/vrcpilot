@@ -12,12 +12,13 @@ resources keyed by its VRChat ``pid``:
 Routing replacement, not addition
 ---------------------------------
 
-VRChat's ``sink_input`` is moved (via ``Pulse.sink_input_move``) onto
-the per-pid tap, so its audio leaves the default sink entirely. The
-loopback then brings it back to the default sink as a single
-controlled path. The user's audible experience is unchanged from the
-previous single-sink design, but the captures of two side-by-side
-VRChat instances no longer leak into each other.
+VRChat's ``sink_input`` is *moved* onto the per-pid tap via
+``Pulse.sink_input_move`` — the stream's link to the default sink is
+replaced, not duplicated. The loopback then brings the audio back to
+the default sink as a single, controlled path. Net audible experience
+matches the previous single-sink design, but two side-by-side VRChat
+instances now stay isolated: each PID's audio reaches exactly one
+tap, with no cross-bleed in either capture.
 
 State / cleanup
 ---------------
@@ -26,8 +27,11 @@ A breadcrumb at
 ``$XDG_RUNTIME_DIR/vrcpilot/speaker-taps/{vrchat_pid}.json`` records
 the module ids plus the VRChat process's ``create_time``. Start-up
 idempotently sweeps tap modules whose VRChat PID is dead or has been
-recycled (mismatched ``create_time``), so an ungraceful previous run
-never wedges PipeWire.
+recycled (``create_time`` mismatches the breadcrumb), so an ungraceful
+previous run never wedges PipeWire. The ``create_time`` check matters
+because PIDs are recycled by the kernel; without it, a tap from a
+crashed run would be wrongly treated as belonging to whichever new
+process happened to inherit the same PID.
 """
 
 from __future__ import annotations
@@ -64,11 +68,12 @@ _logger = logging.getLogger(__name__)
 _REQUIRED_CLIS: Final[tuple[str, ...]] = ("pw-record",)
 
 #: Match a ``vrcpilot_tap_<pid>`` null-sink argument. The trailing
-#: ``\s`` anchors on PulseAudio's argument-token separator so e.g.
-#: ``vrcpilot_tap_1234`` never spuriously matches ``vrcpilot_tap_12345``.
+#: ``\s`` is load-bearing — see :func:`_extract_tap_pid` for why
+#: anchoring on PulseAudio's token separator is required.
 _NULL_SINK_RE: Final[re.Pattern[str]] = re.compile(r"sink_name=vrcpilot_tap_(\d+)\s")
 
 #: Match a ``module-loopback`` whose source is one of our per-pid taps.
+#: Same trailing-``\s`` anchor rationale as :data:`_NULL_SINK_RE`.
 _LOOPBACK_RE: Final[re.Pattern[str]] = re.compile(
     r"source=vrcpilot_tap_(\d+)\.monitor\s"
 )
@@ -108,13 +113,13 @@ def _null_sink_args(pid: int) -> str:
 
 
 def _loopback_args(pid: int, default_sink_name: str) -> str:
-    """``module-loopback`` arguments bridging the per-pid tap's monitor back to
-    the resolved default sink so the user keeps hearing VRChat.
+    """``module-loopback`` arguments for the per-pid tap → default-sink bridge.
 
-    ``source_dont_move`` / ``sink_dont_move`` keep the loopback's
-    endpoints pinned against accidental ``pavucontrol`` moves so a
-    misclick cannot silently re-route VRChat audio away from the
-    speakers.
+    Because :func:`_move_existing_streams_to_tap` replaces (rather
+    than adds to) VRChat's routing, this loopback is the *only* path
+    from the tap back to the speakers. ``source_dont_move`` /
+    ``sink_dont_move`` pin both endpoints so an accidental
+    ``pavucontrol`` move cannot silently mute VRChat for the user.
     """
     return (
         f"source={_tap_sink_name(pid)}.monitor "
@@ -146,9 +151,13 @@ def _extract_tap_pid(module_name: str | None, argument: str | None) -> int | Non
     """Return the VRChat PID encoded in a vrcpilot tap module argument.
 
     Returns ``None`` when ``module_name`` / ``argument`` does not belong
-    to one of our taps. The matcher anchors on the trailing
-    whitespace PulseAudio emits between argument tokens so e.g.
-    ``vrcpilot_tap_1234`` never accidentally matches ``vrcpilot_tap_12345``.
+    to one of our taps.
+
+    PulseAudio separates argument tokens with whitespace, so the regex
+    anchors on a trailing ``\\s`` and a trailing space is appended to
+    ``argument`` before matching. Without that anchor,
+    ``vrcpilot_tap_1234`` would spuriously match ``vrcpilot_tap_12345``
+    and the stale-tap sweep would unload an unrelated, live PID's sink.
     """
     if not module_name or not argument:
         return None
@@ -165,25 +174,26 @@ def _extract_tap_pid(module_name: str | None, argument: str | None) -> int | Non
 class PipeWireSpeakerBackend(SpeakerBackend):
     """SpeakerBackend that captures one VRChat process via native PipeWire.
 
-    Constructor performs the full per-pid setup under an ``ExitStack``
-    so a partial start-up never leaks a null-sink, a loopback, or the
-    ``pw-record`` subprocess. :meth:`close` is also registered with
-    :func:`atexit` so an interpreter shutdown that bypasses
-    ``__exit__`` still releases PipeWire resources.
+    The constructor performs the full per-pid setup under an
+    ``ExitStack`` so a partial start-up never leaks a null-sink, a
+    loopback, or the ``pw-record`` subprocess. :meth:`close` is also
+    registered with :func:`atexit` so an interpreter shutdown that
+    bypasses ``__exit__`` still releases PipeWire resources.
 
     Args:
         read_timeout: Seconds :meth:`read` waits for the first chunk
-            before returning empty. Must be ``> 0``.
-        pid: Target VRChat PID. The backend creates a dedicated
-            ``vrcpilot_tap_{pid}`` null-sink and moves only that
-            process's sink_inputs onto it, so concurrent VRChat
-            instances never share a tap. Callers (typically
-            :class:`vrcpilot.speaker.Speaker`) supply a pre-resolved
-            PID rather than re-resolving here.
+            before returning an empty array. Must be ``> 0``.
+        pid: Target VRChat PID. A dedicated ``vrcpilot_tap_{pid}``
+            null-sink is created and only that process's sink_inputs
+            are moved onto it, so concurrent VRChat instances stay
+            isolated. Callers (typically
+            :class:`vrcpilot.speaker.Speaker`) pre-resolve the PID
+            rather than re-resolving here, so the backend's lifetime
+            stays bound to one definite VRChat process.
 
     Raises:
         ValueError: ``read_timeout`` is not strictly positive.
-        RuntimeError: The required CLI is missing, or the PulseAudio /
+        RuntimeError: The required CLI is missing, the PulseAudio /
             PipeWire control plane refused the null-sink / loopback
             load, or the default sink name could not be resolved.
     """
@@ -296,8 +306,11 @@ class PipeWireSpeakerBackend(SpeakerBackend):
     def _open_pulse(self, client_name: str) -> Any:
         """Construct the ``pulsectl.Pulse`` control connection.
 
-        Test seam (``mocker.patch.object``) — also keeps the
-        ``pulsectl`` import local so non-Linux test runs never need it.
+        Carved out as its own method so tests can substitute a stand-in
+        via ``mocker.patch.object`` without mocking ``pulsectl`` (which
+        the project's testing policy forbids for 3rd-party surfaces).
+        The ``pulsectl`` import is kept local so non-Linux test runs
+        never need the package available.
         """
         from pulsectl import (  # pyright: ignore[reportMissingTypeStubs]
             Pulse,
@@ -308,8 +321,13 @@ class PipeWireSpeakerBackend(SpeakerBackend):
     def _spawn_pw_record(self) -> Any:
         """Spawn the ``pw-record`` subprocess piped to stdout.
 
+        Same test-seam role as :meth:`_open_pulse`: an isolated factory
+        so tests can replace it with a fake :class:`subprocess.Popen`
+        without monkey-patching :mod:`subprocess` itself.
+
         ``bufsize=0`` keeps the OS pipe un-double-buffered so the
-        drain thread can pull at the latency we want. Test seam.
+        drain thread sees bytes at PipeWire's emission cadence rather
+        than after a userland buffer fills.
         """
         return subprocess.Popen(
             list(_pw_record_argv(self._pid)),
@@ -430,11 +448,12 @@ class PipeWireSpeakerBackend(SpeakerBackend):
     def _resolve_default_sink_name(self) -> str:
         """Resolve the current default sink name for the loopback ``sink=``.
 
-        Embedding the literal sink name (rather than ``@DEFAULT_SINK@``)
-        avoids a PipeWire-Pulse placeholder-resolution edge that some
-        distros disable. The trade-off is that the loopback does not
-        follow a runtime default-sink change; that limitation is
-        documented in the plan.
+        Embedding the literal sink name (rather than the
+        ``@DEFAULT_SINK@`` placeholder) sidesteps a PipeWire-Pulse
+        placeholder-resolution edge that some distros disable. The
+        accepted trade-off is that the loopback does not follow a
+        runtime default-sink change; users who hot-swap their default
+        output device need to restart the backend.
         """
         info: Any = self._pulse.server_info()  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
         name_raw: Any = getattr(info, "default_sink_name", None)
@@ -562,7 +581,7 @@ class PipeWireSpeakerBackend(SpeakerBackend):
         )
 
     def _enumerate_vrchat_sink_inputs(self) -> list[int]:
-        """Return ``sink_input.index`` for VRChat streams owned by
+        """Return ``sink_input.index`` values for VRChat streams of
         ``self._pid``.
 
         Filter precedence:
@@ -635,6 +654,13 @@ class PipeWireSpeakerBackend(SpeakerBackend):
 
     def _move_existing_streams_to_tap(self) -> None:
         """Move every matching VRChat sink_input onto the per-pid tap.
+
+        Uses ``Pulse.sink_input_move`` — a *replacement* of the input's
+        routing, not an added link. After the move VRChat's audio
+        leaves the default sink entirely; the module-loopback is what
+        feeds it back to the user. (Previous designs added a tap link
+        alongside the default-sink link, which leaked audio across
+        concurrent instances.)
 
         Idempotent: an input already routed to our tap stays put.
         Failures are logged rather than raised so a transient daemon
@@ -749,8 +775,12 @@ class PipeWireSpeakerBackend(SpeakerBackend):
             _logger.warning("pulse event listener exited: %s", exc)
 
     def _on_pulse_event(self, event: Any) -> None:
-        """Re-move VRChat streams onto the tap when a new ``sink_input``
-        appears.
+        """Re-route freshly-created VRChat ``sink_input``s onto the tap.
+
+        Without this callback, a new sink_input that VRChat creates
+        mid-session (e.g. when the user opens a UI dialog with its own
+        audio stream) would land on the default sink and bypass the
+        capture entirely.
 
         Pulsectl callback. Failures are logged but swallowed — the
         listener must keep running. Honours :attr:`_stop_events` as the
@@ -787,9 +817,11 @@ class PipeWireSpeakerBackend(SpeakerBackend):
     def _safe_unload_by_attr(self, attr_name: str, module_label: str) -> None:
         """Shared body of the two ``_safe_unload_*`` teardown methods.
 
-        Keeps the per-method names stable for ``ExitStack.callback`` /
-        ``close()`` while collapsing the pulse-call + warning + clear
-        logic into one place.
+        The two wrappers below remain as thin delegators rather than
+        being inlined at every call site because ``ExitStack.callback``
+        and tracebacks render the callable's ``__name__``: a frame
+        labelled ``_safe_unload_loopback`` is far more debuggable from
+        a partial-teardown log than a generic ``_safe_unload_by_attr``.
         """
         module_id = getattr(self, attr_name)
         if module_id is None or self._pulse is None:
@@ -801,9 +833,14 @@ class PipeWireSpeakerBackend(SpeakerBackend):
         setattr(self, attr_name, None)
 
     def _safe_unload_loopback(self) -> None:
+        # Kept as a named wrapper so ExitStack / traceback frames
+        # identify which module is being torn down. See
+        # :meth:`_safe_unload_by_attr`.
         self._safe_unload_by_attr("_loopback_module_id", "module-loopback")
 
     def _safe_unload_null_sink(self) -> None:
+        # Kept as a named wrapper for the same reason as
+        # :meth:`_safe_unload_loopback`.
         self._safe_unload_by_attr("_null_sink_module_id", "module-null-sink")
 
     def _safe_remove_state_file(self) -> None:
@@ -881,20 +918,26 @@ class PipeWireSpeakerBackend(SpeakerBackend):
                 return
             self._closed = True
 
-        # Teardown order matters:
+        # Teardown order matters. The data plane is dismantled top-down
+        # (event source → producer → consumer); the control plane is
+        # then unwound bottom-up so each module always observes a
+        # well-formed upstream/downstream:
+        #
         # 1. Event listener first, so it can't fire a callback into a
         #    half-torn-down backend.
         # 2. pw-record next, which lets the drain thread observe EOF.
         # 3. Drain thread last among the data plane, joined cleanly.
-        # 4. Loopback BEFORE null-sink so the loopback never sees a
-        #    deleted source (and PipeWire stops re-routing instantly).
-        # 5. Null-sink unload. PulseAudio re-routes VRChat's sink_input
-        #    back to the default sink automatically when the sink it
-        #    was moved to disappears, so no explicit move-back is
-        #    needed and the user keeps hearing VRChat.
+        # 4. Loopback BEFORE null-sink. Tearing the source out from
+        #    under a live loopback can stall PipeWire mid-pull;
+        #    unloading the consumer first guarantees the source still
+        #    exists for the loopback's last cycle.
+        # 5. Null-sink unload. When the sink VRChat's sink_input was
+        #    moved to disappears, PulseAudio auto-routes the input back
+        #    to the default sink, so no explicit move-back is needed —
+        #    the user keeps hearing VRChat without a gap.
         # 6. State file after both modules are gone — a concurrent
         #    janitor must never see the breadcrumb without its sink.
-        # 7. Pulse control connection last.
+        # 7. Pulse control connection last (everything above needs it).
         self._safe_join_event_thread()
         self._safe_terminate_record_proc()
         self._safe_join_drain_thread()
