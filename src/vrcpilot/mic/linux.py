@@ -36,6 +36,8 @@ if sys.platform != "linux":
 import logging
 import os
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -156,6 +158,28 @@ def open_pulse_control(client_name: str = "vrcpilot-mic") -> Any:
     return Pulse(client_name)  # pyright: ignore[reportUnknownVariableType]
 
 
+@contextmanager
+def _pulse_session(client_name: str) -> Iterator[Any]:
+    """Yield an open ``pulsectl.Pulse`` and always close it on exit.
+
+    Centralises the ``open_pulse_control`` -> ``try / finally:
+    pulse.close()`` boilerplate that ``_runtime_load_null_sink`` and
+    ``_runtime_unload_null_sink`` share. ``ImportError`` (pulsectl
+    missing) and any control-plane open failure propagate so callers
+    can map them to their own warning strings; ``pulse.close()``
+    failures inside the ``finally`` are logged and swallowed because
+    the work is already done by the time we reach them.
+    """
+    pulse = open_pulse_control(client_name)
+    try:
+        yield pulse
+    finally:
+        try:
+            pulse.close()  # pyright: ignore[reportUnknownMemberType]
+        except Exception as exc:  # noqa: BLE001
+            _logger.warning("pulse close failed: %s", exc)
+
+
 def is_registered(*, suffix: str = "") -> bool:
     """Whether the persistent PipeWire config fragment is in place."""
     return config_path(suffix=suffix).exists()
@@ -174,19 +198,18 @@ def iter_registered_suffixes() -> list[str]:
     if not directory.exists():
         return []
 
-    suffixes: list[str] = []
-    for entry in directory.glob("vrcpilot-mic*.conf"):
-        match = _CONFIG_FILENAME_RE.match(entry.name)
-        if match is None:
-            continue
-        captured = match.group(1)
-        suffixes.append(captured if captured is not None else "")
-
+    # Group 1 is ``None`` for the bare ``vrcpilot-mic.conf`` and the
+    # regex's quantifier guarantees a non-empty capture otherwise, so
+    # ``or ""`` collapses the two cases cleanly.
+    suffixes = {
+        match.group(1) or ""
+        for entry in directory.glob("vrcpilot-mic*.conf")
+        if (match := _CONFIG_FILENAME_RE.match(entry.name)) is not None
+    }
     # Empty suffix first, then remaining suffixes in lexicographic
-    # order; de-dup defensively in case the glob picks up the same
-    # name twice on case-insensitive filesystems.
-    unique = sorted(set(suffixes), key=lambda s: (s != "", s))
-    return unique
+    # order so callers (CLI listings, e2e enumerations) get a stable
+    # ordering across runs and filesystems.
+    return sorted(suffixes, key=lambda s: (s != "", s))
 
 
 def _write_config(path: Path, contents: str) -> bool:
@@ -249,7 +272,23 @@ def _runtime_load_null_sink(*, suffix: str = "") -> str | None:
     caller surfaces it via :attr:`RegisterResult.runtime_warning`.
     """
     try:
-        pulse = open_pulse_control("vrcpilot-mic-register")
+        with _pulse_session("vrcpilot-mic-register") as pulse:
+            sink_name = sink_name_for(suffix)
+            # Re-runs must not stack two null-sinks; mirrors
+            # ``_reset_stale_modules`` in ``src/vrcpilot/speaker/linux.py``.
+            _unload_matching_null_sinks(pulse, sink_name=sink_name)
+            try:
+                pulse.module_load(  # pyright: ignore[reportUnknownMemberType]
+                    "module-null-sink", _build_null_sink_args(suffix)
+                )
+            except Exception as exc:  # noqa: BLE001
+                msg = (
+                    "pulsectl module_load failed; the persistent config was "
+                    "written but the sink will not be available until PipeWire "
+                    f"restarts ({exc})"
+                )
+                _logger.warning(msg)
+                return msg
     except ImportError as exc:
         msg = (
             "pulsectl is not installed; the persistent config was written "
@@ -265,30 +304,6 @@ def _runtime_load_null_sink(*, suffix: str = "") -> str | None:
         )
         _logger.warning(msg)
         return msg
-
-    try:
-        sink_name = sink_name_for(suffix)
-        # Re-runs must not stack two null-sinks; mirrors
-        # ``_reset_stale_modules`` in ``src/vrcpilot/speaker/linux.py``.
-        _unload_matching_null_sinks(pulse, sink_name=sink_name)
-
-        try:
-            pulse.module_load(  # pyright: ignore[reportUnknownMemberType]
-                "module-null-sink", _build_null_sink_args(suffix)
-            )
-        except Exception as exc:  # noqa: BLE001
-            msg = (
-                "pulsectl module_load failed; the persistent config was "
-                "written but the sink will not be available until PipeWire "
-                f"restarts ({exc})"
-            )
-            _logger.warning(msg)
-            return msg
-    finally:
-        try:
-            pulse.close()  # pyright: ignore[reportUnknownMemberType]
-        except Exception as exc:  # noqa: BLE001
-            _logger.warning("pulse close failed: %s", exc)
 
     return None
 
@@ -337,7 +352,8 @@ def _runtime_unload_null_sink(*, suffix: str = "") -> bool:
     source of truth, so a failure here never blocks the config delete.
     """
     try:
-        pulse = open_pulse_control("vrcpilot-mic-unregister")
+        with _pulse_session("vrcpilot-mic-unregister") as pulse:
+            count = _unload_matching_null_sinks(pulse, sink_name=sink_name_for(suffix))
     except ImportError as exc:
         _logger.warning(
             "pulsectl is not installed; cannot runtime-unload VRCPilotMic (%s)",
@@ -349,14 +365,6 @@ def _runtime_unload_null_sink(*, suffix: str = "") -> bool:
             "could not open pulsectl control connection for unload: %s", exc
         )
         return False
-
-    try:
-        count = _unload_matching_null_sinks(pulse, sink_name=sink_name_for(suffix))
-    finally:
-        try:
-            pulse.close()  # pyright: ignore[reportUnknownMemberType]
-        except Exception as exc:  # noqa: BLE001
-            _logger.warning("pulse close failed: %s", exc)
     return count > 0
 
 
