@@ -10,7 +10,7 @@ from typing import Self
 import numpy as np
 from numpy.typing import NDArray
 
-from vrcpilot.speaker.session import Speaker
+from .session import Speaker
 
 type AudioCallback = Callable[[NDArray[np.float32]], None]
 

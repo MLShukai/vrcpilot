@@ -42,7 +42,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from vrcpilot.mic.base import VIRTUAL_MIC_SINK_NAME
+from .base import VIRTUAL_MIC_SINK_NAME
 
 _logger = logging.getLogger(__name__)
 

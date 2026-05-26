@@ -23,17 +23,17 @@ Public surface:
 
 from __future__ import annotations
 
-from vrcpilot.speaker.routing.base import AudioDevice
-from vrcpilot.speaker.routing.devices import (
+from .base import AudioDevice
+from .devices import (
     default_device,
     find_device,
     list_devices,
 )
-from vrcpilot.speaker.routing.errors import (
+from .errors import (
     AudioRoutingError,
     DeviceNotFoundError,
 )
-from vrcpilot.speaker.routing.router import Router, route
+from .router import Router, route
 
 __all__ = [
     "AudioDevice",

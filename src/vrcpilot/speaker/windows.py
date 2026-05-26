@@ -21,7 +21,7 @@ from typing import Any, override
 import numpy as np
 from numpy.typing import NDArray
 
-from vrcpilot.speaker.base import CHANNELS, SpeakerBackend
+from .base import CHANNELS, SpeakerBackend
 
 _logger = logging.getLogger(__name__)
 

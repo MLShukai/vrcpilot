@@ -8,8 +8,8 @@ other platform's dependencies.
 
 from __future__ import annotations
 
-from vrcpilot.speaker.loop import AudioCallback, SpeakerLoop
-from vrcpilot.speaker.session import Speaker
+from .loop import AudioCallback, SpeakerLoop
+from .session import Speaker
 
 __all__ = [
     "AudioCallback",

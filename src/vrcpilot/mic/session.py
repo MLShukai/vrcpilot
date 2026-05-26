@@ -13,8 +13,8 @@ from typing import Any, Self
 import numpy as np
 from numpy.typing import NDArray
 
-from vrcpilot.mic.base import SAMPLE_RATE
-from vrcpilot.mic.devices import lookup_speaker, resolve_device_name
+from .base import SAMPLE_RATE
+from .devices import lookup_speaker, resolve_device_name
 
 
 def _validate_chunk(chunk: NDArray[np.float32], *, expected_channels: int) -> None:

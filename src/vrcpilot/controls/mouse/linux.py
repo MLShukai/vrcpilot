@@ -17,7 +17,7 @@ from typing import override
 import inputtino
 import mss
 
-from vrcpilot.controls.mouse.base import Mouse, MouseButton
+from .base import Mouse, MouseButton
 
 # inputtino's scroll API takes distance in 120-per-notch high-resolution
 # units; we expose plain notches and multiply on the way down.

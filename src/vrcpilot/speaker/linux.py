@@ -96,7 +96,7 @@ import numpy as np
 import psutil
 from numpy.typing import NDArray
 
-from vrcpilot.speaker.base import CHANNELS, SpeakerBackend
+from .base import CHANNELS, SpeakerBackend
 
 _logger = logging.getLogger(__name__)
 
