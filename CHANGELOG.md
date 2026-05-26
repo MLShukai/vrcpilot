@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`vrcpilot.speaker.routing` subpackage and `vrcpilot speaker` CLI**: PID 単位の VRChat 出力音声を任意のスピーカーデバイスへユーザー空間でリレーする cross-platform 機能。`AudioDevice` / `list_devices` / `default_device` / `find_device` / `Router` / `route` / `AudioRoutingError` / `DeviceNotFoundError` の 8 シンボルを公開。Windows は proc-tap、Linux は PipeWire native の既存 PID-scoped capture をそのまま使い、`soundcard` で出力先デバイスへ転送する素直な合成。OS policy (`IAudioPolicyConfig` / EarTrumpet) に依存しないため、同じ `VRChat.exe` の多重起動でも per-PID 分離が成立する。CLI は `vrcpilot speaker list` (出力デバイスを YAML で列挙) と `vrcpilot speaker route --pid N [--device <id|name>] [--chunk-seconds 0.02] [--blocksize N]` (foreground リレー、Ctrl+C で停止) の 2 アクション。`--device` 省略時は OS 既定スピーカーへ流す。仮想スピーカーデバイス (VB-Cable / Voicemeeter / VAC / PipeWire null-sink) のセットアップと、補助 GUI ツール (Windows: EarTrumpet、Linux: pavucontrol / Helvum / qpwgraph) との組み合わせパターンを [`docs/virtual-audio.md`](docs/virtual-audio.md) にまとめた。
 - **`vrcpilot linux-mic` gains `--suffix <NAME>` / `--all`**, primarily so multiple AI agent instances can run in parallel with each instance owning a dedicated virtual mic instead of fighting over a single shared `VRCPilotMic`. Suffixed sinks (e.g. `VRCPilotMic_bot`) can now be registered side-by-side; omitting `--suffix` preserves the original `VRCPilotMic` sink name. `status --all` / `unregister --all` enumerate / bulk-remove every `vrcpilot-mic*.conf` under the PipeWire config directory.
 
 ## [0.3.0] - 2026-05-25
