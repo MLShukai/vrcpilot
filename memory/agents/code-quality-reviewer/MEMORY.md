@@ -15,3 +15,4 @@
 ## project（vrcpilot 固有の確立パターン）
 
 - [pulsectl session pattern](project_pulsectl_session_pattern.md) — `vrcpilot.mic.linux._pulse_session(client_name)` で `open_pulse_control` → `try/finally close` の boilerplate を集約。pulsectl を使う新規コードはこの CM を経由する
+- [speaker.linux seams / log contract](project_speaker_linux_seams.md) — PipeWire backend の pinned seam・ログ prefix 契約・pure helper 一覧。リファクタ前に触ってよい/だめな境界を確認
