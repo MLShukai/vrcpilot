@@ -14,8 +14,6 @@ from vrcpilot.mic.base import (
     SAMPLE_RATE,
     VIRTUAL_MIC_SINK_NAME,
     MicDeviceNotFoundError,
-    description_for,
-    sink_name_for,
 )
 from vrcpilot.mic.devices import default_device_name
 from vrcpilot.mic.session import Mic
@@ -27,6 +25,4 @@ __all__ = [
     "SAMPLE_RATE",
     "VIRTUAL_MIC_SINK_NAME",
     "default_device_name",
-    "description_for",
-    "sink_name_for",
 ]

@@ -105,13 +105,12 @@ def register(subparsers: SubParsersAction) -> None:
 def _run_register(*, suffix: str, runtime_load: bool) -> int:
     """Execute the ``register`` action.
 
-    Maps the ``ValueError`` :func:`vrcpilot.mic.base._normalize_suffix`
+    Maps the ``ValueError`` :func:`vrcpilot.mic.linux._normalize_suffix`
     raises for malformed suffixes to exit code 2 (argparse-style usage
     error) so scripts can distinguish "you typed it wrong" from a real
     PipeWire failure.
     """
     from vrcpilot.mic import linux as mic_linux
-    from vrcpilot.mic.base import description_for
 
     try:
         result = mic_linux.register_virtual_mic(
@@ -141,7 +140,7 @@ def _run_register(*, suffix: str, runtime_load: bool) -> int:
     # Always print the VRChat-side setup hint; the persistent config is
     # the source of truth regardless of whether the runtime load
     # succeeded, so users still need this step.
-    description = description_for(result.suffix)
+    description = mic_linux.description_for(result.suffix)
     print(
         f"In VRChat Audio settings, select 'Monitor of {description}' "
         "as the microphone input",
@@ -276,7 +275,6 @@ def _print_status_block(suffix: str, *, include_suffix_header: bool) -> None:
     existing pins.
     """
     from vrcpilot.mic import linux as mic_linux
-    from vrcpilot.mic.base import sink_name_for
 
     if include_suffix_header:
         print(f"suffix: {suffix}")
@@ -286,7 +284,7 @@ def _print_status_block(suffix: str, *, include_suffix_header: bool) -> None:
     print(f"config: {'present' if config_present else 'absent'}")
     print(f"config_path: {cfg_path}")
 
-    sink_name = sink_name_for(suffix)
+    sink_name = mic_linux.sink_name_for(suffix)
 
     loaded, runtime_err = _runtime_loaded(sink_name)
     if runtime_err is not None:
