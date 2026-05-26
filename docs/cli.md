@@ -309,6 +309,60 @@ is the source of truth.
 
 ______________________________________________________________________
 
+## speaker
+
+Relay one VRChat instance's output audio to a chosen speaker device. Reuses the same per-PID capture backend as [`record`](#record) (PipeWire native on Linux, `proc-tap` on Windows) but forwards the audio to a `soundcard` output player instead of muxing to a file, so multiple `VRChat.exe` PIDs can each be pinned to a different speaker without relying on OS-level per-app policy. See [`virtual-audio.md`](virtual-audio.md) for end-to-end scenarios (multi-instance routing, virtual-cable setups, EarTrumpet / pavucontrol interop, latency tuning).
+
+Two actions: `vrcpilot speaker list` enumerates output devices, `vrcpilot speaker route` opens a foreground relay.
+
+### `speaker list`
+
+List output audio devices as YAML on stdout.
+
+```
+vrcpilot speaker list
+```
+
+**Output**: a YAML document on stdout with a single top-level `devices` key, whose value is a list of `{id, name, is_default}` entries. The OS default (if any) is listed first; remaining devices are sorted by `name` ascending. `devices: []` when no output device is visible.
+
+```yaml
+devices:
+  - id: "{0.0.0.00000000}.{...}"
+    name: Speakers (Realtek High Definition Audio)
+    is_default: true
+  - id: "{0.0.0.00000000}.{...}"
+    name: CABLE Input (VB-Audio Virtual Cable)
+    is_default: false
+```
+
+**Exit codes**: `0` on success, `1` on device-enumeration failure (`soundcard` not installed, libpulse / WASAPI cannot be loaded, or other `AudioRoutingError`). The failure is reported as a single `vrcpilot: <message>` line on stderr.
+
+**Side effects**: none.
+
+### `speaker route`
+
+Relay one VRChat PID's audio to an output device until `Ctrl+C`.
+
+```
+vrcpilot speaker route --pid PID [--device QUERY]
+                       [--chunk-seconds SECONDS] [--blocksize FRAMES]
+```
+
+| Option                    | Default               | Description                                                                                                                                                                                                                            |
+| ------------------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--pid PID`               | required              | Target VRChat PID whose audio is relayed. **Required** — `speaker route` deliberately does not auto-resolve a single VRChat instance, because multi-instance routing is the entire reason this command exists.                         |
+| `--device QUERY`          | OS default            | Output device query. Matched against `speaker list` entries in this order: `id` exact, then `name` exact (case-sensitive), then `name` case-insensitive substring. Ambiguous matches (two or more devices in the same stage) exit `1`. |
+| `--chunk-seconds SECONDS` | `0.02`                | Capture-side tick forwarded to `SpeakerLoop`. Smaller is lower latency; larger is more underrun-resistant. See [`virtual-audio.md`](virtual-audio.md) for the practical adjustment flow.                                               |
+| `--blocksize FRAMES`      | `None` (backend pick) | `soundcard` output player buffer size in frames. Increase (e.g. `2048`) when underruns persist after raising `--chunk-seconds`.                                                                                                        |
+
+**Output**: silent on stdout. On entry, one line is written to stderr in the form `route: pid=<PID> device=<NAME>` (with ` (system default)` appended when `--device` was omitted) so the resolved device is observable. Runtime failures emit a single `vrcpilot: <message>` stderr line; nominal `Ctrl+C` exit is silent.
+
+**Exit codes**: `0` on `Ctrl+C` (the nominal stop path). `1` when device resolution fails (`DeviceNotFoundError`, ambiguous-match `AudioRoutingError`), when the relay cannot start (VRChat PID not running, `soundcard` cannot open the player, missing `soundcard` install, host is neither Windows nor Linux, or `VRChatMultipleInstancesError` from the resolution path), or when the underlying `SpeakerLoop` surfaces a worker-thread exception at stop time — typically because VRChat exited mid-relay, which the CLI only notices when the user presses `Ctrl+C`.
+
+**Side effects**: opens a `soundcard` output player on the resolved device and a PID-scoped `SpeakerLoop` against the VRChat PID for the duration of the relay; both are released on exit. The CLI sleeps in `time.sleep(0.5)` ticks rather than blocking on a single long sleep so `SIGINT` is observed promptly.
+
+______________________________________________________________________
+
 ## mouse
 
 Send synthetic mouse input to VRChat. All actions guard on VRChat being running and focused.

@@ -251,6 +251,198 @@ audio = np.concatenate(chunks, axis=0) if chunks else np.empty((0, 2), np.float3
 
 ______________________________________________________________________
 
+## Speaker ルーティング（音声出力リレー）
+
+`vrcpilot.speaker.routing` は、特定の VRChat PID からキャプチャした音声を任意の OS 出力デバイス（物理スピーカーや仮想ケーブルのシンク）へリアルタイムにリレーします。内部では既存の PID スコープド `SpeakerLoop` をキャプチャ側に、`soundcard` の出力プレイヤーを再生側に組み合わせており、Windows / Linux 共通のコードパスです（プラットフォーム差分は `Speaker` と `soundcard` がそれぞれ吸収します）。VRChat を複数並列に起動して各インスタンスを別々の仮想出力へ振り分けたい、AI エージェントごとに音声経路を分離したい、といった「per-PID 音声分離」が主要なユースケースです。背景・配線手順・仮想ケーブル構成（VB-Audio Virtual Cable / PipeWire null-sink）については [`docs/virtual-audio.md`](virtual-audio.md) を参照してください。CLI 等価物は [`vrcpilot speaker list` / `vrcpilot speaker route`](cli.ja.md#speaker) です。
+
+### `vrcpilot.speaker.routing.AudioDevice`
+
+```python
+@dataclass(frozen=True, slots=True)
+class AudioDevice:
+    id: str
+    name: str
+    is_default: bool
+```
+
+OS の出力スピーカーを表す不変ハンドルです。`list_devices()` / `default_device()` / `find_device()` の戻り値であり、`Router` / `route()` の `device` 引数として受け取られます。
+
+- `id` — `soundcard` のバックエンド識別子（Windows ではエンドポイント GUID、Linux では PipeWire のノード識別子）。呼び出し側にとっては不透明な文字列で、`find_device` や `Router` にそのまま再投入する以外の用途はありません。
+- `name` — ユーザー向けのフレンドリ名（Windows では FriendlyName、Linux では PipeWire の `node.description`）。
+- `is_default` — OS のデフォルト出力デバイスである場合に限り `True`。単一の `list_devices()` 結果の中でこのフラグが立つデバイスは高々 1 つです。
+
+`frozen=True` なのでスレッド間で解決済みデバイスを安全に受け渡せます。
+
+### `vrcpilot.speaker.routing.list_devices`
+
+```python
+def list_devices() -> list[AudioDevice]: ...
+```
+
+可視な出力デバイスをすべて列挙します。並び順は「OS デフォルトが先頭、残りは `name` 昇順（Python の標準コードポイント比較で大文字小文字を区別）」で固定されているため、CLI 表示や e2e の列挙に直接使えます。出力デバイスが 1 つも無い環境では空リスト `[]` を返し、例外は送出しません。
+
+**Raises**:
+
+- `soundcard` がインストールされていない場合は `ImportError`。
+- `soundcard` がネイティブバックエンド（Linux では libpulse、Windows では WASAPI）をロードできない場合は `OSError`。
+
+### `vrcpilot.speaker.routing.default_device`
+
+```python
+def default_device() -> AudioDevice: ...
+```
+
+OS のデフォルト出力デバイスを `AudioDevice` として返します。`Router(device=None)` / `route(device=None)` が内部で呼ぶのと同じ解決ロジックです。
+
+**Raises**:
+
+- 出力デバイスがこのシステムに 1 つも存在しない場合は `DeviceNotFoundError`。
+- `ImportError` / `OSError` は `list_devices()` と同じ条件。
+
+### `vrcpilot.speaker.routing.find_device`
+
+```python
+def find_device(query: str) -> AudioDevice: ...
+```
+
+`query` を単一の出力デバイスへ解決します。解決は 3 段階を順番に試し、いずれかの段階で**ユニークに**一致した時点で確定します:
+
+1. `query == device.id` の完全一致。
+2. `query == device.name` の完全一致（大文字小文字を区別）。
+3. `query.lower() in device.name.lower()` の部分一致（大文字小文字を区別しない）。
+
+**いずれかの段階で 2 件以上にマッチした場合は、次の段階へフォールスルーせず即座に `AudioRoutingError` を送出します**。曖昧なクエリは黙って 1 つに決められるのではなく、はっきり失敗します。`Router(device="...")` / `route(device="...")` も内部でこの関数を呼びます。
+
+**Raises**:
+
+- いずれかの段階で 2 件以上にマッチした場合は `AudioRoutingError`。
+- 3 段階すべてで 0 件だった場合は `DeviceNotFoundError`（メッセージには認識済みデバイス一覧が含まれます）。
+- `ImportError` / `OSError` は `list_devices()` と同じ条件。
+
+### `vrcpilot.speaker.routing.Router`
+
+```python
+class Router:
+    def __init__(
+        self,
+        pid: int,
+        device: str | AudioDevice | None = None,
+        *,
+        chunk_seconds: float = 0.02,
+        blocksize: int | None = None,
+    ) -> None: ...
+
+    @property
+    def device(self) -> AudioDevice: ...
+    @property
+    def is_running(self) -> bool: ...
+
+    def start(self) -> None: ...
+    def stop(self) -> None: ...
+    def close(self) -> None: ...
+
+    def __enter__(self) -> Self: ...
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None: ...
+```
+
+単一の VRChat PID の音声を指定した出力デバイスへリレーするハンドルです。コンストラクタは `device` を解決して `AudioDevice` を内部に保持しますが、**音声ストリームは開きません** — 実際のリソース取得は `start()` が行います。
+
+`device` の型による分岐:
+
+- `None` — `default_device()` で OS のデフォルトを解決。
+- `str` — `find_device(device)` で 3 段階解決（id 完全 → name 完全 → name 部分一致、最後だけ大文字小文字無視）。
+- `AudioDevice` — そのまま使用（解決不要）。
+
+`pid` は内部の `SpeakerLoop` にそのまま渡されます。`None` は受け付けません — 複数 VRChat を並列に走らせる構成では PID を明示する必要があります（曖昧な「現在の VRChat」自動解決はこの API の範囲外）。`chunk_seconds` はキャプチャ側 tick の秒数で `SpeakerLoop` に転送され、デフォルトは `0.02`（20 ms、`SpeakerLoop` 単体のデフォルト 50 ms より細かい設定 — リレー用途では低遅延寄りに調整されています）。`blocksize` は `soundcard` のプレイヤーバッファのフレーム数で、`None` のときはバックエンドのデフォルトに任せます。
+
+**ライフサイクル**: `start()` は **プレイヤーを先に開き、その後で `SpeakerLoop` を起動** します（最初のコールバックが届いた時点で出力ストリームが必ず準備済みになるように）。`SpeakerLoop` 側の起動が失敗した場合は、既に開いたプレイヤーをロールバックしてから例外を伝播するので、中途半端なリソースが残ることはありません。`stop()` は逆順で、ループ停止を `try` に、プレイヤー解放を `finally` に置いているため、ワーカースレッドが捕捉した例外（例: VRChat がリレー途中に終了）を再送出する場合でも出力デバイスは必ず解放されます。`start()` / `stop()` の二重呼び出しはいずれも no-op です。`stop()` 後のインスタンスは再利用可能で、`start()` を再度呼べば新しい `SpeakerLoop` とプレイヤーが作り直されます（同じ `Router` で `with` ブロックを再入することも安全です）。
+
+`close()` は `stop()` のエイリアスです。コンテキストマネージャプロトコル (`__enter__` / `__exit__`) にも対応しており、本体側の例外を握り潰しません — ワーカースレッド由来の例外が `stop()` から再送出された場合は標準の `__exit__` チェーンに従って本体の例外を置き換えます。
+
+**スレッドモデル**: `start()` / `stop()` はメインスレッドから呼ぶことを想定しています。内部のフレームコールバックは `SpeakerLoop` のワーカースレッド上で動き、`stop()` と競合した場合はプレイヤースロットの `None` スナップショットを見て黙ってスキップするため、ロックなしで安全に止められます。
+
+**Raises** (`start()` から):
+
+- 内部の `SpeakerLoop` / `Speaker` の起動失敗（例: VRChat が起動していない）は `RuntimeError`。
+- `chunk_seconds <= 0` の場合は `ValueError`（`SpeakerLoop.__init__` 由来）。
+- `soundcard` のプレイヤーオープン失敗（解決と `start()` の間にデバイスが消えた、libpulse / WASAPI のランタイムエラー等）は `OSError`。
+- Windows / Linux 以外のプラットフォームでは `NotImplementedError`（`Speaker` バックエンドのディスパッチ由来）。
+
+### `vrcpilot.speaker.routing.route`
+
+```python
+def route(
+    pid: int,
+    device: str | AudioDevice | None = None,
+    *,
+    chunk_seconds: float = 0.02,
+    blocksize: int | None = None,
+) -> Router: ...
+```
+
+`Router(...)` を構築して `start()` まで済ませた状態で返す薄いコンビニエンスラッパーです。「リレーを開いてハンドルを受け取り、自分でライフサイクル管理する」という典型ケース向けで、戻り値の `Router` は既に running 状態にあります。以降のライフサイクル（`stop()` / `close()` / `with` ブロック）は呼び出し側の責任です。`Router.start()` が例外を送出した場合は例外がそのまま伝播し、`Router` インスタンスは返されません — `start()` 自身がロールバック済みなので呼び出し側が片付けるべきものはありません。
+
+引数の意味はすべて [`Router`](#vrcpilotspeakerroutingrouter) と同じです。
+
+### 例外
+
+- `vrcpilot.speaker.routing.AudioRoutingError` — `RuntimeError` のサブクラスで、当パッケージ全体のベース例外。直接インスタンスは「`find_device` の同一段階で 2 件以上にマッチした曖昧解決」のときに送出されます。ルーティング失敗をまとめて拾いたい場合はこの型を `except` してください。
+- `vrcpilot.speaker.routing.DeviceNotFoundError` — `AudioRoutingError` のサブクラスで、`find_device` の 3 段階すべてが 0 件だった場合と、`default_device()` がデフォルト出力デバイスを 1 つも見つけられなかった場合に送出されます。サブクラス関係のため、`AudioRoutingError` で広く `except` するとこちらも拾えます。
+
+### エンドツーエンドのスニペット
+
+VRChat の音声を OS デフォルトの出力デバイスへリレーします:
+
+```python
+import time
+
+import vrcpilot
+from vrcpilot.speaker.routing import route
+
+pid = vrcpilot.launch(no_vr=True)
+if pid is None:
+    raise RuntimeError("VRChat did not start before launch() timed out")
+time.sleep(45)  # warm-up
+
+with route(pid) as router:
+    print(f"routing PID {pid} -> {router.device.name!r}")
+    time.sleep(30.0)  # relay for 30 seconds
+# Router.stop() runs automatically on __exit__.
+```
+
+仮想ケーブル（Linux の `VRCPilotMic` / Windows の `CABLE Input`）へ転送して、Discord や OBS から「マイク入力」として拾えるようにします。クエリは `find_device` の 3 段階解決を通るので、`"VRCPilotMic"` のような部分文字列でも一意に決まれば通ります:
+
+```python
+from vrcpilot.speaker.routing import Router, find_device
+
+target = find_device("VRCPilotMic")  # raises DeviceNotFoundError if absent
+router = Router(pid=vrchat_pid, device=target, chunk_seconds=0.02)
+router.start()
+try:
+    ...  # main loop / wait condition
+finally:
+    router.stop()
+```
+
+複数 VRChat インスタンスを別々の出力デバイスへ分離する例（per-PID 音声分離）:
+
+```python
+import vrcpilot
+from vrcpilot.speaker.routing import list_devices, route
+
+devices = [d for d in list_devices() if "VRCPilotMic" in d.name]
+pids = vrcpilot.find_pids()  # newest first
+
+routers = [route(pid, device=dev) for pid, dev in zip(pids, devices)]
+try:
+    ...  # let the agents talk
+finally:
+    for router in routers:
+        router.close()
+```
+
+______________________________________________________________________
+
 ## Mic（音声再生）
 
 VRChat にライブマイク入力として認識させるために、float32 PCM を仮想ケーブルの出力デバイスへストリーミングします。主なユースケースは、LLM エージェントの TTS チャンクを実マイクや中間音声ファイルを介さずに VRChat へ直接流し込むことです。セッションは `__init__` で `soundcard` のプレイヤーを開き、インスタンスがクローズされるまで生かし続けます。`play(chunk)` は呼び出しごとに 1 チャンクだけ書き込むので、ペースは呼び出し側が制御します（`for chunk in tts.stream(): mic.play(chunk)`）。Windows ではデフォルトデバイスは VB-Audio Virtual Cable の `"CABLE Input"`、Linux では [`vrcpilot.mic.linux.register_virtual_mic`](#vrcpilotmiclinux)（または `vrcpilot linux-mic register` の実行）で作成される `"VRCPilotMic"` の PipeWire シンクです（複数の AI インスタンスを並列に走らせる場合は、`vrcpilot.mic.linux.register_virtual_mic(suffix=...)` で各インスタンス用の `VRCPilotMic_<suffix>` を別々に登録し、TTS 音声経路を分離できます）。

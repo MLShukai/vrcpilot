@@ -251,6 +251,144 @@ To persist the recording, write `audio` (or each incoming chunk) with PyAV, the 
 
 ______________________________________________________________________
 
+## Speaker routing (audio output relay)
+
+Forward the audio of a single VRChat PID to a chosen OS output device by pairing the existing PID-scoped `SpeakerLoop` capture with a `soundcard` output player. Cross-platform — the same module is used on Windows (`proc-tap` capture) and Linux (PipeWire-native capture). The PID-scoped capture above feeds two downstream consumers: `vrcpilot record` persists it to a file, while this module relays it live to another device. Because the relay happens in user space rather than through OS audio policy (`IAudioPolicyConfig` / EarTrumpet), per-PID isolation holds even when several `VRChat.exe` instances are running. See [`virtual-audio.md`](virtual-audio.md) for the user-facing playbook (virtual-cable setup, latency tuning, mic feedback avoidance) and [`cli.md`](cli.md#speaker) for the matching `vrcpilot speaker` CLI.
+
+### `vrcpilot.speaker.routing.AudioDevice`
+
+```python
+@dataclass(frozen=True, slots=True)
+class AudioDevice:
+    id: str
+    name: str
+    is_default: bool
+```
+
+Immutable handle to an OS output speaker. `id` is the opaque backend identifier from `soundcard` (Windows endpoint GUID, PipeWire node identifier) — treat it as a black box and only pass it back into `find_device` / `Router`. `name` is the user-visible friendly name (Windows FriendlyName, PipeWire `node.description`). `is_default` is `True` iff this is the OS default output; at most one device per `list_devices()` result has the flag set. `frozen=True` so a resolved device is safe to share between threads.
+
+### `vrcpilot.speaker.routing.list_devices`
+
+```python
+def list_devices() -> list[AudioDevice]: ...
+```
+
+Enumerate every visible output device. The OS default (if any) is first; the remaining devices follow in `name`-ascending order (Python's default codepoint comparison, case-sensitive). Returns `[]` cleanly when no output device exists — *not* an error.
+
+**Raises**: `ImportError` when `soundcard` is not installed; `OSError` when `soundcard` cannot load libpulse / WASAPI.
+
+### `vrcpilot.speaker.routing.default_device`
+
+```python
+def default_device() -> AudioDevice: ...
+```
+
+**Returns**: the OS default output device.
+
+**Raises**: `DeviceNotFoundError` when the host has no output device at all; `ImportError` / `OSError` as for `list_devices()`.
+
+### `vrcpilot.speaker.routing.find_device`
+
+```python
+def find_device(query: str) -> AudioDevice: ...
+```
+
+Resolve `query` to a single output device through three strict stages, each of which stops on a unique hit and raises immediately (without falling through) on two-or-more hits:
+
+1. `query == device.id` (exact).
+2. `query == device.name` (exact, case-sensitive).
+3. `query.lower() in device.name.lower()` (substring, case-insensitive).
+
+This means an ambiguous substring query fails loudly rather than silently picking one device. Use the full `id` or the exact `name` to disambiguate.
+
+**Raises**: `AudioRoutingError` when any stage matched two or more devices; `DeviceNotFoundError` when all three stages matched zero; `ImportError` / `OSError` as for `list_devices()`.
+
+### `vrcpilot.speaker.routing.Router`
+
+```python
+class Router:
+    def __init__(
+        self,
+        pid: int,
+        device: str | AudioDevice | None = None,
+        *,
+        chunk_seconds: float = 0.02,
+        blocksize: int | None = None,
+    ) -> None: ...
+
+    @property
+    def device(self) -> AudioDevice: ...
+    @property
+    def is_running(self) -> bool: ...
+
+    def start(self) -> None: ...
+    def stop(self) -> None: ...
+    def close(self) -> None: ...
+    def __enter__(self) -> Self: ...
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None: ...
+```
+
+Relay one VRChat PID's audio to a chosen output device. Construction resolves `device` (`None` → `default_device()`, `str` → `find_device(...)`, `AudioDevice` → used directly) but does *not* open any audio stream; `start()` is what acquires resources. Use the explicit `start()` / `stop()` pair, the `close()` alias, or the `with` block — all three are interchangeable.
+
+`pid` is the target VRChat PID and is forwarded to the inner `SpeakerLoop`; `None` is intentionally not accepted because the whole point of this module is per-PID separation under multi-instance VRChat. `chunk_seconds` and `blocksize` are the capture-side and output-side buffer knobs respectively (see [`virtual-audio.md`](virtual-audio.md) for tuning guidance); `chunk_seconds=0.02` keeps latency low at the cost of some underrun risk, and `blocksize=None` lets `soundcard` pick its backend default.
+
+Lifecycle: `start()` opens the output player first, then spawns the inner `SpeakerLoop`; if the capture side fails, the already-opened player is rolled back before the original exception propagates, so a partial start never leaks a resource. `stop()` tears both down in the reverse order with the player release in a `finally` block, so a worker-thread exception (e.g. VRChat died mid-relay) still releases the player before being re-raised. Double-`start()` / double-`stop()` are intentional no-ops. After a successful `stop()` the instance is re-startable: a fresh `SpeakerLoop` and player pair are created on the next `start()`, which is what makes re-entering the `with` block well-defined.
+
+VRChat process death does not interrupt `start()` itself — the worker-thread exception is captured by `SpeakerLoop` and surfaces on the next `stop()` / `close()` / `__exit__`, mirroring `SpeakerLoop`'s contract.
+
+Thread safety: `start()` / `stop()` are expected to be called from the main thread. Audio frames arrive on the `SpeakerLoop` worker thread; a callback racing with `stop()` sees a `None` player snapshot and skips its `play()` call without locking.
+
+**Raises (from `start()`)**:
+
+- `RuntimeError` when `SpeakerLoop` / `Speaker` fails to start (e.g. VRChat process not running).
+- `ValueError` when `chunk_seconds <= 0` (surfaced by `SpeakerLoop.__init__`).
+- `OSError` when `soundcard` fails to open the player (device disappeared between resolution and `start()`, libpulse / WASAPI runtime error, etc.).
+- `NotImplementedError` when the host is neither Windows nor Linux (surfaced by the `Speaker` backend dispatch).
+
+### `vrcpilot.speaker.routing.route`
+
+```python
+def route(
+    pid: int,
+    device: str | AudioDevice | None = None,
+    *,
+    chunk_seconds: float = 0.02,
+    blocksize: int | None = None,
+) -> Router: ...
+```
+
+Construct a `Router` and call `start()` in one step. The returned `Router` is already running; the caller owns the lifecycle from there (call `stop()` / `close()`, or wrap the result in `with`). If `start()` raises, the exception propagates and no `Router` is returned — `start()` itself rolled back the partial player, so there is nothing for the caller to clean up. Arguments mean exactly what they do on `Router.__init__`.
+
+### `vrcpilot.speaker.routing.AudioRoutingError`
+
+`RuntimeError` subclass and the package-wide base for routing failures — catch this for a single `except` clause covering both ambiguous-resolution and device-not-found cases. Direct (non-subclass) instances are raised when `find_device` matches two or more devices in the same stage.
+
+### `vrcpilot.speaker.routing.DeviceNotFoundError`
+
+Subclass of `AudioRoutingError`. Raised by `find_device` when all three resolution stages return zero hits, and by `default_device` when the host has no output device at all.
+
+### End-to-end snippet
+
+```python
+import time
+
+from vrcpilot.speaker.routing import Router, find_device, list_devices
+
+# Pick a target speaker. find_device("CABLE") would also work if the
+# substring is unambiguous on this host.
+device = next(d for d in list_devices() if "CABLE" in d.name)
+
+# VRChat must already be running; Router.start raises RuntimeError otherwise.
+with Router(pid=12345, device=device) as router:
+    assert router.is_running
+    time.sleep(5.0)
+# Leaving the `with` block stops the relay and releases the output player.
+```
+
+For the matching CLI (`vrcpilot speaker list` / `vrcpilot speaker route --pid N`), see [`cli.md`](cli.md#speaker).
+
+______________________________________________________________________
+
 ## Mic (audio playback)
 
 Stream float32 PCM into a virtual-cable output device so it appears to VRChat as live microphone input. The primary use case is piping an LLM agent's TTS chunks directly into VRChat without ever touching a real microphone or an intermediate audio file. The session opens a `soundcard` player in `__init__` and keeps it alive until the instance is closed; `play(chunk)` writes a single chunk per call so callers drive the cadence themselves (`for chunk in tts.stream(): mic.play(chunk)`). On Windows the default device is VB-Audio Virtual Cable's `"CABLE Input"`; on Linux the default is the `"VRCPilotMic"` PipeWire sink created by [`vrcpilot.mic.linux.register_virtual_mic`](#vrcpilotmiclinux) (or by running `vrcpilot linux-mic register`) — when running multiple AI agent instances in parallel, register a dedicated `VRCPilotMic_<suffix>` for each via `vrcpilot.mic.linux.register_virtual_mic(suffix=...)` so each instance's TTS gets its own isolated input path into VRChat.

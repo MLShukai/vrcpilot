@@ -290,6 +290,60 @@ vrcpilot linux-mic status     [--suffix NAME | --all]
 
 ______________________________________________________________________
 
+## speaker
+
+VRChat の出力音声を PID 単位で任意の出力デバイスへリレーします。多重起動した VRChat の音声を物理 / 仮想スピーカーへ振り分ける用途で、OS のアプリ別出力ポリシー (Windows `IAudioPolicyConfig` 等) に依存しないユーザー空間リレーです。背景・ユースケース・仮想 cable のセットアップは [`virtual-audio.md`](virtual-audio.md) を参照してください。
+
+`vrcpilot speaker list` / `vrcpilot speaker route` の 2 アクションを公開しています。
+
+### `speaker list`
+
+```
+vrcpilot speaker list
+```
+
+出力デバイスを YAML で列挙します。
+
+**出力**: 以下の形の YAML ドキュメントを stdout に出力します。並びは「OS デフォルトが先頭、続いて `name` 昇順 (Python のコードポイント比較)」です。デバイスが 1 つもない環境では `devices: []` を出力します。
+
+```yaml
+devices:
+  - id: "<backend-specific id>"
+    name: "<human-readable name>"
+    is_default: true
+  - id: "..."
+    name: "..."
+    is_default: false
+```
+
+**終了コード**: 成功時 `0`、デバイス列挙自体に失敗した場合（`soundcard` 未インストール、libpulse / WASAPI のロード失敗、ルーティングエラー）`1`。
+
+**副作用**: なし。
+
+### `speaker route`
+
+```
+vrcpilot speaker route --pid PID [--device QUERY]
+                       [--chunk-seconds SECONDS] [--blocksize FRAMES]
+```
+
+指定 PID の VRChat 音声を選んだ出力デバイスへ転送します。foreground 実行で、Ctrl+C で停止します。
+
+| Option                    | Default       | 説明                                                                                                                                                                                                                                                                             |
+| ------------------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--pid PID`               | required      | リレー対象の VRChat PID。多重起動分離が本コマンドの存在理由のため、他の PID 依存サブコマンドと違い自動 resolve は行わず **必須** です。                                                                                                                                          |
+| `--device QUERY`          | OS デフォルト | 出力デバイスの解決クエリ。`id` 完全一致 → `name` 完全一致（大文字小文字を区別）→ `name` 部分一致（小文字化して `in` 判定）の順で 1 つに解決します。いずれかのステージで複数ヒットすると即エラー終了します。省略時は OS の既定スピーカーを使用します。                            |
+| `--chunk-seconds SECONDS` | `0.02`        | キャプチャ側 (`SpeakerLoop`) のチャンク秒数。小さいほど低レイテンシ、大きいほど underrun に強くなります。レイテンシ調整は [`virtual-audio.md`](virtual-audio.md#%E3%83%AC%E3%82%A4%E3%83%86%E3%83%B3%E3%82%B7%E8%AA%BF%E6%95%B4%E3%82%AC%E3%82%A4%E3%83%89) を参照してください。 |
+| `--blocksize FRAMES`      | `None`        | `soundcard` プレイヤーのブロックサイズ（フレーム数）。`None` は `soundcard` バックエンド既定値を使います。                                                                                                                                                                       |
+
+**出力**: 起動直後に stderr へ解決後デバイスを 1 行で報告します: `route: pid=<PID> device='<NAME>'`。`--device` を省略した場合は末尾に ` (system default)` が付きます。stdout は **サイレント** です（パイプ汚染なし）。
+
+**終了コード**: 正常終了（Ctrl+C）時 `0`。指定 PID の VRChat が起動していない、`--device` クエリにマッチするデバイスがない (`DeviceNotFoundError`)、`--device` が複数デバイスに曖昧マッチ (`AudioRoutingError`)、`soundcard` / libpulse / WASAPI のランタイム失敗、`soundcard` 未インストール、Windows / Linux 以外のホストで実行した場合は `1`。`--pid` 未指定など argparse の引数形状エラーは `2`。
+
+**副作用**: 指定 PID 向けに platform 別 Speaker バックエンド（Linux: PipeWire パイプライン、Windows: `proc-tap` プロセスループバックセッション）を取得し、`soundcard` 出力プレイヤーを開いてキャプチャしたフレームを転送します。Ctrl+C 受信時はキャプチャ → プレイヤーの順で確実に解放されます。VRChat プロセスが route 実行中に終了した場合、内部のキャプチャワーカーが例外を捕捉しますが、CLI 側は `time.sleep` ループに留まるため自動停止はせず、ユーザーが Ctrl+C で能動的に停止する必要があります（例外は停止時に surface します）。
+
+______________________________________________________________________
+
 ## mouse
 
 VRChat に合成マウス入力を送ります。すべてのアクションは VRChat が起動中かつフォーカスされていることをガードします。
