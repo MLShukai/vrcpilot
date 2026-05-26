@@ -1,11 +1,11 @@
 ---
 name: pid-speaker-routing-relay
-description: vrcpilot.speaker.routing と CLI speaker-device を PID 単位 capture → soundcard リレー方式に書き換えるための確定仕様 (cross-platform)
+description: vrcpilot.speaker.routing と CLI speaker を PID 単位 capture → soundcard リレー方式に書き換えるための確定仕様 (cross-platform)
 metadata:
   type: project
 ---
 
-# Spec: PID 単位 VRChat 音声リレー (speaker.routing + CLI speaker-device)
+# Spec: PID 単位 VRChat 音声リレー (speaker.routing + CLI speaker)
 
 承認済みプラン [`C:\Users\22shi\.claude\plans\claude-pid-speaker-windows-windows-only-cheeky-puppy.md`](../../../.claude/plans/claude-pid-speaker-windows-windows-only-cheeky-puppy.md) を仕様レベルまで分解した版。Phase 2 の 4 並列実装 (実装 A/B、テスト C/D) はこの文書だけで担当領域が決定できることを目標とする。
 
@@ -22,7 +22,7 @@ metadata:
 ### ゴール
 
 - `vrcpilot.speaker.routing` 公開 API として `AudioDevice` / `list_devices` / `default_device` / `find_device` / `Router` / `route` / `AudioRoutingError` / `DeviceNotFoundError` を提供する。
-- CLI `vrcpilot speaker-device` を `list` / `route` の 2 サブコマンドに刷新する (`get` / `set` / `reset` は削除)。
+- CLI `vrcpilot speaker` を `list` / `route` の 2 サブコマンドに刷新する (`get` / `set` / `reset` は削除)。
 - Windows と Linux のどちらでも、platform 別ファイルなしの **cross-platform 一本** で動作させる。
 - 既定 `chunk_seconds = 0.02` (20 ms) で低レイテンシ重視。underrun が出る環境向けに調整余地を残す。
 
@@ -106,20 +106,20 @@ metadata:
 - F4.3 公開 API から伝播しうるその他の例外: `ValueError` (`chunk_seconds <= 0`)、`ImportError` (`soundcard` 未インストール)、`OSError` (`soundcard` の dlopen 失敗、libpulse 等)、`RuntimeError` (`SpeakerLoop` / `Speaker` 由来の runtime 失敗、VRChat 未起動など)、`NotImplementedError` (Win/Linux 以外のプラットフォーム — `Speaker` 由来)、`VRChatMultipleInstancesError` (`pid` が None かつ多重起動の場合 — `Speaker` 由来だが本 API では `pid` 必須化で実質発生しない、後述)。
 - F4.4 `Router.__init__(pid, ...)` の `pid` MUST `int` 型 (省略不可)。これは「multi-instance を扱う前提で明示する」設計判断 (CLI 仕様 §4 と整合)。Python は型注釈強制しないので runtime チェックは行わないが、`None` を渡せば下流の `Speaker(pid=None)` 経由で `resolve_pid` が呼ばれ、多重起動時は `VRChatMultipleInstancesError` が伝播する。仕様上は「`pid` は int を渡すべき」と書くに留める。
 
-#### F5. CLI `speaker-device list`
+#### F5. CLI `speaker list`
 
 - F5.1 引数: なし (positional / option いずれも追加しない)。
 - F5.2 stdout に YAML を出力 MUST。スキーマは §4.1 で規定。
 - F5.3 終了コード MUST: 成功 0、`OSError` / `ImportError` 等で 1。
 
-#### F6. CLI `speaker-device route`
+#### F6. CLI `speaker route`
 
 - F6.1 引数:
   - `--pid PID` (`int`, 必須): リレー対象 VRChat PID。argparse の `required=True` で強制。
   - `--device QUERY` (`str`, 省略可): 解決クエリ。省略時は `default_device()`。
   - `--chunk-seconds FLOAT` (`float`, 省略可、既定 `0.02`): SpeakerLoop の chunk 秒数。
   - `--blocksize N` (`int`, 省略可、既定 `None`): soundcard player のブロックサイズ。
-- F6.2 `--pid` 必須化により、`add_pid_arg` (`required=False`) は **使わない**。`speaker-device` 専用に `parser.add_argument("--pid", type=int, required=True, ...)` を直接書く。
+- F6.2 `--pid` 必須化により、`add_pid_arg` (`required=False`) は **使わない**。`speaker` 専用に `parser.add_argument("--pid", type=int, required=True, ...)` を直接書く。
 - F6.3 起動時の stderr 出力 MUST: route 開始時に 1 行のサマリを stderr に書く (§4.2 で書式規定)。`--device` 未指定時は末尾に ` (system default)` を付ける。
 - F6.4 foreground 動作 MUST: `Router` を `with` で開いた状態で停止シグナルを待つ。停止シグナルは:
   - `KeyboardInterrupt` (Ctrl+C / SIGINT): 正常終了経路。`with` を抜けて exit code 0。
@@ -130,7 +130,7 @@ metadata:
 #### F7. 既存仕様との整合
 
 - F7.1 `vrcpilot.speaker.routing` パッケージは既存 `speaker/` の同階層に新規作成する。`speaker/__init__.py` の `__all__` は変更しない (routing は名前空間越しに公開、`speaker.routing` として import)。
-- F7.2 CLI ディスパッチ ([`src/vrcpilot/cli/__init__.py`](../../src/vrcpilot/cli/__init__.py)) の `_COMMANDS` に `"speaker-device": speaker_device` を追加 MUST。`mic` の後・`mouse` の前あたり、help の並び順を意識して挿入する (推奨: `mic` の直後)。
+- F7.2 CLI ディスパッチ ([`src/vrcpilot/cli/__init__.py`](../../src/vrcpilot/cli/__init__.py)) の `_COMMANDS` に `"speaker": speaker` を追加 MUST。`mic` の後・`mouse` の前あたり、help の並び順を意識して挿入する (推奨: `mic` の直後)。
 - F7.3 `pyproject.toml`: 新規依存追加なし。`comtypes` を削除する MUST (旧 IAudioPolicyConfig 用、本仕様では未使用)。`uv lock` を再生成 MUST。
 - F7.4 Windows / Linux 以外のプラットフォームで `import vrcpilot.speaker.routing` 自体は失敗させない (cross-platform モジュール、`Speaker` 経由で初めて `NotImplementedError` が出る)。`list_devices` / `default_device` は soundcard が動けば動く (macOS でも soundcard は一応動く) が、本仕様のサポートプラットフォームではない。
 
@@ -266,7 +266,7 @@ metadata:
 
 両者の `__all__` 公開を MUST。
 
-### 4.2 CLI `vrcpilot speaker-device list` 出力 YAML スキーマ
+### 4.2 CLI `vrcpilot speaker list` 出力 YAML スキーマ
 
 `yaml.safe_dump(payload, sort_keys=False, default_flow_style=False)` で出力。トップキー:
 
@@ -292,7 +292,7 @@ metadata:
 
 `--json` フラグは導入しない (`ocr` / `detect` / `screenshot` 既存規約と整合)。
 
-### 4.3 CLI `vrcpilot speaker-device route` の引数と出力
+### 4.3 CLI `vrcpilot speaker route` の引数と出力
 
 argparse 定義 (擬似):
 
@@ -321,7 +321,7 @@ CLI `run(args) -> int` は 0 / 1 を返す。2 は argparse 内部で `SystemExi
 
 ### 4.4 既存 helper との関係
 
-- `cli/_common.py::add_pid_arg`: 本 CLI では `required=True` の `--pid` を要求するため **使わない**。`speaker_device.py` 内で直接 `parser.add_argument("--pid", required=True, ...)` を書く。
+- `cli/_common.py::add_pid_arg`: 本 CLI では `required=True` の `--pid` を要求するため **使わない**。`speaker.py` 内で直接 `parser.add_argument("--pid", required=True, ...)` を書く。
 - `cli/_common.py::handle_multi_instance_error`: 本 CLI では `--pid` 必須なので **発生経路がない**。使わない (defensive にも置かない)。
 - `mic/devices.py::lookup_speaker`: `find_device` の実装で再利用してよい。ただし `lookup_speaker` は `Mic` のために substring + fuzzy id 解決 (= 部分一致 1 段) であり、本仕様の 3 段階解決とは挙動が違う。**「実装上の下敷きにする」程度に留め、`find_device` は独自実装が望ましい**。`lookup_speaker` を直接呼ぶと「曖昧時に最初の 1 件」になり F1.7 に反する。
 
@@ -372,7 +372,7 @@ CLI `run(args) -> int` は 0 / 1 を返す。2 は argparse 内部で `SystemExi
 | `tests/vrcpilot/speaker/routing/test_errors.py`  | unit (公開 API 契約ピンに該当)                 | 例外階層 (`DeviceNotFoundError` is `AudioRoutingError` is `RuntimeError`)。**§契約ピン例外として `tests/vrcpilot/test_api_contract.py` に集約してもよい** (spec-test-author の判断)                |
 | `tests/vrcpilot/speaker/routing/test_devices.py` | integration_real                               | `list_devices` / `default_device` / `find_device` の挙動。soundcard 実機が必要 (Linux: PipeWire null-sink を fixture で立てる、Windows: 既定の WASAPI で実機実行)                                  |
 | `tests/vrcpilot/speaker/routing/test_router.py`  | integration_real                               | `Router` ライフサイクル全般。実 soundcard player + 実 SpeakerLoop が必要。VRChat 実起動はせず、`FakeSpeakerLoop` で callback だけ駆動するパターンも併用可 (この場合は integration-with-fakes 区分) |
-| `tests/vrcpilot/cli/test_speaker_device.py`      | integration-with-fakes + integration_real 併用 | `list` の YAML 出力、`route` の argparse / stderr サマリ / exit code は fake で。実機 routing の sanity は `integration_real` マーカー付きで別関数                                                 |
+| `tests/vrcpilot/cli/test_speaker.py`             | integration-with-fakes + integration_real 併用 | `list` の YAML 出力、`route` の argparse / stderr サマリ / exit code は fake で。実機 routing の sanity は `integration_real` マーカー付きで別関数                                                 |
 
 ### 6.4 テストケース一覧 (FR / NFR 対応)
 
@@ -438,15 +438,15 @@ integration_real (`@pytest.mark.integration_real`):
 
 注意: VRChat 実起動 + 実 Speaker + 実 soundcard までの本物 end-to-end は Phase 6 の手動 e2e で実施する (本仕様の自動テストには含めない)。
 
-#### test_speaker_device.py (CLI)
+#### test_speaker.py (CLI)
 
-integration-with-fakes (Router を `vrcpilot.cli.speaker_device` モジュール内で参照しているところを monkeypatch — これは「自前モジュールの内部 import 経路の差し替え」であり、skill 方針 §「自分のコードの内部関数モック禁止」とギリギリ抵触するが、**「Router クラス全体を fake クラスで差し替える」は公開 API を ABC 化した場合と本質的に等価で、許容範囲**。spec-test-author の判断で `tests/fakes/audio.py` に `FakeRouter` を追加してよい):
+integration-with-fakes (Router を `vrcpilot.cli.speaker` モジュール内で参照しているところを monkeypatch — これは「自前モジュールの内部 import 経路の差し替え」であり、skill 方針 §「自分のコードの内部関数モック禁止」とギリギリ抵触するが、**「Router クラス全体を fake クラスで差し替える」は公開 API を ABC 化した場合と本質的に等価で、許容範囲**。spec-test-author の判断で `tests/fakes/audio.py` に `FakeRouter` を追加してよい):
 
-- T-C1. `vrcpilot speaker-device list` の exit code 0
-- T-C2. `vrcpilot speaker-device list` の YAML スキーマ: `devices` キーが存在、リスト要素が `{id, name, is_default}` の dict
-- T-C3. `vrcpilot speaker-device list` の順序: F1.2 (default 先頭、後続 name 昇順)
-- T-C4. `vrcpilot speaker-device list` が空デバイス時に `devices: []` を出力 (FakeRouter ではなく `list_devices` の monkeypatch、もしくは soundcard の出力がゼロになるよう環境を作る — 後者は困難なので前者で OK。**`list_devices` を空リストに差し替えるのも「自前モジュールの差し替え」**)
-- T-C5. `vrcpilot speaker-device route --pid 12345 --device 'Q'`: argparse 解釈、`FakeRouter` が `pid=12345, device='Q', chunk_seconds=0.02, blocksize=None` で構築される
+- T-C1. `vrcpilot speaker list` の exit code 0
+- T-C2. `vrcpilot speaker list` の YAML スキーマ: `devices` キーが存在、リスト要素が `{id, name, is_default}` の dict
+- T-C3. `vrcpilot speaker list` の順序: F1.2 (default 先頭、後続 name 昇順)
+- T-C4. `vrcpilot speaker list` が空デバイス時に `devices: []` を出力 (FakeRouter ではなく `list_devices` の monkeypatch、もしくは soundcard の出力がゼロになるよう環境を作る — 後者は困難なので前者で OK。**`list_devices` を空リストに差し替えるのも「自前モジュールの差し替え」**)
+- T-C5. `vrcpilot speaker route --pid 12345 --device 'Q'`: argparse 解釈、`FakeRouter` が `pid=12345, device='Q', chunk_seconds=0.02, blocksize=None` で構築される
 - T-C6. `--device` 省略時: FakeRouter の `device` 引数が `None`
 - T-C7. `--chunk-seconds 0.05`, `--blocksize 256` が FakeRouter に正しく渡る
 - T-C8. `--pid` 欠落で SystemExit(2) (argparse の `required=True` 由来)
@@ -458,7 +458,7 @@ integration-with-fakes (Router を `vrcpilot.cli.speaker_device` モジュール
 
 integration_real (任意、`@pytest.mark.integration_real`):
 
-- T-C14. 実環境で `vrcpilot speaker-device list` を subprocess.run で実行し、YAML が parse できる (実 soundcard 必須)
+- T-C14. 実環境で `vrcpilot speaker list` を subprocess.run で実行し、YAML が parse できる (実 soundcard 必須)
 
 ### 6.5 マーカー登録
 
@@ -507,16 +507,16 @@ platform 別ファイル (`windows.py` / `linux.py`) は **作らない**。cros
 
 ### 8.1 主要シナリオ
 
-**S1: `vrcpilot speaker-device list` で デバイスを列挙**
+**S1: `vrcpilot speaker list` で デバイスを列挙**
 
 - Given: 出力デバイスが 2 個存在 (Speakers と CABLE Input)。
-- When: ユーザーが `vrcpilot speaker-device list` を実行。
+- When: ユーザーが `vrcpilot speaker list` を実行。
 - Then: stdout に F1.2 順序の YAML が出力され、exit code 0。
 
 **S2: 既定スピーカーへ単一 VRChat の音声をリレー**
 
 - Given: VRChat (PID 12345) が起動済み、`--device` 省略。
-- When: `vrcpilot speaker-device route --pid 12345` を実行。
+- When: `vrcpilot speaker route --pid 12345` を実行。
 - Then:
   1. `Router(pid=12345, device=None)` が `default_device()` を解決。
   2. stderr に `route: pid=12345 device='<name>' (system default)`。
@@ -623,9 +623,9 @@ platform 別ファイル (`windows.py` / `linux.py`) は **作らない**。cros
 
 ### CLI 面
 
-- [ ] `vrcpilot speaker-device list` が §4.2 スキーマの YAML を stdout に出力、exit 0
-- [ ] `vrcpilot speaker-device route --pid <N>` で `--device` 省略時に既定スピーカーへ relay 開始、stderr に `(system default)` 付きサマリ
-- [ ] `vrcpilot speaker-device route --pid <N> --device <Q>` で `--device` 指定時に解決後デバイスへ relay
+- [ ] `vrcpilot speaker list` が §4.2 スキーマの YAML を stdout に出力、exit 0
+- [ ] `vrcpilot speaker route --pid <N>` で `--device` 省略時に既定スピーカーへ relay 開始、stderr に `(system default)` 付きサマリ
+- [ ] `vrcpilot speaker route --pid <N> --device <Q>` で `--device` 指定時に解決後デバイスへ relay
 - [ ] `--pid` 欠落で exit code 2 (argparse)
 - [ ] Ctrl+C で exit code 0
 - [ ] 例外時に stderr に `vrcpilot: <msg>` 1 行 + exit code 1
@@ -657,9 +657,9 @@ platform 別ファイル (`windows.py` / `linux.py`) は **作らない**。cros
 | エージェント                                  | 触るファイル                                                                                                                                                                                                                                                                       | 触ってはいけないファイル                                                          |
 | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
 | **A. spec-driven-implementer (routing コア)** | `src/vrcpilot/speaker/routing/__init__.py`、`base.py`、`errors.py`、`devices.py`、`router.py`                                                                                                                                                                                      | `tests/` 全般、`src/vrcpilot/cli/`、`pyproject.toml`、`tests/fakes/`              |
-| **B. spec-driven-implementer (CLI)**          | `src/vrcpilot/cli/speaker_device.py` (新規)、`src/vrcpilot/cli/__init__.py` の `_COMMANDS` に 1 行追加                                                                                                                                                                             | `src/vrcpilot/speaker/routing/`、`tests/` 全般、`tests/fakes/`、`pyproject.toml`  |
+| **B. spec-driven-implementer (CLI)**          | `src/vrcpilot/cli/speaker.py` (新規)、`src/vrcpilot/cli/__init__.py` の `_COMMANDS` に 1 行追加                                                                                                                                                                                    | `src/vrcpilot/speaker/routing/`、`tests/` 全般、`tests/fakes/`、`pyproject.toml`  |
 | **C. spec-test-author (routing テスト)**      | `tests/vrcpilot/speaker/routing/__init__.py`、`test_base.py`、`test_errors.py`、`test_devices.py`、`test_router.py`、必要なら `pyproject.toml` の markers に `integration_real` 追加、必要なら `tests/fakes/audio.py` に `FakeRouter` のみ追加 (FakeSoundcard\* は **追加しない**) | `src/vrcpilot/` 全般、`src/vrcpilot/cli/` 全般                                    |
-| **D. spec-test-author (CLI テスト)**          | `tests/vrcpilot/cli/test_speaker_device.py`                                                                                                                                                                                                                                        | `src/vrcpilot/` 全般、`src/vrcpilot/cli/` 全般、`tests/vrcpilot/speaker/routing/` |
+| **D. spec-test-author (CLI テスト)**          | `tests/vrcpilot/cli/test_speaker.py`                                                                                                                                                                                                                                               | `src/vrcpilot/` 全般、`src/vrcpilot/cli/` 全般、`tests/vrcpilot/speaker/routing/` |
 
 C と D が共有編集する可能性のあるファイル:
 
@@ -681,7 +681,7 @@ C と D が共有編集する可能性のあるファイル:
 ### Phase 4 (リファクタ): code-quality-reviewer
 
 - A. routing コア (`src/vrcpilot/speaker/routing/`) のリファクタ
-- B. CLI (`src/vrcpilot/cli/speaker_device.py`) のリファクタ
+- B. CLI (`src/vrcpilot/cli/speaker.py`) のリファクタ
 
 public API 不変、tests 触らない。
 
@@ -698,7 +698,7 @@ public API 不変、tests 触らない。
 | Q   | 内容                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | 判断者                                | 期限             |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------- | ---------------- |
 | Q1  | T-R8 / T-R9 (空フレーム skip / 非空フレーム転送) は `Router._on_frames` を直接呼ぶ単体テストに倒すと記述したが、`_on_frames` は private メソッドであり、テストから直接呼ぶことの是非。**仕様判断**: private メソッドのテストは `feedback_private_module_convention.md` で「テストするなら prefix を外す」とあるが、これはモジュール単位の話。メソッド単位では skill 哲学 §「内部実装の詳細はテストしない」と衝突する。Phase 2 で spec-test-author が **integration_real (実 player 越し)** で T-R8 / T-R9 を観察可能な形に置き換える方が clean。 | spec-test-author (Phase 2)            | Phase 2 内で確定 |
-| Q2  | `FakeRouter` を `tests/fakes/audio.py` に追加するか、`tests/vrcpilot/cli/test_speaker_device.py` 内で local class とするか。skill 方針 §「共有 fake は `tests/fakes/` に集約」と整合させるなら前者だが、Router は公開 API クラスなので「`tests/fakes/audio.py` は自前 ABC の fake のみ」原則とは微妙にズレる (Router は ABC ではなく concrete class)。                                                                                                                                                                                           | spec-test-author (Phase 2)            | Phase 2 内で確定 |
+| Q2  | `FakeRouter` を `tests/fakes/audio.py` に追加するか、`tests/vrcpilot/cli/test_speaker.py` 内で local class とするか。skill 方針 §「共有 fake は `tests/fakes/` に集約」と整合させるなら前者だが、Router は公開 API クラスなので「`tests/fakes/audio.py` は自前 ABC の fake のみ」原則とは微妙にズレる (Router は ABC ではなく concrete class)。                                                                                                                                                                                                  | spec-test-author (Phase 2)            | Phase 2 内で確定 |
 | Q3  | T-C10 の `KeyboardInterrupt` テストで `time.sleep` を patch するか、`FakeRouter.start()` から直接 raise させるか。前者は skill 方針 §「`time.sleep` のモック禁止」に抵触気味、後者の方が清潔。**推奨: 後者** (`FakeRouter` に `raise_on_start_complete=KeyboardInterrupt` のような knob)。Q2 と同時に確定する。                                                                                                                                                                                                                                  | spec-test-author (Phase 2)            | Phase 2 内で確定 |
 | Q4  | `find_device` の F1.6 段階遷移を「同じ段で複数ヒット → 即エラー」と規定したが、「id exact で 1 件あればそれを返す」のは intentional。プランの記述「3段階解決」と整合するが、ユーザー側で「name 完全一致が優先されるべき」という別解釈があれば仕様変更要。**現状の仕様は plan §3 と整合**。                                                                                                                                                                                                                                                       | ユーザー (再確認)                     | Phase 2 着手前   |
 | Q5  | T-R12 (start 失敗時の player ロールバック) を spec-test-author が integration-with-fakes で書くには `FakeSpeakerLoop` の `start_side_effect` knob が必要。現状 `FakeSpeakerLoop` には `init_side_effect` のみ。`tests/fakes/audio.py` を編集して knob 追加するのは C の責務 — D には影響しない。                                                                                                                                                                                                                                                 | spec-test-author (Phase 2 内、C 担当) | Phase 2 内で確定 |
@@ -708,9 +708,9 @@ public API 不変、tests 触らない。
 
 スコープ外だが意識しておくべき発展方向:
 
-- **`route-many` サブコマンド**: 単一コマンドで複数 (PID, device) ペアを扱う。v2 で `vrcpilot speaker-device route-many --pair PID=DEVICE --pair PID=DEVICE` の形で導入余地。
+- **`route-many` サブコマンド**: 単一コマンドで複数 (PID, device) ペアを扱う。v2 で `vrcpilot speaker route-many --pair PID=DEVICE --pair PID=DEVICE` の形で導入余地。
 - **音量制御**: `Router.set_volume(0.0..1.0)` で出力ゲインを変える。`numpy` の素のスカラ乗算で実装可能。
-- **デーモンモード**: `vrcpilot speaker-device daemon` で background 常駐、unix socket / named pipe で制御。
+- **デーモンモード**: `vrcpilot speaker daemon` で background 常駐、unix socket / named pipe で制御。
 - **メトリクス出力**: `--metrics` フラグで relay レイテンシ / underrun カウントを stderr に定期出力。
 - **AudioDevice の追加メタデータ**: `channels` / `default_samplerate` / `is_virtual` 等。soundcard が提供できる範囲で。
 - **EarTrumpet / pavucontrol との hybrid 構成のドキュメント化**: docs/virtual-audio.md に既存 GUI ツールとの組み合わせパターンを記載 (Phase 3 担当)。
@@ -722,7 +722,7 @@ public API 不変、tests 触らない。
 - 永続化: 状態は全て in-memory。設定ファイル / レジストリ書き込みなし。
 - 認証: ローカル CLI、認証なし。
 - ネットワーク: ループバック含めて使用しない。OSC とは独立。
-- データマイグレーション: 旧 IAudioPolicyConfig 経路の永続化レジストリエントリは別途 cleanup する必要があるが、本仕様のスコープ外 (旧仕様の `vrcpilot speaker-device reset` を最後に実行してから移行することをユーザーへ案内する程度。docs に追記 Phase 3)。
+- データマイグレーション: 旧 IAudioPolicyConfig 経路の永続化レジストリエントリは別途 cleanup する必要があるが、本仕様のスコープ外 (旧仕様の `vrcpilot speaker reset` を最後に実行してから移行することをユーザーへ案内する程度。docs に追記 Phase 3)。
 
 ______________________________________________________________________
 

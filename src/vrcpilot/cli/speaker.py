@@ -1,4 +1,4 @@
-"""``vrcpilot speaker-device`` subcommand: list / route output devices.
+"""``vrcpilot speaker`` subcommand: list / route output devices.
 
 Two actions:
 
@@ -6,6 +6,10 @@ Two actions:
   speaker (default first, then name-sorted) to stdout.
 * ``route`` — opens a PID-scoped audio relay from one VRChat instance
   to a chosen output device and blocks until ``Ctrl+C``.
+
+Application-audio *capture* is owned by ``vrcpilot record``; this
+subcommand owns the output-side concern (which device VRChat audio
+plays into), hence the shorter ``speaker`` name.
 
 Unlike most PID-dependent subcommands, ``route`` requires ``--pid``;
 the spec calls for explicit multi-instance handling so we do **not**
@@ -30,17 +34,32 @@ from vrcpilot.speaker.routing import (
 
 from ._common import SubParsersAction
 
+#: Exceptions the spec (§4.3 exit-code table) maps to exit 1 with a
+#: single ``vrcpilot: <msg>`` stderr line. ``DeviceNotFoundError`` /
+#: ``AudioRoutingError`` are ``RuntimeError`` subclasses, so the bare
+#: ``RuntimeError`` entry would suffice — they are listed explicitly to
+#: pin the contract to the spec and surface it to readers.
+_ROUTE_RUNTIME_ERRORS: tuple[type[BaseException], ...] = (
+    DeviceNotFoundError,
+    AudioRoutingError,
+    VRChatMultipleInstancesError,
+    RuntimeError,
+    OSError,
+    ImportError,
+    NotImplementedError,
+)
+
 
 def register(subparsers: SubParsersAction) -> None:
-    """Wire ``speaker-device`` plus its ``list`` / ``route`` actions."""
+    """Wire ``speaker`` plus its ``list`` / ``route`` actions."""
     parser = subparsers.add_parser(
-        "speaker-device",
+        "speaker",
         help=(
             "List output audio devices, or relay one VRChat instance's "
             "audio to a chosen output device."
         ),
     )
-    actions = parser.add_subparsers(dest="speaker_device_action", required=True)
+    actions = parser.add_subparsers(dest="speaker_action", required=True)
 
     actions.add_parser(
         "list",
@@ -109,39 +128,28 @@ def _run_route(args: argparse.Namespace) -> int:
     """Open a PID-scoped relay and block until ``Ctrl+C`` or failure."""
     pid: int = args.pid
     device: str | None = args.device
-    chunk_seconds: float = args.chunk_seconds
-    blocksize: int | None = args.blocksize
 
     try:
         with route(
             pid,
             device,
-            chunk_seconds=chunk_seconds,
-            blocksize=blocksize,
+            chunk_seconds=args.chunk_seconds,
+            blocksize=args.blocksize,
         ) as router:
             suffix = " (system default)" if device is None else ""
             print(
                 f"route: pid={pid} device={router.device.name!r}{suffix}",
                 file=sys.stderr,
             )
-            try:
-                while True:
-                    time.sleep(0.5)
-            except KeyboardInterrupt:
-                pass
+            # ``KeyboardInterrupt`` here propagates through Router's
+            # ``__exit__`` (which stops the relay) and is caught by the
+            # outer handler below — same clean-exit path used when SIGINT
+            # arrives during ``Router.start()``.
+            while True:
+                time.sleep(0.5)
     except KeyboardInterrupt:
-        # Ctrl+C raised during Router.__enter__/start before the inner
-        # try-block established its own handler — still a clean exit.
         pass
-    except (
-        DeviceNotFoundError,
-        AudioRoutingError,
-        VRChatMultipleInstancesError,
-        RuntimeError,
-        OSError,
-        ImportError,
-        NotImplementedError,
-    ) as exc:
+    except _ROUTE_RUNTIME_ERRORS as exc:
         print(f"vrcpilot: {exc}", file=sys.stderr)
         return 1
 
@@ -149,7 +157,7 @@ def _run_route(args: argparse.Namespace) -> int:
 
 
 def run(args: argparse.Namespace) -> int:
-    """Dispatch to the requested ``speaker-device`` action."""
-    if args.speaker_device_action == "list":
+    """Dispatch to the requested ``speaker`` action."""
+    if args.speaker_action == "list":
         return _run_list()
     return _run_route(args)

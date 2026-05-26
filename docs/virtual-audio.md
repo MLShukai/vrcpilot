@@ -1,6 +1,6 @@
 # 仮想オーディオガイド
 
-VRChat の出力音声を PID 単位で別デバイスへ振り分けるためのガイド。`vrcpilot speaker-device` の使い方、補助ツールとの組み合わせ、レイテンシ調整の指針をまとめる。CLI のフラグ単位の詳細は [`cli.ja.md`](cli.ja.md) を、Python API は [`python-api.ja.md`](python-api.ja.md) を参照。
+VRChat の出力音声を PID 単位で別デバイスへ振り分けるためのガイド。`vrcpilot speaker` の使い方、補助ツールとの組み合わせ、レイテンシ調整の指針をまとめる。CLI のフラグ単位の詳細は [`cli.ja.md`](cli.ja.md) を、Python API は [`python-api.ja.md`](python-api.ja.md) を参照。
 
 ______________________________________________________________________
 
@@ -32,7 +32,7 @@ ______________________________________________________________________
 ### デバイス列挙
 
 ```bash
-uv run vrcpilot speaker-device list
+uv run vrcpilot speaker list
 ```
 
 stdout に YAML で出力スピーカー一覧が出る。`is_default: true` のものが OS 既定。
@@ -50,7 +50,7 @@ devices:
 ### リレー開始
 
 ```bash
-uv run vrcpilot speaker-device route --pid 12345 --device "CABLE Input"
+uv run vrcpilot speaker route --pid 12345 --device "CABLE Input"
 ```
 
 `--pid` は必須 (多重起動を扱う前提なので自動 resolve はしない)。`--device` には `list` で得た `id` か `name` の完全一致、もしくは部分一致 (大文字小文字無視) を渡す。曖昧マッチで複数ヒットした場合はエラー終了する。
@@ -62,7 +62,7 @@ foreground 動作。Ctrl+C で停止し exit code 0 で抜ける。VRChat プロ
 ### レイテンシ調整
 
 ```bash
-uv run vrcpilot speaker-device route --pid 12345 --device "CABLE Input" \
+uv run vrcpilot speaker route --pid 12345 --device "CABLE Input" \
     --chunk-seconds 0.05 --blocksize 1024
 ```
 
@@ -83,7 +83,7 @@ ______________________________________________________________________
 - [VB-Audio Voicemeeter Banana](https://vb-audio.com/Voicemeeter/banana.htm) — 3 系統入力 + 仮想 cable 2 系統。ミックスやモニタリングが要るなら有力。
 - [Virtual Audio Cable (VAC)](https://vac.muzychenko.net/en/) — 有償。任意数の仮想 cable を立てられる。
 
-インストール後、`uv run vrcpilot speaker-device list` の出力に新しいデバイスが現れることを確認。
+インストール後、`uv run vrcpilot speaker list` の出力に新しいデバイスが現れることを確認。
 
 ### Linux
 
@@ -97,7 +97,7 @@ pactl load-module module-null-sink \
     sink_properties=device.description=VRChat_PID_1
 ```
 
-`uv run vrcpilot speaker-device list` の出力に `VRChat_PID_1` が現れる。アンロードは:
+`uv run vrcpilot speaker list` の出力に `VRChat_PID_1` が現れる。アンロードは:
 
 ```bash
 pactl unload-module $(pactl list short modules | grep vrchat_pid_1 | cut -f1)
@@ -112,7 +112,7 @@ ______________________________________________________________________
 `vrcpilot mic` は **VB-Audio Virtual Cable の `CABLE Input` を既に使用している**。ここに route 先として同じ cable を指定すると、
 
 ```
-VRChat → speaker-device route → CABLE Input ─┐
+VRChat → speaker route → CABLE Input ─┐
                                               │
             CABLE Output → VRChat マイク入力 ←┘ (VRChat 側で設定済み)
 ```
@@ -135,11 +135,11 @@ ______________________________________________________________________
 
 **用途 1: 単一インスタンスで vrcpilot route を使わない**
 
-VRChat を 1 つしか立てないなら、EarTrumpet で `VRChat.exe` の出力先デバイスを直接指定するのが最も手軽。`vrcpilot speaker-device route` は不要。
+VRChat を 1 つしか立てないなら、EarTrumpet で `VRChat.exe` の出力先デバイスを直接指定するのが最も手軽。`vrcpilot speaker route` は不要。
 
 **用途 2: 多重 VRChat で hybrid 構成**
 
-EarTrumpet で「VRChat 全体」を仮想 cable (`CABLE Input` 等) に流しておき、各 PID は `vrcpilot speaker-device route --pid <N> --device <出力先>` で個別に振り分ける。
+EarTrumpet で「VRChat 全体」を仮想 cable (`CABLE Input` 等) に流しておき、各 PID は `vrcpilot speaker route --pid <N> --device <出力先>` で個別に振り分ける。
 
 ### 注意
 

@@ -42,4 +42,4 @@
 
 ## specs（確定済み仕様）
 
-- [PID 単位 VRChat 音声リレー (speaker.routing + speaker-device CLI)](specs/pid_speaker_routing_relay.md) — cross-platform リレー方式 (旧 IAudioPolicyConfig 仕様は破棄)。Phase 2 4 並列実装の前提
+- [PID 単位 VRChat 音声リレー (speaker.routing + speaker CLI)](specs/pid_speaker_routing_relay.md) — cross-platform リレー方式 (旧 IAudioPolicyConfig 仕様は破棄)。Phase 2 4 並列実装の前提

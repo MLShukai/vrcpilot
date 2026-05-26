@@ -1,6 +1,6 @@
-"""Tests for :mod:`vrcpilot.cli.speaker_device`.
+"""Tests for :mod:`vrcpilot.cli.speaker`.
 
-``vrcpilot speaker-device`` has two actions:
+``vrcpilot speaker`` has two actions:
 
 * ``list`` -- emits a YAML payload with the ``devices`` key (default
   speaker first, then name-ascending) and exits 0 on success.
@@ -13,7 +13,7 @@
 These tests drive the CLI in-process through
 :func:`vrcpilot.cli.build_parser` and :func:`vrcpilot.cli.main`, and
 substitute vrcpilot's own concrete ``list_devices`` / ``route``
-attachment points inside :mod:`vrcpilot.cli.speaker_device` with local
+attachment points inside :mod:`vrcpilot.cli.speaker` with local
 stand-ins. The stand-ins replace **vrcpilot-owned** symbols, not 3rd-
 party surfaces -- ``soundcard`` / ``time.sleep`` / ``subprocess`` / etc.
 are never patched per the project's testing policy
@@ -147,7 +147,7 @@ def _install_fake_route(
     interrupt_main_on_enter: bool = True,
     raise_at_call: BaseException | None = None,
 ) -> RouteCallRecord:
-    """Patch ``vrcpilot.cli.speaker_device.route`` with a fake.
+    """Patch ``vrcpilot.cli.speaker.route`` with a fake.
 
     Returns a record of ``(args, kwargs)`` for each invocation so tests
     can assert argparse plumbing. The fake returns a :class:`FakeRouter`
@@ -176,7 +176,7 @@ def _install_fake_route(
             interrupt_main_on_enter=interrupt_main_on_enter,
         )
 
-    monkeypatch.setattr("vrcpilot.cli.speaker_device.route", fake_route)
+    monkeypatch.setattr("vrcpilot.cli.speaker.route", fake_route)
     return record
 
 
@@ -184,7 +184,7 @@ def _install_fake_list_devices(
     monkeypatch: pytest.MonkeyPatch,
     devices: Iterable[FakeAudioDevice] | BaseException,
 ) -> None:
-    """Patch ``vrcpilot.cli.speaker_device.list_devices`` with a fake.
+    """Patch ``vrcpilot.cli.speaker.list_devices`` with a fake.
 
     If ``devices`` is an exception instance, the patched function raises
     it; otherwise it returns the iterable materialised as a list.
@@ -202,18 +202,18 @@ def _install_fake_list_devices(
             return materialised
 
     monkeypatch.setattr(
-        "vrcpilot.cli.speaker_device.list_devices",
+        "vrcpilot.cli.speaker.list_devices",
         fake_list_devices,
     )
 
 
 # ---------------------------------------------------------------------
-# T-C1, T-C2, T-C3: speaker-device list happy path
+# T-C1, T-C2, T-C3: speaker list happy path
 # ---------------------------------------------------------------------
 
 
 class TestSpeakerDeviceList:
-    """``vrcpilot speaker-device list`` YAML emission and ordering."""
+    """``vrcpilot speaker list`` YAML emission and ordering."""
 
     def test_exit_code_zero_on_success(
         self,
@@ -225,7 +225,7 @@ class TestSpeakerDeviceList:
             monkeypatch,
             [FakeAudioDevice(id="d1", name="A", is_default=True)],
         )
-        assert main(["speaker-device", "list"]) == 0
+        assert main(["speaker", "list"]) == 0
         capsys.readouterr()  # drain so other tests start clean
 
     def test_yaml_schema_devices_key_and_fields(
@@ -243,7 +243,7 @@ class TestSpeakerDeviceList:
                 FakeAudioDevice(id="d2", name="Bravo", is_default=False),
             ],
         )
-        assert main(["speaker-device", "list"]) == 0
+        assert main(["speaker", "list"]) == 0
         out = capsys.readouterr().out
         payload = yaml.safe_load(out)
         assert isinstance(payload, dict)
@@ -270,7 +270,7 @@ class TestSpeakerDeviceList:
             FakeAudioDevice(id="d-y", name="Zzz", is_default=False),
         ]
         _install_fake_list_devices(monkeypatch, ordered)
-        assert main(["speaker-device", "list"]) == 0
+        assert main(["speaker", "list"]) == 0
         payload = yaml.safe_load(capsys.readouterr().out)
         emitted_ids = [d["id"] for d in payload["devices"]]
         assert emitted_ids == [d.id for d in ordered]
@@ -282,13 +282,13 @@ class TestSpeakerDeviceList:
     ):
         # T-C4 -- spec §4.2 requires ``devices: []`` when zero devices.
         _install_fake_list_devices(monkeypatch, [])
-        assert main(["speaker-device", "list"]) == 0
+        assert main(["speaker", "list"]) == 0
         payload = yaml.safe_load(capsys.readouterr().out)
         assert payload == {"devices": []}
 
 
 # ---------------------------------------------------------------------
-# T-C5, T-C6, T-C7: speaker-device route argparse plumbing
+# T-C5, T-C6, T-C7: speaker route argparse plumbing
 # ---------------------------------------------------------------------
 
 
@@ -309,7 +309,7 @@ class TestSpeakerDeviceRouteArgparse:
         assert (
             main(
                 [
-                    "speaker-device",
+                    "speaker",
                     "route",
                     "--pid",
                     "12345",
@@ -337,7 +337,7 @@ class TestSpeakerDeviceRouteArgparse:
         # T-C6 -- omitted --device must reach route() as ``None`` so the
         # routing layer falls back to ``default_device()``.
         record = _install_fake_route(monkeypatch)
-        assert main(["speaker-device", "route", "--pid", "42"]) == 0
+        assert main(["speaker", "route", "--pid", "42"]) == 0
         capsys.readouterr()
         args, kwargs = record.calls[0]
         passed_device = args[1] if len(args) >= 2 else kwargs.get("device", "MISSING")
@@ -354,7 +354,7 @@ class TestSpeakerDeviceRouteArgparse:
         assert (
             main(
                 [
-                    "speaker-device",
+                    "speaker",
                     "route",
                     "--pid",
                     "7",
@@ -382,7 +382,7 @@ class TestSpeakerDeviceRouteArgparseErrors:
         # T-C8 -- ``--pid`` is ``required=True``; omitting it must raise
         # SystemExit(2) via argparse before route() runs.
         with pytest.raises(SystemExit) as excinfo:
-            main(["speaker-device", "route"])
+            main(["speaker", "route"])
         assert excinfo.value.code == 2
         assert capsys.readouterr().err != ""
 
@@ -406,7 +406,7 @@ class TestSpeakerDeviceRouteSummary:
         assert (
             main(
                 [
-                    "speaker-device",
+                    "speaker",
                     "route",
                     "--pid",
                     "100",
@@ -438,7 +438,7 @@ class TestSpeakerDeviceRouteSummary:
             id="d-default", name="Speakers (Realtek)", is_default=True
         )
         _install_fake_route(monkeypatch, device=device)
-        assert main(["speaker-device", "route", "--pid", "200"]) == 0
+        assert main(["speaker", "route", "--pid", "200"]) == 0
         err = capsys.readouterr().err
         summary_lines = [line for line in err.splitlines() if "route:" in line]
         assert len(summary_lines) == 1
@@ -472,7 +472,7 @@ class TestSpeakerDeviceRouteKeyboardInterrupt:
             raise_on_enter=KeyboardInterrupt(),
             interrupt_main_on_enter=False,
         )
-        assert main(["speaker-device", "route", "--pid", "12345"]) == 0
+        assert main(["speaker", "route", "--pid", "12345"]) == 0
         err = capsys.readouterr().err
         assert "vrcpilot:" not in err
 
@@ -488,7 +488,7 @@ class TestSpeakerDeviceRouteKeyboardInterrupt:
         # ``__enter__``; the genuine ``time.sleep`` then exits with a
         # genuine ``KeyboardInterrupt`` (no stdlib patching involved).
         _install_fake_route(monkeypatch)  # default: interrupt_main_on_enter=True
-        assert main(["speaker-device", "route", "--pid", "12345"]) == 0
+        assert main(["speaker", "route", "--pid", "12345"]) == 0
         err = capsys.readouterr().err
         assert "vrcpilot:" not in err
 
@@ -513,7 +513,7 @@ class TestSpeakerDeviceRouteRuntimeErrors:
             monkeypatch,
             raise_at_call=RuntimeError("vrchat dead"),
         )
-        assert main(["speaker-device", "route", "--pid", "12345"]) == 1
+        assert main(["speaker", "route", "--pid", "12345"]) == 1
         captured = capsys.readouterr()
         assert captured.out == ""
         assert "vrcpilot:" in captured.err
@@ -538,7 +538,7 @@ class TestSpeakerDeviceRouteRuntimeErrors:
         assert (
             main(
                 [
-                    "speaker-device",
+                    "speaker",
                     "route",
                     "--pid",
                     "12345",
@@ -569,7 +569,7 @@ class TestSpeakerDeviceRouteRuntimeErrors:
         assert (
             main(
                 [
-                    "speaker-device",
+                    "speaker",
                     "route",
                     "--pid",
                     "12345",
@@ -597,7 +597,7 @@ class TestSpeakerDeviceRouteRuntimeErrors:
             monkeypatch,
             OSError("libpulse missing"),
         )
-        assert main(["speaker-device", "list"]) == 1
+        assert main(["speaker", "list"]) == 1
         captured = capsys.readouterr()
         assert captured.out == ""
         assert "vrcpilot:" in captured.err
@@ -615,7 +615,7 @@ class TestSpeakerDeviceParserDefaults:
     def test_route_defaults(self):
         # Defaults: --device None, --chunk-seconds 0.02, --blocksize None.
         ns: argparse.Namespace = build_parser().parse_args(
-            ["speaker-device", "route", "--pid", "1"]
+            ["speaker", "route", "--pid", "1"]
         )
         assert ns.pid == 1
         assert ns.device is None

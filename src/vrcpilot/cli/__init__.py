@@ -28,7 +28,7 @@ from . import (
     pid,
     record,
     screenshot,
-    speaker_device,
+    speaker,
     terminate,
     unfocus,
 )
@@ -42,7 +42,7 @@ _COMMANDS: dict[str, ModuleType] = {
     "screenshot": screenshot,
     "record": record,
     "mic": mic,
-    "speaker-device": speaker_device,
+    "speaker": speaker,
 }
 
 # ``linux-mic`` slots between ``mic`` and ``mouse`` on Linux so the
