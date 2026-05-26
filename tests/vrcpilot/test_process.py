@@ -2,11 +2,11 @@
 
 What is covered here vs. elsewhere:
 
-* **PID discovery** (``find_pid``, ``find_pids``, ``resolve_pid``):
+* **PID discovery** (``find_pids``, ``resolve_pid``):
   the autouse conftest fixture ``_no_real_vrchat`` pins
   ``psutil.process_iter`` to an empty iterator, so every test in this
   module observes "no VRChat running" by default. That gives us the
-  negative case for free. The **positive case** ("find_pid returns a
+  negative case for free. The **positive case** ("find_pids returns a
   PID when VRChat IS running") requires a real ``VRChat.exe``
   process and is covered by ``tests/e2e/`` -- the policy forbids
   individual tests from re-patching ``psutil.process_iter``.
@@ -46,7 +46,6 @@ from vrcpilot.process import (
     PID_WAIT_TIMEOUT,
     VRChatMultipleInstancesError,
     VRChatNotRunningError,
-    find_pid,
     find_pids,
     resolve_pid,
     terminate,
@@ -101,25 +100,6 @@ def _doomed_pid() -> int:
     while psutil.pid_exists(pid) and time.monotonic() < deadline:
         time.sleep(0.05)
     return pid
-
-
-class TestFindPid:
-    """``find_pid`` is deprecated; verify the negative case and warning.
-
-    The positive case (returning a real PID) requires a live
-    ``VRChat.exe`` and lives in tests/e2e/.
-    """
-
-    def test_returns_none_when_no_vrchat_running(self):
-        # autouse fixture pins process_iter to empty -> no VRChat seen.
-        with pytest.warns(DeprecationWarning):
-            assert find_pid() is None
-
-    def test_emits_deprecation_warning(self):
-        # Spec deprecates find_pid in favour of find_pids; the warning
-        # message must mention the deprecation so callers know.
-        with pytest.warns(DeprecationWarning, match=r"find_pid\(\) is deprecated"):
-            find_pid()
 
 
 class TestFindPids:

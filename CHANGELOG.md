@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **`vrcpilot.find_pid` / `vrcpilot.process.find_pid`** has been removed (deprecated in `0.3.0`, scheduled for removal in `0.4.0`). Migrate to `vrcpilot.find_pids()` (returns the full PID list, newest first), `vrcpilot.process.resolve_pid(pid)` (single resolution with multi-instance diagnostics), or pass `pid=` to the specific API you are calling. A typical replacement for the legacy `find_pid()` call is `next(iter(find_pids()), None)`.
+
 ### Added
 
 - **`vrcpilot linux-mic` gains `--suffix <NAME>` / `--all`**, primarily so multiple AI agent instances can run in parallel with each instance owning a dedicated virtual mic instead of fighting over a single shared `VRCPilotMic`. Suffixed sinks (e.g. `VRCPilotMic_bot`) can now be registered side-by-side; omitting `--suffix` preserves the original `VRCPilotMic` sink name. `status --all` / `unregister --all` enumerate / bulk-remove every `vrcpilot-mic*.conf` under the PipeWire config directory.
