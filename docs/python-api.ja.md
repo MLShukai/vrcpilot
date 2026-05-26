@@ -253,7 +253,7 @@ ______________________________________________________________________
 
 ## Speaker ルーティング（音声出力リレー）
 
-`vrcpilot.speaker.routing` は、特定の VRChat PID からキャプチャした音声を任意の OS 出力デバイス（物理スピーカーや仮想ケーブルのシンク）へリアルタイムにリレーします。内部では既存の PID スコープド `SpeakerLoop` をキャプチャ側に、`soundcard` の出力プレイヤーを再生側に組み合わせており、Windows / Linux 共通のコードパスです（プラットフォーム差分は `Speaker` と `soundcard` がそれぞれ吸収します）。VRChat を複数並列に起動して各インスタンスを別々の仮想出力へ振り分けたい、AI エージェントごとに音声経路を分離したい、といった「per-PID 音声分離」が主要なユースケースです。背景・配線手順・仮想ケーブル構成（VB-Audio Virtual Cable / PipeWire null-sink）については [`docs/virtual-audio.md`](virtual-audio.md) を参照してください。CLI 等価物は [`vrcpilot speaker list` / `vrcpilot speaker route`](cli.ja.md#speaker) です。
+`vrcpilot.speaker.routing` は、特定の VRChat PID からキャプチャした音声を任意の OS 出力デバイス（物理スピーカーや仮想ケーブルのシンク）へリアルタイムにリレーします。内部では既存の PID スコープド `SpeakerLoop` をキャプチャ側に、`soundcard` の出力プレイヤーを再生側に組み合わせており、Windows / Linux 共通のコードパスです（プラットフォーム差分は `Speaker` と `soundcard` がそれぞれ吸収します）。VRChat を複数並列に起動して各インスタンスを別々の仮想出力へ振り分けたい、AI エージェントごとに音声経路を分離したい、といった「per-PID 音声分離」が主要なユースケースです。背景・配線手順・仮想ケーブル構成（VB-Audio Virtual Cable / PipeWire null-sink）については [`docs/virtual-audio.ja.md`](virtual-audio.ja.md) を参照してください。CLI 等価物は [`vrcpilot speaker list` / `vrcpilot speaker route`](cli.ja.md#speaker) です。
 
 ### `vrcpilot.speaker.routing.AudioDevice`
 
