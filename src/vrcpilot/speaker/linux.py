@@ -363,12 +363,13 @@ class PipeWireSpeakerBackend(SpeakerBackend):
 
         # Mirror close()'s teardown order: loopback before null-sink so
         # a loopback is never left pointing at a deleted source.
-        for index, pid in loopbacks:
-            if self._tap_is_stale(pid):
-                self._unload_module_safely(index, "module-loopback", pid)
-        for index, pid in null_sinks:
-            if self._tap_is_stale(pid):
-                self._unload_module_safely(index, "module-null-sink", pid)
+        for entries, module_name in (
+            (loopbacks, "module-loopback"),
+            (null_sinks, "module-null-sink"),
+        ):
+            for index, pid in entries:
+                if self._tap_is_stale(pid):
+                    self._unload_module_safely(index, module_name, pid)
 
     def _tap_is_stale(self, pid: int) -> bool:
         """Whether the tap module for ``pid`` is safe to unload."""
@@ -410,17 +411,21 @@ class PipeWireSpeakerBackend(SpeakerBackend):
                 exc,
             )
 
-    def _load_null_sink(self) -> int:
-        """Load the per-pid ``module-null-sink`` and return its index."""
-        idx: Any = self._pulse.module_load(  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
-            "module-null-sink", _null_sink_args(self._pid)
-        )
+    def _load_module(self, module_name: str, args: str, kind_label: str) -> int:
+        """``pulse.module_load`` with shared ``isinstance(int)`` validation."""
+        idx: Any = self._pulse.module_load(module_name, args)  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
         if not isinstance(idx, int):
             raise RuntimeError(
-                "module_load(null-sink) returned non-int module id: "
+                f"module_load({kind_label}) returned non-int module id: "
                 f"{type(idx).__name__}"
             )
         return idx
+
+    def _load_null_sink(self) -> int:
+        """Load the per-pid ``module-null-sink`` and return its index."""
+        return self._load_module(
+            "module-null-sink", _null_sink_args(self._pid), "null-sink"
+        )
 
     def _resolve_default_sink_name(self) -> str:
         """Resolve the current default sink name for the loopback ``sink=``.
@@ -441,15 +446,11 @@ class PipeWireSpeakerBackend(SpeakerBackend):
 
     def _load_loopback(self, default_sink_name: str) -> int:
         """Load the ``module-loopback`` and return its index."""
-        idx: Any = self._pulse.module_load(  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
-            "module-loopback", _loopback_args(self._pid, default_sink_name)
+        return self._load_module(
+            "module-loopback",
+            _loopback_args(self._pid, default_sink_name),
+            "loopback",
         )
-        if not isinstance(idx, int):
-            raise RuntimeError(
-                "module_load(loopback) returned non-int module id: "
-                f"{type(idx).__name__}"
-            )
-        return idx
 
     def _resolve_state_dir(self) -> Path:
         """Return (and create) the directory state files live in.
@@ -783,23 +784,27 @@ class PipeWireSpeakerBackend(SpeakerBackend):
         except Exception as exc:  # noqa: BLE001
             warnings.warn(f"pulse close failed: {exc}", stacklevel=2)
 
-    def _safe_unload_loopback(self) -> None:
-        if self._loopback_module_id is None or self._pulse is None:
+    def _safe_unload_by_attr(self, attr_name: str, module_label: str) -> None:
+        """Shared body of the two ``_safe_unload_*`` teardown methods.
+
+        Keeps the per-method names stable for ``ExitStack.callback`` /
+        ``close()`` while collapsing the pulse-call + warning + clear
+        logic into one place.
+        """
+        module_id = getattr(self, attr_name)
+        if module_id is None or self._pulse is None:
             return
         try:
-            self._pulse.module_unload(self._loopback_module_id)  # pyright: ignore[reportUnknownMemberType]
+            self._pulse.module_unload(module_id)  # pyright: ignore[reportUnknownMemberType]
         except Exception as exc:  # noqa: BLE001
-            warnings.warn(f"module-loopback unload failed: {exc}", stacklevel=2)
-        self._loopback_module_id = None
+            warnings.warn(f"{module_label} unload failed: {exc}", stacklevel=2)
+        setattr(self, attr_name, None)
+
+    def _safe_unload_loopback(self) -> None:
+        self._safe_unload_by_attr("_loopback_module_id", "module-loopback")
 
     def _safe_unload_null_sink(self) -> None:
-        if self._null_sink_module_id is None or self._pulse is None:
-            return
-        try:
-            self._pulse.module_unload(self._null_sink_module_id)  # pyright: ignore[reportUnknownMemberType]
-        except Exception as exc:  # noqa: BLE001
-            warnings.warn(f"module-null-sink unload failed: {exc}", stacklevel=2)
-        self._null_sink_module_id = None
+        self._safe_unload_by_attr("_null_sink_module_id", "module-null-sink")
 
     def _safe_remove_state_file(self) -> None:
         if self._state_file is None:
