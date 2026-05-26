@@ -39,3 +39,7 @@
 ## reference（外部ツール・パス）
 
 - [gh CLI は絶対パスで呼ぶ](reference_gh_executable_path.md) — `"/c/Program Files/GitHub CLI/gh.exe"` で呼ぶ。PATH には通っていない
+
+## specs（確定済み仕様）
+
+- [PID 単位 VRChat 音声リレー (speaker.routing + speaker CLI)](specs/pid_speaker_routing_relay.md) — cross-platform リレー方式 (旧 IAudioPolicyConfig 仕様は破棄)。Phase 2 4 並列実装の前提

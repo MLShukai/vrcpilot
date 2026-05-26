@@ -41,7 +41,7 @@ def launch(
 ) -> int | None: ...
 ```
 
-Start VRChat through Steam. The new process is detached from the calling process group. After spawning Steam, `launch()` polls [`find_pid()`](#vrcpilotfind_pid) for up to `wait_timeout` seconds (default 30s) and returns the observed PID. Pass `wait_timeout=0` (or any non-positive value) to skip the wait and return immediately. This is useful for "fire and forget" launches where you intend to poll later yourself.
+Start VRChat through Steam. The new process is detached from the calling process group. After spawning Steam, `launch()` polls [`find_pids()`](#vrcpilotfind_pids) for up to `wait_timeout` seconds (default 30s) and returns the observed PID. Pass `wait_timeout=0` (or any non-positive value) to skip the wait and return immediately. This is useful for "fire and forget" launches where you intend to poll later yourself.
 
 **Returns**: the PID once VRChat is observed, or `None` if `wait_timeout <= 0` or the timeout is exceeded. A `None` return on a positive timeout is *not* an exception — branch on the return value if you need a stricter signal.
 
@@ -59,13 +59,13 @@ Force-kill every running VRChat process and wait up to `timeout` seconds for the
 
 **Returns**: the PIDs that were signalled.
 
-### `vrcpilot.find_pid`
+### `vrcpilot.find_pids`
 
 ```python
-def find_pid() -> int | None: ...
+def find_pids() -> list[int]: ...
 ```
 
-**Returns**: the first running VRChat PID, or `None` when nothing matches.
+**Returns**: PIDs of every running VRChat process, sorted newest-first by `psutil.Process.create_time()`. The list is empty when no VRChat is running.
 
 ### `vrcpilot.OscConfig`
 

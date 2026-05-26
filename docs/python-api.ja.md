@@ -41,7 +41,7 @@ def launch(
 ) -> int | None: ...
 ```
 
-Steam 経由で VRChat を起動します。新しいプロセスは呼び出し側のプロセスグループから切り離されます。Steam を起動した後、`launch()` は最大 `wait_timeout` 秒（デフォルト 30 秒）の間 [`find_pid()`](#vrcpilotfind_pid) をポーリングし、観測した PID を返します。`wait_timeout=0`（または非正の値）を渡すと待機をスキップしてすぐに復帰します。これは、自分で後からポーリングするつもりの「fire and forget」型の起動に便利です。
+Steam 経由で VRChat を起動します。新しいプロセスは呼び出し側のプロセスグループから切り離されます。Steam を起動した後、`launch()` は最大 `wait_timeout` 秒（デフォルト 30 秒）の間 [`find_pids()`](#vrcpilotfind_pids) をポーリングし、観測した PID を返します。`wait_timeout=0`（または非正の値）を渡すと待機をスキップしてすぐに復帰します。これは、自分で後からポーリングするつもりの「fire and forget」型の起動に便利です。
 
 **Returns**: VRChat が観測された時点での PID、もしくは `wait_timeout <= 0` の場合やタイムアウトを超えた場合は `None`。正のタイムアウトで `None` が返ること自体は例外ではありません — より厳密なシグナルが必要であれば戻り値で分岐してください。
 
@@ -59,13 +59,13 @@ def terminate(*, timeout: float = 5.0) -> list[int]: ...
 
 **Returns**: シグナルを送った PID のリスト。
 
-### `vrcpilot.find_pid`
+### `vrcpilot.find_pids`
 
 ```python
-def find_pid() -> int | None: ...
+def find_pids() -> list[int]: ...
 ```
 
-**Returns**: 最初に見つかった VRChat の PID、もしくは該当なしの場合は `None`。
+**Returns**: 実行中の全 VRChat プロセスの PID。`psutil.Process.create_time()` の降順（新しいものが先頭）で並びます。VRChat が起動していない場合は空リストになります。
 
 ### `vrcpilot.OscConfig`
 

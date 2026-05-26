@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import time
-import warnings
 from typing import Final
 
 import psutil
@@ -24,26 +23,6 @@ PID_WAIT_TIMEOUT: Final[float] = 30.0
 #: :func:`wait_for_no_pid`. One second keeps the helpers responsive
 #: without burning CPU on ``psutil.process_iter`` calls.
 PID_WAIT_INTERVAL: Final[float] = 1.0
-
-
-def find_pid() -> int | None:
-    """Return the newest VRChat PID, or ``None`` if absent. **Deprecated.**
-
-    .. deprecated:: 0.3.0
-        Will be removed in 0.4.0. Use :func:`find_pids` to enumerate all
-        instances, or pass ``pid=`` to specific APIs to target one explicitly.
-
-    Equivalent to ``find_pids()[0] if find_pids() else None`` — i.e. the
-    newest-started VRChat by ``create_time`` ordering.
-    """
-    warnings.warn(
-        "find_pid() is deprecated and will be removed in 0.4.0; "
-        "use find_pids() or pass pid= to specific APIs",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    pids = find_pids()
-    return pids[0] if pids else None
 
 
 def find_pids() -> list[int]:

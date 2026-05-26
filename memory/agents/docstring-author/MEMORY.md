@@ -18,6 +18,7 @@ docstring / コメント記述専任エージェントが Google-style docstring
 - [vrcpilot.osc subpackage docstring conventions](project_osc_subpackage.md) — OSC `i`/`f` tag intent, `client=` test seam, `INT_RANGE`/`FLOAT_RANGE`/`CHATBOX_MAX_LENGTH` constants
 - [vrcpilot.speaker subpackage docstring conventions](project_speaker_subpackage.md) — PID-isolated capture intent, lazy backend dispatch rationale, drain-all read contract
 - [vrcpilot.speaker.linux per-PID design docstring patterns](project_speaker_linux_per_pid.md) — two-stage global-port-id pw-link routing, object.id vs serial trap, pw-dump tempfile race, --target=0 capture side, port-link diagnostic contract, teardown order, trailing-`\s` anchor
+- [vrcpilot.speaker.routing subpackage docstring conventions](project_routing_subpackage.md) — relay lifecycle invariants, 3-stage device resolution, error hierarchy, record-vs-routing distinction
 - [tests/e2e/ docstring style](project_tests_e2e_docstring_style.md) — scenarios open with "E2E scenario:" + Run with:: block + prerequisites; helpers stay out of that pattern
 - [tests/fakes/ docstring style](project_tests_fakes_docstring_style.md) — name the production ABC, why fake vs real, which test tier uses it; reaffirm 3rd-party surfaces are not faked
 - [User-docs drift audit checklist](project_user_docs_drift_audit.md) — 5 recurring drift sources to cross-check before declaring a README / CONTRIBUTING / tests/e2e/README polish pass complete

@@ -125,11 +125,11 @@ def ensure_no_vrchat() -> None:
     process from a prior failed run cannot pollute the test, and so the
     user's environment is left clean even on failure.
     """
-    pid = vrcpilot.find_pid()
-    if pid is None:
+    pids = vrcpilot.find_pids()
+    if not pids:
         log("no existing VRChat process")
         return
-    log(f"existing VRChat detected (pid={pid}); terminating")
+    log(f"existing VRChat detected (pids={pids}); terminating")
     vrcpilot.terminate()
     if wait_for_no_pid():
         log("existing VRChat terminated")

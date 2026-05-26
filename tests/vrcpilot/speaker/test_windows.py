@@ -37,14 +37,14 @@ def live_vrchat_pid(monkeypatch: pytest.MonkeyPatch) -> int:
 
     The autouse ``_no_real_vrchat`` fixture in ``tests/conftest.py``
     pins ``psutil.process_iter`` to an empty iterator; undoing the
-    monkeypatch lets ``find_pid`` query the real OS. Returns the live
+    monkeypatch lets ``find_pids`` query the real OS. Returns the live
     PID so tests can pass it to ``ProcTapSpeakerBackend(pid=...)``.
     """
     monkeypatch.undo()
-    pid = process.find_pid()
-    if pid is None:
+    pids = process.find_pids()
+    if not pids:
         pytest.skip("VRChat is not running; cannot exercise proc-tap")
-    return pid
+    return pids[0]
 
 
 class TestConstructionValidation:

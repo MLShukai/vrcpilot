@@ -166,7 +166,8 @@
       "WebSearch",
       "WebFetch",
       "Bash(git cherry-pick *)",
-      "Bash(git worktree *)"
+      "Bash(git worktree *)",
+      "Bash(tasklist)"
     ],
     "deny": [
       "Read(~/.ssh/**)",
