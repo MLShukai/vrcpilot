@@ -97,6 +97,14 @@ _DRAIN_CHUNK_BYTES: Final[int] = 4096
 _SINK_LOOKUP_RETRIES: Final[int] = 10
 _SINK_LOOKUP_INTERVAL_SEC: Final[float] = 0.05
 
+#: ``module_load`` can race the PipeWire-Pulse daemon when two backends
+#: unload stale modules in quick succession: the daemon may try to
+#: reuse a just-freed module index for the new load and return
+#: ``Operation canceled`` (-125). Retrying with a short backoff lets the
+#: free pool settle without escalating the failure to the caller.
+_MODULE_LOAD_RETRIES: Final[int] = 3
+_MODULE_LOAD_RETRY_DELAY_SEC: Final[float] = 0.1
+
 #: ``create_time`` tolerance when checking for PID reuse. ``psutil``
 #: reports times in seconds; a small slack absorbs filesystem timestamp
 #: rounding without letting an honest reuse slip through.
@@ -238,7 +246,13 @@ class PipeWireSpeakerBackend(SpeakerBackend):
         # pw-record subprocess.
         stack = ExitStack()
         try:
-            self._pulse = self._open_pulse("vrcpilot-tap")
+            # Client name is suffixed with the VRChat PID so the daemon
+            # log identifies which backend each ``client ... [vrcpilot-tap-N]``
+            # message belongs to. Without the suffix two concurrent
+            # backends would both register as plain ``vrcpilot-tap`` and
+            # post-mortems could not tell their LOAD_MODULE / unload
+            # ordering apart.
+            self._pulse = self._open_pulse(f"vrcpilot-tap-{self._pid}")
             stack.callback(self._safe_close_pulse)
 
             self._reset_stale_taps()
@@ -408,15 +422,63 @@ class PipeWireSpeakerBackend(SpeakerBackend):
                 exc,
             )
 
+    def _module_load_raw(self, module_name: str, args: str) -> Any:
+        """Thin wrapper around ``pulse.module_load`` carved out as a test seam.
+
+        Same role as :meth:`_open_pulse` / :meth:`_spawn_pw_record`: a
+        single-call factory so tests can substitute the per-attempt
+        outcome via ``mocker.patch.object(backend, '_module_load_raw',
+        side_effect=[...])`` without monkey-patching ``pulsectl`` itself
+        (which the project's testing policy forbids for 3rd-party
+        surfaces).
+        """
+        return self._pulse.module_load(module_name, args)  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
+
     def _load_module(self, module_name: str, args: str, kind_label: str) -> int:
-        """``pulse.module_load`` with shared ``isinstance(int)`` validation."""
-        idx: Any = self._pulse.module_load(module_name, args)  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
-        if not isinstance(idx, int):
-            raise RuntimeError(
-                f"module_load({kind_label}) returned non-int module id: "
-                f"{type(idx).__name__}"
-            )
-        return idx
+        """``pulse.module_load`` with retry-with-backoff + int validation.
+
+        PipeWire-Pulse occasionally returns ``Operation canceled``
+        (-125) when two backends unload stale modules and immediately
+        request a new load: the daemon races to reuse the just-freed
+        module index. A short retry with a fixed backoff is enough to
+        let the free pool settle before re-attempting.
+        """
+        last_exc: BaseException | None = None
+        for attempt in range(1, _MODULE_LOAD_RETRIES + 1):
+            try:
+                idx: Any = self._module_load_raw(module_name, args)
+            except Exception as exc:
+                # Broad catch is deliberate: pulsectl's ``PulseError`` is
+                # off-limits per the project's 3rd-party surface policy,
+                # and PipeWire-Pulse surfaces generic errors here
+                # (e.g. ``Operation canceled``) without a stable type.
+                last_exc = exc
+                _logger.warning(
+                    "module_load attempt %d/%d failed | module=%s | error=%s",
+                    attempt,
+                    _MODULE_LOAD_RETRIES,
+                    module_name,
+                    exc,
+                )
+                if attempt < _MODULE_LOAD_RETRIES:
+                    time.sleep(_MODULE_LOAD_RETRY_DELAY_SEC)
+                continue
+            if not isinstance(idx, int):
+                raise RuntimeError(
+                    f"module_load({kind_label}) returned non-int module id: "
+                    f"{type(idx).__name__}"
+                )
+            if attempt > 1:
+                _logger.info(
+                    "module_load retry succeeded | module=%s | attempt=%d | "
+                    "total_attempts=%d",
+                    module_name,
+                    attempt,
+                    _MODULE_LOAD_RETRIES,
+                )
+            return idx
+        assert last_exc is not None  # loop exited via final-attempt failure
+        raise last_exc
 
     def _load_null_sink(self) -> int:
         """Load the per-pid ``module-null-sink`` and return its index."""

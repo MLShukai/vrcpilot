@@ -31,8 +31,11 @@ import pytest
 if not sys.platform.startswith("linux"):
     pytest.skip("vrcpilot.speaker.linux is Linux-only", allow_module_level=True)
 
+from pytest_mock import MockerFixture  # noqa: E402
+
 from tests.helpers import has_pipewire  # noqa: E402
 from vrcpilot.speaker.linux import (  # noqa: E402
+    _MODULE_LOAD_RETRIES,
     _REQUIRED_CLIS,
     PipeWireSpeakerBackend,
     _extract_tap_pid,
@@ -330,7 +333,18 @@ class TestPipeWireSpeakerBackendAgainstRealDaemon:
 
     def test_two_backends_have_independent_per_pid_taps(self) -> None:
         """Two backends with distinct PIDs each own a private null-sink and
-        neither close path tramples the other's module."""
+        neither close path tramples the other's module.
+
+        Phase A1' additionally pins the **per-PID client name**: the
+        pipewire-pulse daemon was re-using a stale ``module-null-sink``
+        index when two backends both registered as the plain
+        ``vrcpilot-tap`` client and one of the two ``module_load`` calls
+        came back with ``Operation canceled``. With per-PID client names
+        the two backends present distinct identities to the daemon, so
+        the daemon log can attribute every ``LOAD_MODULE`` /
+        ``UNLOAD_MODULE`` to a specific backend and the index-reuse race
+        is no longer ambiguous.
+        """
         import os
 
         import pulsectl  # type: ignore[import-not-found]
@@ -351,6 +365,22 @@ class TestPipeWireSpeakerBackendAgainstRealDaemon:
                     sinks = [getattr(s, "name", "") for s in p.sink_list()]
                     assert f"vrcpilot_tap_{real_pid}" in sinks
                     assert f"vrcpilot_tap_{ghost_pid}" in sinks
+
+                    # Per-PID client name contract: each backend's pulse
+                    # client registers under ``vrcpilot-tap-<pid>``, and
+                    # the two distinct PIDs produce two distinct client
+                    # names on the daemon. This is the regression detector
+                    # for the "both backends share the same client name
+                    # and the daemon races their module load" bug.
+                    client_names = [getattr(c, "name", "") for c in p.client_list()]
+                    assert f"vrcpilot-tap-{real_pid}" in client_names, (
+                        f"per-PID client name for real backend missing; "
+                        f"got {client_names}"
+                    )
+                    assert f"vrcpilot-tap-{ghost_pid}" in client_names, (
+                        f"per-PID client name for ghost backend missing; "
+                        f"got {client_names}"
+                    )
             finally:
                 backend_ghost.close()
 
@@ -359,6 +389,12 @@ class TestPipeWireSpeakerBackendAgainstRealDaemon:
                 sinks_after_ghost = [getattr(s, "name", "") for s in p.sink_list()]
                 assert f"vrcpilot_tap_{real_pid}" in sinks_after_ghost
                 assert f"vrcpilot_tap_{ghost_pid}" not in sinks_after_ghost
+
+                # And the ghost client is gone from the daemon, while
+                # the real backend's client remains.
+                names_after_ghost = [getattr(c, "name", "") for c in p.client_list()]
+                assert f"vrcpilot-tap-{real_pid}" in names_after_ghost
+                assert f"vrcpilot-tap-{ghost_pid}" not in names_after_ghost
         finally:
             backend_real.close()
 
@@ -367,6 +403,11 @@ class TestPipeWireSpeakerBackendAgainstRealDaemon:
             sinks_final = [getattr(s, "name", "") for s in p.sink_list()]
             assert f"vrcpilot_tap_{real_pid}" not in sinks_final
             assert f"vrcpilot_tap_{ghost_pid}" not in sinks_final
+
+            # Both backends' pulse clients are gone, too.
+            names_final = [getattr(c, "name", "") for c in p.client_list()]
+            assert f"vrcpilot-tap-{real_pid}" not in names_final
+            assert f"vrcpilot-tap-{ghost_pid}" not in names_final
 
     def test_stale_tap_for_dead_pid_is_swept_on_start(self) -> None:
         """A leftover ``vrcpilot_tap_<dead_pid>`` from a prior crashed run must
@@ -539,6 +580,61 @@ class TestPipeWireSpeakerBackendAgainstRealDaemon:
             f"{post_verify_lines}"
         )
 
+    def test_pulse_client_name_is_per_pid_unique(self) -> None:
+        """The backend's pulse control connection registers under ``vrcpilot-
+        tap-<pid>``, exactly once.
+
+        Phase A1' suffixes the pulsectl client name with the VRChat
+        PID. The contract this test pins:
+
+        * Exactly one client on the daemon is named
+          ``vrcpilot-tap-<self._pid>`` while the backend is alive.
+        * No legacy plain ``vrcpilot-tap`` client remains (the suffix
+          replaced the old name, not added alongside it).
+        * After :meth:`close`, the per-PID client is gone from the
+          daemon.
+
+        Why per-PID matters: when two backends share the client name
+        ``vrcpilot-tap``, the pipewire-pulse daemon races their
+        ``LOAD_MODULE`` requests and returns ``Operation canceled``
+        for the second backend's module-null-sink load. The retry
+        logic in :class:`TestModuleLoadRetry` handles the symptom; the
+        per-PID client name addresses the root cause by giving each
+        backend a stable identity on the daemon.
+        """
+        import os
+
+        import pulsectl  # type: ignore[import-not-found]
+
+        my_pid = os.getpid()
+        backend = PipeWireSpeakerBackend(pid=my_pid)
+        try:
+            with pulsectl.Pulse("vrcpilot-test-probe-client-name") as p:
+                names = [getattr(c, "name", "") for c in p.client_list()]
+            per_pid_hits = [n for n in names if n == f"vrcpilot-tap-{my_pid}"]
+            assert len(per_pid_hits) == 1, (
+                f"expected exactly one daemon client named "
+                f"'vrcpilot-tap-{my_pid}'; got {per_pid_hits} "
+                f"(full client list: {names})"
+            )
+            # The pre-A1' literal ``vrcpilot-tap`` (no suffix) must
+            # not appear: that would mean the rename regressed.
+            assert "vrcpilot-tap" not in names, (
+                "legacy 'vrcpilot-tap' (no suffix) client appeared on "
+                "the daemon — the per-PID rename has regressed; "
+                f"full client list: {names}"
+            )
+        finally:
+            backend.close()
+
+        # After close, no client of either name should remain.
+        with pulsectl.Pulse("vrcpilot-test-probe-client-name-after") as p:
+            names_after = [getattr(c, "name", "") for c in p.client_list()]
+        assert f"vrcpilot-tap-{my_pid}" not in names_after, (
+            f"per-PID client 'vrcpilot-tap-{my_pid}' must be gone after "
+            f"backend.close; full client list: {names_after}"
+        )
+
     def test_pw_record_stderr_drain_thread_is_joined_on_close(self) -> None:
         """``pw-record`` stderr drain thread must not outlive ``close()``.
 
@@ -570,3 +666,318 @@ class TestPipeWireSpeakerBackendAgainstRealDaemon:
             f"no Thread attribute on the backend should remain alive "
             f"after close(); leaked: {live_threads}"
         )
+
+
+class TestModuleLoadRawWrapper:
+    """``_module_load_raw`` is a thin wrapper around ``pulse.module_load``.
+
+    The carve-out exists so retry tests can substitute the per-attempt
+    outcome via ``mocker.patch.object(backend, '_module_load_raw',
+    side_effect=[...])`` without mocking ``pulsectl`` itself (which the
+    project's testing policy forbids for 3rd-party surfaces). This test
+    asserts the wrapper has no behaviour of its own beyond delegating
+    to the underlying ``pulse.module_load``.
+
+    Real-daemon integration: we load a module via both routes, confirm
+    they return integer module ids, and clean up both. ``pulsectl`` is
+    used directly (not mocked) because the contract under test is "the
+    wrapper is a no-op delegate".
+    """
+
+    def setup_method(self) -> None:
+        if not _required_clis_present():
+            pytest.skip(f"required CLIs must all be installed: {_REQUIRED_CLIS}")
+        if not _pulsectl_importable():
+            pytest.skip("pulsectl is required for the real PipeWire backend")
+        if not has_pipewire():
+            pytest.skip("no PipeWire daemon reachable")
+
+    def test_raw_wrapper_returns_int_module_id_from_real_daemon(self) -> None:
+        """``_module_load_raw`` delegates verbatim to ``pulse.module_load`` on
+        a real PipeWire-Pulse daemon.
+
+        We bypass the full ``__init__`` here because a fully-constructed
+        backend has the pulse event listener thread running, and
+        pulsectl refuses blocking sync calls (``module_load``) from the
+        main thread under that condition (see the project memory
+        ``feedback_caplog_pulsectl_event_loop``). Bypassing init lets us
+        attach a **real** ``pulsectl.Pulse`` connection that has no
+        event loop running, exercise the wrapper, and verify it
+        returns the integer module id the daemon assigned — confirming
+        the seam is a pure delegate and not introducing any per-call
+        side effect of its own.
+        """
+        import os
+
+        import pulsectl  # type: ignore[import-not-found]
+
+        my_pid = os.getpid()
+        # Build a minimal backend instance with just the attributes the
+        # wrapper touches: ``_pulse``. ``object.__new__`` skips
+        # ``__init__`` so no event listener thread is started.
+        backend: PipeWireSpeakerBackend = object.__new__(PipeWireSpeakerBackend)
+        backend._pulse = pulsectl.Pulse("vrcpilot-test-raw-wrapper")
+        # Use a distinct sink name so the wrapper-only test never
+        # collides with the backend's own ``vrcpilot_tap_<pid>`` if a
+        # real backend happens to be running in another test.
+        probe_sink_name = f"vrcpilot_test_raw_wrapper_{my_pid}"
+        args = (
+            f"sink_name={probe_sink_name} "
+            f"sink_properties=device.description=VRCPilotTestRaw_{my_pid} "
+            "rate=48000 channels=2 format=float32le"
+        )
+        idx: object = None
+        try:
+            idx = backend._module_load_raw("module-null-sink", args)
+            # Contract: the daemon assigns an integer module id. The
+            # wrapper must return that int verbatim — anything else
+            # means the seam has grown behaviour of its own (which
+            # would break the retry tests that rely on substituting
+            # ``_module_load_raw`` as a pure delegate).
+            assert isinstance(idx, int), (
+                f"_module_load_raw must return an int module id; "
+                f"got {type(idx).__name__} = {idx!r}"
+            )
+        finally:
+            if isinstance(idx, int):
+                try:
+                    backend._pulse.module_unload(idx)
+                except Exception:  # noqa: BLE001
+                    pass
+            try:
+                backend._pulse.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+
+class TestModuleLoadRetry:
+    """``_load_module`` retries on transient failures with fixed backoff.
+
+    Phase A1' adds retry-with-backoff to absorb the
+    ``Operation canceled`` race that pipewire-pulse exhibits when two
+    backends unload-then-load module-null-sinks in quick succession.
+    The retry surface:
+
+    * up to ``_MODULE_LOAD_RETRIES`` total attempts
+    * each failing attempt emits a WARNING log
+    * a successful retry (attempt > 1) emits an INFO log
+      ``module_load retry succeeded``
+    * initial-attempt success emits no retry-success INFO
+
+    These tests substitute :meth:`PipeWireSpeakerBackend._module_load_raw`
+    via ``mocker.patch.object`` after the backend has been constructed.
+    That test seam is **project-owned** (not a 3rd-party surface), so
+    patching it follows the policy. Because the patched seam is the
+    only call site touching pulsectl from the retry loop, no blocking
+    pulse sync call escapes onto the main thread while the event
+    listener thread is running — the retry loop itself only calls
+    ``time.sleep`` and the patched seam.
+    """
+
+    def setup_method(self) -> None:
+        if not _required_clis_present():
+            pytest.skip(f"required CLIs must all be installed: {_REQUIRED_CLIS}")
+        if not _pulsectl_importable():
+            pytest.skip("pulsectl is required for the real PipeWire backend")
+        if not has_pipewire():
+            pytest.skip("no PipeWire daemon reachable")
+
+    def test_retries_on_transient_failure_and_succeeds_on_third_attempt(
+        self,
+        mocker: MockerFixture,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Two transient failures followed by a success: ``_load_module``
+        returns the third attempt's module id and logs one INFO
+        ``retry succeeded`` after two WARNING attempts."""
+        import os
+
+        my_pid = os.getpid()
+        backend = PipeWireSpeakerBackend(pid=my_pid)
+        try:
+            # 99999 is an arbitrary placeholder int — _load_module does
+            # not address the daemon with the returned id; it simply
+            # returns it to the caller. Using a fake int avoids
+            # actually loading (and having to unload) a real module.
+            mocker.patch.object(
+                backend,
+                "_module_load_raw",
+                side_effect=[
+                    Exception("simulated transient 1"),
+                    Exception("simulated transient 2"),
+                    99999,
+                ],
+            )
+            with caplog.at_level("INFO", logger="vrcpilot.speaker.linux"):
+                caplog.clear()
+                result = backend._load_module(
+                    "module-null-sink", "sink_name=foo", "null-sink"
+                )
+
+            assert result == 99999, (
+                "the successful attempt's module id must be returned "
+                f"verbatim; got {result!r}"
+            )
+
+            warning_attempt_msgs = [
+                rec.getMessage()
+                for rec in caplog.records
+                if rec.name == "vrcpilot.speaker.linux"
+                and rec.levelname == "WARNING"
+                and "module_load attempt" in rec.getMessage()
+            ]
+            assert len(warning_attempt_msgs) == 2, (
+                f"expected exactly 2 'module_load attempt' WARNINGs for "
+                f"two transient failures; got {warning_attempt_msgs}"
+            )
+            # Pin the attempt counter on each line so a future
+            # off-by-one in the loop is caught.
+            assert any(
+                "attempt 1/" in m for m in warning_attempt_msgs
+            ), warning_attempt_msgs
+            assert any(
+                "attempt 2/" in m for m in warning_attempt_msgs
+            ), warning_attempt_msgs
+
+            success_msgs = [
+                rec.getMessage()
+                for rec in caplog.records
+                if rec.name == "vrcpilot.speaker.linux"
+                and rec.levelname == "INFO"
+                and "module_load retry succeeded" in rec.getMessage()
+            ]
+            assert len(success_msgs) == 1, (
+                f"expected exactly one 'module_load retry succeeded' "
+                f"INFO line on the successful third attempt; got "
+                f"{success_msgs}"
+            )
+            # The INFO line must name the eventual attempt number so a
+            # post-mortem knows how many tries it took.
+            assert "attempt=3" in success_msgs[0], success_msgs[0]
+        finally:
+            backend.close()
+
+    def test_propagates_final_exception_after_all_attempts_fail(
+        self,
+        mocker: MockerFixture,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """When every attempt fails, the **last** exception propagates and one
+        WARNING per attempt is logged.
+
+        The exact exception identity matters because callers (e.g. the
+        ExitStack rollback in ``__init__``) inspect the chained error
+        message; if ``_load_module`` raised a generic wrapper instead of
+        re-raising the underlying failure, the actionable
+        ``Operation canceled`` detail would be lost.
+        """
+        import os
+
+        my_pid = os.getpid()
+        backend = PipeWireSpeakerBackend(pid=my_pid)
+        try:
+            final_exc = RuntimeError("simulated final failure")
+            mocker.patch.object(
+                backend,
+                "_module_load_raw",
+                side_effect=[
+                    RuntimeError("simulated attempt 1"),
+                    RuntimeError("simulated attempt 2"),
+                    final_exc,
+                ],
+            )
+            with caplog.at_level("WARNING", logger="vrcpilot.speaker.linux"):
+                caplog.clear()
+                with pytest.raises(RuntimeError) as excinfo:
+                    backend._load_module(
+                        "module-null-sink", "sink_name=foo", "null-sink"
+                    )
+            # Last attempt's exception is the one that propagates;
+            # this pins the "preserve the actionable error" contract.
+            assert excinfo.value is final_exc, (
+                "the final attempt's exception must propagate verbatim; "
+                f"got {excinfo.value!r}"
+            )
+
+            warning_attempt_msgs = [
+                rec.getMessage()
+                for rec in caplog.records
+                if rec.name == "vrcpilot.speaker.linux"
+                and rec.levelname == "WARNING"
+                and "module_load attempt" in rec.getMessage()
+            ]
+            assert len(warning_attempt_msgs) == _MODULE_LOAD_RETRIES, (
+                f"expected one WARNING per failed attempt "
+                f"({_MODULE_LOAD_RETRIES}); got {warning_attempt_msgs}"
+            )
+
+            # And critically: no spurious 'retry succeeded' INFO on
+            # the all-fail path.
+            success_msgs = [
+                rec.getMessage()
+                for rec in caplog.records
+                if rec.name == "vrcpilot.speaker.linux"
+                and "module_load retry succeeded" in rec.getMessage()
+            ]
+            assert success_msgs == [], (
+                f"no 'retry succeeded' INFO should be logged when every "
+                f"attempt fails; got {success_msgs}"
+            )
+        finally:
+            backend.close()
+
+    def test_first_attempt_success_logs_no_retry_succeeded_info(
+        self,
+        mocker: MockerFixture,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """First-attempt success must NOT emit ``retry succeeded``.
+
+        The INFO line is reserved for retries that recover from a
+        transient failure — emitting it on every load would flood the
+        log on the common path and dilute its diagnostic value when the
+        race actually fires.
+        """
+        import os
+
+        my_pid = os.getpid()
+        backend = PipeWireSpeakerBackend(pid=my_pid)
+        try:
+            mocker.patch.object(
+                backend,
+                "_module_load_raw",
+                side_effect=[12345],
+            )
+            with caplog.at_level("INFO", logger="vrcpilot.speaker.linux"):
+                caplog.clear()
+                result = backend._load_module(
+                    "module-null-sink", "sink_name=foo", "null-sink"
+                )
+
+            assert result == 12345
+
+            success_msgs = [
+                rec.getMessage()
+                for rec in caplog.records
+                if rec.name == "vrcpilot.speaker.linux"
+                and "module_load retry succeeded" in rec.getMessage()
+            ]
+            assert success_msgs == [], (
+                f"first-attempt success must not log 'retry succeeded'; "
+                f"got {success_msgs}"
+            )
+
+            # And no attempt-failure WARNINGs either.
+            warning_msgs = [
+                rec.getMessage()
+                for rec in caplog.records
+                if rec.name == "vrcpilot.speaker.linux"
+                and rec.levelname == "WARNING"
+                and "module_load attempt" in rec.getMessage()
+            ]
+            assert warning_msgs == [], (
+                f"no 'module_load attempt' WARNING expected on "
+                f"first-attempt success; got {warning_msgs}"
+            )
+        finally:
+            backend.close()
