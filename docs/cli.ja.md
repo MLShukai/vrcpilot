@@ -256,9 +256,9 @@ ______________________________________________________________________
 Linux 上の永続的な `VRCPilotMic` 仮想マイク（PipeWire `module-null-sink`）を管理します。同じ親サブパーサ配下に 3 つのアクションが公開されています:
 
 ```
-vrcpilot linux-mic register [--no-runtime-load]
-vrcpilot linux-mic unregister
-vrcpilot linux-mic status
+vrcpilot linux-mic register   [--no-runtime-load] [--suffix NAME]
+vrcpilot linux-mic unregister [--suffix NAME | --all]
+vrcpilot linux-mic status     [--suffix NAME | --all]
 ```
 
 | Action       | 説明                                                                                                                                                |
@@ -267,18 +267,26 @@ vrcpilot linux-mic status
 | `unregister` | 設定フラグメントを削除し、マッチするランタイムモジュールがあればアンロードします。冪等です — 登録されていない状態でも `0` で終了します。            |
 | `status`     | 設定が存在するか、ランタイムモジュールがロードされているか、`soundcard` がデバイスを認識できるかを報告します。Linux 上では常に `0` で終了します。   |
 
-| Option              | Applies to | Default | 説明                                                                                                                                        |
-| ------------------- | ---------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--no-runtime-load` | `register` | off     | 即時の `pulsectl` `module_load` ステップをスキップします。永続設定は書き出されるので、PipeWire を再起動すれば後のセッションで反映されます。 |
+| Option              | Applies to              | Default | 説明                                                                                                                                                                                                            |
+| ------------------- | ----------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--no-runtime-load` | `register`              | off     | 即時の `pulsectl` `module_load` ステップをスキップします。永続設定は書き出されるので、PipeWire を再起動すれば後のセッションで反映されます。                                                                     |
+| `--suffix NAME`     | all actions             | unset   | `register` では名前付きの追加 sink (`VRCPilotMic_<NAME>`) を作成します。`unregister` / `status` では指定 suffix のみを対象とします。デフォルト（未指定）は空 suffix の `VRCPilotMic` です。`--all` と排他です。 |
+| `--all`             | `unregister` / `status` | off     | `unregister` では登録済みの全 suffix を一括解除します。`status` では登録済みの全 suffix を列挙します。`--suffix` と排他です。                                                                                   |
 
 **出力**: 人間向けの進捗は stderr に出力されます（設定パス、ランタイムロード結果、VRChat 側のヒント）。`status` アクションはこれに加え、固定語彙の機械可読サマリを stdout に書き出します: `config: {present|absent}`、`config_path: <path>`、`runtime: {loaded|not loaded|unavailable}`、`soundcard: {visible|not visible|unavailable}`（1 行 1 キー）。`unavailable` は、原因となるプローブ失敗を説明する `error: <message>` 行が stderr に併記されます。
+
+`status` の出力フォーマットは指定オプションで変わります:
+
+- 引数なし（空 suffix デフォルト） — 従来通り上記 4 行を出力します。
+- `--suffix NAME` — 先頭に `suffix: <name>` 行が追加され、合計 5 行になります。
+- `--all` — 登録済みの各 suffix エントリ（先頭に `suffix:` 行 + 既存 4 行の計 5 行）を **空行 1 行** で区切って列挙します。登録が 0 件の場合は stdout に `suffix: (none)` / `config: absent` / `config_path: <dir>/` を出力し、stderr に案内メッセージを書いて exit `0` で終了します。
 
 **終了コード**:
 
 - `0` 成功時（`register` / `unregister` でランタイムステップが警告に降格した場合、および `status` の Linux プローブ結果すべてを含む）。
 - `2` 非 Linux プラットフォーム — Windows 向けに VB-Cable を案内するヒントとともにショートサーキットします。
 
-**副作用**: `$XDG_CONFIG_HOME/pipewire/pipewire.conf.d/vrcpilot-mic.conf`（変数未設定時は `~/.config/...`）を書き出し / 削除します。ランタイムロードが有効な場合は `pulsectl.Pulse.module_load("module-null-sink", ...)` を呼び出します — ランタイム失敗（`pulsectl` 未インストール、コントロールプレーンエラー）は、永続設定が真実の源であるため、終了コードを変更せず stderr の警告に降格します。
+**副作用**: `$XDG_CONFIG_HOME/pipewire/pipewire.conf.d/vrcpilot-mic.conf`（変数未設定時は `~/.config/...`）を書き出し / 削除します。`--suffix NAME` を指定した場合は同ディレクトリ配下に `vrcpilot-mic-<NAME>.conf` という独立したファイルが書き込まれます（空 suffix の `vrcpilot-mic.conf` とは別ファイルとして共存します）。ランタイムロードが有効な場合は `pulsectl.Pulse.module_load("module-null-sink", ...)` を呼び出します — ランタイム失敗（`pulsectl` 未インストール、コントロールプレーンエラー）は、永続設定が真実の源であるため、終了コードを変更せず stderr の警告に降格します。
 
 ______________________________________________________________________
 

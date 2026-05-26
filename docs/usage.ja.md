@@ -214,6 +214,23 @@ ______________________________________________________________________
 ステータスは `vrcpilot linux-mic status` でいつでも確認でき、
 `vrcpilot linux-mic unregister` で登録を解除できます。
 
+### 複数の仮想マイクを並列運用する
+
+`--suffix <name>` で名前付きの追加 sink を登録できます。1 つの VRChat
+インスタンスに OBS の monitor と TTS bot で別々の入力経路を持たせる、
+複数 VRChat に異なる音声ソースを流す、といったケースで使います。
+
+```bash
+vrcpilot linux-mic register --suffix bot   # VRCPilotMic_bot を作る
+vrcpilot linux-mic register --suffix obs   # VRCPilotMic_obs を作る
+vrcpilot linux-mic status --all            # 登録済み全 suffix を列挙
+vrcpilot linux-mic unregister --suffix bot # bot だけ削除
+vrcpilot linux-mic unregister --all        # 全部削除
+```
+
+`--suffix` を省略すると既存の `VRCPilotMic`（空 suffix）が対象です。
+suffix に使える文字は `[A-Za-z0-9_-]` のみです。
+
 ### スモークテスト
 
 ```bash

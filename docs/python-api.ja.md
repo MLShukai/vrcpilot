@@ -253,7 +253,7 @@ ______________________________________________________________________
 
 ## Mic（音声再生）
 
-VRChat にライブマイク入力として認識させるために、float32 PCM を仮想ケーブルの出力デバイスへストリーミングします。主なユースケースは、LLM エージェントの TTS チャンクを実マイクや中間音声ファイルを介さずに VRChat へ直接流し込むことです。セッションは `__init__` で `soundcard` のプレイヤーを開き、インスタンスがクローズされるまで生かし続けます。`play(chunk)` は呼び出しごとに 1 チャンクだけ書き込むので、ペースは呼び出し側が制御します（`for chunk in tts.stream(): mic.play(chunk)`）。Windows ではデフォルトデバイスは VB-Audio Virtual Cable の `"CABLE Input"`、Linux では [`vrcpilot.mic.linux.register_virtual_mic`](#vrcpilotmiclinux)（または `vrcpilot linux-mic register` の実行）で作成される `"VRCPilotMic"` の PipeWire シンクです。
+VRChat にライブマイク入力として認識させるために、float32 PCM を仮想ケーブルの出力デバイスへストリーミングします。主なユースケースは、LLM エージェントの TTS チャンクを実マイクや中間音声ファイルを介さずに VRChat へ直接流し込むことです。セッションは `__init__` で `soundcard` のプレイヤーを開き、インスタンスがクローズされるまで生かし続けます。`play(chunk)` は呼び出しごとに 1 チャンクだけ書き込むので、ペースは呼び出し側が制御します（`for chunk in tts.stream(): mic.play(chunk)`）。Windows ではデフォルトデバイスは VB-Audio Virtual Cable の `"CABLE Input"`、Linux では [`vrcpilot.mic.linux.register_virtual_mic`](#vrcpilotmiclinux)（または `vrcpilot linux-mic register` の実行）で作成される `"VRCPilotMic"` の PipeWire シンクです（`vrcpilot.mic.linux.register_virtual_mic(suffix=...)` で `VRCPilotMic_<suffix>` 派生シンクを並べて登録し、複数の仮想マイクを並列運用することも可能です）。
 
 ### `vrcpilot.Mic`
 
@@ -308,11 +308,31 @@ class Mic:
 def default_device_name() -> str | None: ...
 ```
 
-OS 別の既定出力デバイス部分文字列です。Windows では `"CABLE Input"`、Linux では（`vrcpilot linux-mic register` 実行後に）`"VRCPilotMic"` を返します。それ以外のプラットフォームでは `None` を返します。
+OS 別の既定出力デバイス部分文字列です。Windows では `"CABLE Input"`、Linux では（`vrcpilot linux-mic register` 実行後に）`"VRCPilotMic"` を返します。それ以外のプラットフォームでは `None` を返します。`vrcpilot.mic.linux.register_virtual_mic(suffix=...)` で派生シンク (`VRCPilotMic_<suffix>`) を追加した場合は、`Mic(sink_name_for("<suffix>"))` のように明示的に指定してください — `default_device_name()` は空 suffix の `"VRCPilotMic"` のみを返します。
 
 ### `VRCPILOT_MIC_DEVICE`
 
 コンストラクタ引数と `default_device_name()` の間に参照される環境変数です。デバイス名をソースコードに埋め込みたくない場合や、Windows のデフォルトをコード変更なしで上書きしたい場合に便利です。
+
+### `vrcpilot.mic.sink_name_for`
+
+```python
+def sink_name_for(suffix: str = "") -> str: ...
+```
+
+`suffix` から PipeWire シンク名を組み立てます。空 suffix（既定）は `"VRCPilotMic"` を、非空 suffix は `f"VRCPilotMic_{suffix}"` を返します。戻り値は `Mic` の `device` 引数にそのまま渡せます（例: `Mic(sink_name_for("bot"))`）ので、派生シンクを `register_virtual_mic(suffix="bot")` で登録した後の参照に便利です。
+
+**Raises**: `suffix` に `[A-Za-z0-9_-]` 以外の文字が含まれる場合は `ValueError`。
+
+### `vrcpilot.mic.description_for`
+
+```python
+def description_for(suffix: str = "") -> str: ...
+```
+
+`suffix` から PulseAudio の `device.description` を組み立てます。空 suffix は `"VRCPilot_Virtual_Mic"`、非空は `f"VRCPilot_Virtual_Mic_{suffix}"` を返します。空白の代わりにアンダースコアを使うのは、`module-null-sink` の引数文字列内で値が単一の PulseAudio トークンになるようにするためです（speaker バックエンドと同じ流儀）。
+
+**Raises**: `suffix` に `[A-Za-z0-9_-]` 以外の文字が含まれる場合は `ValueError`。
 
 ### エンドツーエンドのスニペット
 
@@ -353,36 +373,66 @@ ______________________________________________________________________
 
 PipeWire 上の永続的な `VRCPilotMic` 仮想マイクを管理する Linux 専用ヘルパーです。これは `vrcpilot linux-mic` CLI のプログラム上の対応物で、両者は同じ config 断片を書き込み、同じ PulseAudio の `module_load` 経路を呼び出します。
 
-**Linux 以外のプラットフォームでこのサブモジュールをインポートすると、インポート時点で `RuntimeError` が送出されます**。クロスプラットフォームなコードを書く際は `sys.platform == "linux"` でガードする（または遅延 import する）ようにしてください。
+すべての公開関数は `suffix` キーワード引数を受け取り、同じ仕組みを複数のシンクに対して並行運用できます。空 suffix (`""`、既定) は従来の `VRCPilotMic` を対象にして後方互換を保ち、非空 suffix（例: `"alt"`）は `VRCPilotMic_<suffix>` 派生シンクを対象にします。`suffix` に使える文字は `[A-Za-z0-9_-]` のみで、それ以外を渡すと `ValueError` が送出されます。
+
+**Linux 以外のプラットフォームでこのサブモジュールをインポートすると、インポート時点で `ImportError` が送出されます**（`raise ImportError("vrcpilot.mic.linux is Linux-only")`）。クロスプラットフォームなコードを書く際は `sys.platform == "linux"` でガードする（または遅延 import する）ようにしてください。
 
 ### `vrcpilot.mic.linux.register_virtual_mic`
 
 ```python
-def register_virtual_mic(*, runtime_load: bool = True) -> RegisterResult: ...
+def register_virtual_mic(
+    *,
+    suffix: str = "",
+    runtime_load: bool = True,
+) -> RegisterResult: ...
 ```
 
-`VRCPilotMic` の `module-null-sink` を
-`$XDG_CONFIG_HOME/pipewire/pipewire.conf.d/vrcpilot-mic.conf`（変数が未設定の場合は `~/.config/...` にフォールバック）へ永続化します。さらに `runtime_load=True` のときは `pulsectl.Pulse.module_load("module-null-sink", ...)` を呼び出してシンクを即座に使えるようにします。ランタイムステップはベストエフォートで、失敗（`pulsectl` 不在、コントロールプレーンのエラー）は `RegisterResult.runtime_warning` に格納されて返り、例外としては送出されません — 永続的な config が正なので、次回の PipeWire 再起動 / 再ログイン後には拾われます。
+`VRCPilotMic`（または `VRCPilotMic_<suffix>`）の `module-null-sink` を
+`$XDG_CONFIG_HOME/pipewire/pipewire.conf.d/vrcpilot-mic[-<suffix>].conf`（変数が未設定の場合は `~/.config/...` にフォールバック）へ永続化します。さらに `runtime_load=True` のときは `pulsectl.Pulse.module_load("module-null-sink", ...)` を呼び出してシンクを即座に使えるようにします。ランタイムステップはベストエフォートで、失敗（`pulsectl` 不在、コントロールプレーンのエラー）は `RegisterResult.runtime_warning` に格納されて返り、例外としては送出されません — 永続的な config が正なので、次回の PipeWire 再起動 / 再ログイン後には拾われます。
+
+`suffix` は対象シンクを切り替えます。空 suffix（既定）は既存の `VRCPilotMic` を、非空 suffix は `VRCPilotMic_<suffix>` を対象にします。同じ suffix への再呼び出しは冪等で、既存のランタイムモジュールがあれば一度アンロードしてから読み直すため、二重スタックは起きません。
 
 **Returns**: 行った内容を表す `RegisterResult`。
 
-**Raises**: 永続的な config が書き込めない場合（権限エラー、ファイルシステムの失敗）は `OSError`。
+**Raises**: 永続的な config が書き込めない場合（権限エラー、ファイルシステムの失敗）は `OSError`。`suffix` に不正文字が含まれる場合は `ValueError`。
 
 ### `vrcpilot.mic.linux.unregister_virtual_mic`
 
 ```python
-def unregister_virtual_mic() -> bool: ...
+def unregister_virtual_mic(*, suffix: str = "") -> bool: ...
 ```
 
-永続的な config 断片を削除し、現在読み込まれている `VRCPilotMic` の `module-null-sink` をアンロードします。実際に何かが削除された場合（config ファイルの削除、ランタイムモジュールのアンロード、もしくはその両方）は `True` を、どちらの成果物も存在しなかった場合は `False` を返します。冪等で、繰り返し呼んでも安全です。
+`suffix` に対応する永続的な config 断片を削除し、現在読み込まれている同名 `module-null-sink` をアンロードします。空 suffix（既定）は `VRCPilotMic` を、非空 suffix は `VRCPilotMic_<suffix>` を対象とします。実際に何かが削除された場合（config ファイルの削除、ランタイムモジュールのアンロード、もしくはその両方）は `True` を、どちらの成果物も存在しなかった場合は `False` を返します。冪等で、繰り返し呼んでも安全です。
+
+**Raises**: `suffix` に不正文字が含まれる場合は `ValueError`。
 
 ### `vrcpilot.mic.linux.is_registered`
 
 ```python
-def is_registered() -> bool: ...
+def is_registered(*, suffix: str = "") -> bool: ...
 ```
 
-永続的な config 断片が存在するかどうかを返します。PulseAudio は参照しません — ランタイムのモジュール一覧を確認したい場合は `vrcpilot linux-mic status` CLI を使うか、`open_pulse_control()` を直接呼び出してください。
+`suffix` に対応する永続的な config 断片が存在するかどうかを返します。空 suffix は既定の `VRCPilotMic` を、非空 suffix は `VRCPilotMic_<suffix>` を確認します。PulseAudio は参照しません — ランタイムのモジュール一覧を確認したい場合は `vrcpilot linux-mic status` CLI を使うか、`open_pulse_control()` を直接呼び出してください。
+
+**Raises**: `suffix` に不正文字が含まれる場合は `ValueError`。
+
+### `vrcpilot.mic.linux.config_path`
+
+```python
+def config_path(*, suffix: str = "") -> Path: ...
+```
+
+`suffix` に対応する PipeWire config 断片の絶対パスを返します（空 suffix は `vrcpilot-mic.conf`、非空 suffix は `vrcpilot-mic-<suffix>.conf`）。`$XDG_CONFIG_HOME` を尊重し、未設定なら `~/.config` にフォールバックします。`vrcpilot linux-mic status` CLI で位置を表示できるよう公開されています。
+
+**Raises**: `suffix` に不正文字が含まれる場合は `ValueError`。
+
+### `vrcpilot.mic.linux.iter_registered_suffixes`
+
+```python
+def iter_registered_suffixes() -> list[str]: ...
+```
+
+`pipewire.conf.d/` 配下の `vrcpilot-mic*.conf` 断片を走査し、ファイル名から復元した suffix のリストを返します。空 suffix（既定シンク）が先頭、残りは辞書順でソートされるため、CLI 表示や e2e の列挙が安定します。config ディレクトリがまだ存在しない場合は空リスト `[]` を返します。
 
 ### `vrcpilot.mic.linux.RegisterResult`
 
@@ -393,6 +443,7 @@ class RegisterResult:
     created_config: bool
     runtime_loaded: bool
     runtime_warning: str | None
+    suffix: str
 ```
 
 `register_virtual_mic` の結果:
@@ -401,6 +452,7 @@ class RegisterResult:
 - `created_config` — 呼び出しがファイルを書き込んだ場合に限り `True`（期待した内容で既に存在した場合は `False`）。
 - `runtime_loaded` — 即時実行された `pulsectl` の `module_load` が成功した場合に限り `True`。`runtime_load=False` でスキップされた場合や、ランタイムステップが失敗した場合は `False`（その場合 `runtime_warning` が設定されます）。
 - `runtime_warning` — ランタイムロード失敗の人間可読な説明、もしくは失敗がなかった場合は `None`。
+- `suffix` — 登録された suffix を正規化した文字列（既定シンクの場合は空文字列）。呼び出し時に `register_virtual_mic(suffix=...)` へ渡した値がそのまま round-trip されます。
 
 ______________________________________________________________________
 

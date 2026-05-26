@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`vrcpilot linux-mic` gains `--suffix <NAME>` / `--all`**. Suffixed sinks (e.g. `VRCPilotMic_bot`) can now be registered side-by-side; omitting `--suffix` preserves the original `VRCPilotMic` sink name. `status --all` / `unregister --all` enumerate / bulk-remove every `vrcpilot-mic*.conf` under the PipeWire config directory.
+- **`vrcpilot.mic.linux` registration API accepts a keyword `suffix`**: `register_virtual_mic(suffix="bot")`, `unregister_virtual_mic(suffix="bot")`, `is_registered(suffix="bot")`, and `config_path(suffix="bot")`. Default `""` preserves the previous behaviour.
+- **`vrcpilot.mic.sink_name_for(suffix)` / `description_for(suffix)`** public helpers that derive the PulseAudio sink name / device description from a suffix, so user code can write `Mic(sink_name_for("bot"))` instead of hardcoding the string.
+- **`RegisterResult` gains a `suffix: str` field**. Existing fields are unaffected.
+
 ## [0.3.0] - 2026-05-25
 
 First-class multi-instance VRChat support: every PID-dependent Python API and CLI subcommand now takes an explicit target PID, and `launch()` defaults to spawning the EAC-aware `launch.exe` wrapper directly (Windows: `launch.exe`, Linux: `umu-run launch.exe`) instead of going through Steam. Linux also gets a fix for the long-standing "first synthetic key / mouse event silently dropped" issue, by waiting for the kernel to propagate the freshly created `/dev/uinput` device to X11 / libinput listeners before emitting the first event.

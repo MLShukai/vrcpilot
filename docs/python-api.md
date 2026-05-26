@@ -253,7 +253,7 @@ ______________________________________________________________________
 
 ## Mic (audio playback)
 
-Stream float32 PCM into a virtual-cable output device so it appears to VRChat as live microphone input. The primary use case is piping an LLM agent's TTS chunks directly into VRChat without ever touching a real microphone or an intermediate audio file. The session opens a `soundcard` player in `__init__` and keeps it alive until the instance is closed; `play(chunk)` writes a single chunk per call so callers drive the cadence themselves (`for chunk in tts.stream(): mic.play(chunk)`). On Windows the default device is VB-Audio Virtual Cable's `"CABLE Input"`; on Linux the default is the `"VRCPilotMic"` PipeWire sink created by [`vrcpilot.mic.linux.register_virtual_mic`](#vrcpilotmiclinux) (or by running `vrcpilot linux-mic register`).
+Stream float32 PCM into a virtual-cable output device so it appears to VRChat as live microphone input. The primary use case is piping an LLM agent's TTS chunks directly into VRChat without ever touching a real microphone or an intermediate audio file. The session opens a `soundcard` player in `__init__` and keeps it alive until the instance is closed; `play(chunk)` writes a single chunk per call so callers drive the cadence themselves (`for chunk in tts.stream(): mic.play(chunk)`). On Windows the default device is VB-Audio Virtual Cable's `"CABLE Input"`; on Linux the default is the `"VRCPilotMic"` PipeWire sink created by [`vrcpilot.mic.linux.register_virtual_mic`](#vrcpilotmiclinux) (or by running `vrcpilot linux-mic register`) — you can also register additional `VRCPilotMic_<suffix>` sinks side-by-side via `vrcpilot.mic.linux.register_virtual_mic(suffix=...)` to run multiple virtual mics in parallel.
 
 ### `vrcpilot.Mic`
 
@@ -308,11 +308,31 @@ The stream is released by `close()`, by leaving the `with` block, or as a best-e
 def default_device_name() -> str | None: ...
 ```
 
-The OS-specific default output-device substring. Returns `"CABLE Input"` on Windows and `"VRCPilotMic"` on Linux (after `vrcpilot linux-mic register`). Returns `None` on other platforms.
+The OS-specific default output-device substring. Returns `"CABLE Input"` on Windows and `"VRCPilotMic"` on Linux (after `vrcpilot linux-mic register`). Returns `None` on other platforms. When you register additional sinks via `vrcpilot.mic.linux.register_virtual_mic(suffix=...)`, target them explicitly with `Mic(sink_name_for("<suffix>"))` — `default_device_name()` only ever returns the empty-suffix `"VRCPilotMic"`.
 
 ### `VRCPILOT_MIC_DEVICE`
 
 Environment variable consulted between the constructor argument and `default_device_name()`. Useful for keeping device names out of source code, or for overriding the Windows default without code changes.
+
+### `vrcpilot.mic.sink_name_for`
+
+```python
+def sink_name_for(suffix: str = "") -> str: ...
+```
+
+Build the PipeWire sink name for `suffix`. An empty suffix (the default) returns `"VRCPilotMic"`; a non-empty suffix returns `f"VRCPilotMic_{suffix}"`. The result can be passed straight to `Mic`'s `device` argument (e.g. `Mic(sink_name_for("bot"))`), which is convenient after registering a derived sink via `register_virtual_mic(suffix="bot")`.
+
+**Raises**: `ValueError` when `suffix` contains characters outside `[A-Za-z0-9_-]`.
+
+### `vrcpilot.mic.description_for`
+
+```python
+def description_for(suffix: str = "") -> str: ...
+```
+
+Build the PulseAudio `device.description` for `suffix`. Empty suffix returns `"VRCPilot_Virtual_Mic"`; non-empty returns `f"VRCPilot_Virtual_Mic_{suffix}"`. Underscores instead of spaces keep the value a single PulseAudio token inside `module-null-sink` argument strings (matches the speaker backend's style).
+
+**Raises**: `ValueError` when `suffix` contains characters outside `[A-Za-z0-9_-]`.
 
 ### End-to-end snippets
 
@@ -353,36 +373,66 @@ ______________________________________________________________________
 
 Linux-only helpers that manage the persistent `VRCPilotMic` virtual mic in PipeWire. This is the programmatic counterpart of the `vrcpilot linux-mic` CLI; both write the same config fragment and call the same PulseAudio `module_load` path.
 
-**Importing this submodule on non-Linux platforms raises `RuntimeError` at import time**, so guard accesses with `sys.platform == "linux"` (or import lazily) when writing cross-platform code.
+Every public function takes a `suffix` keyword so the same machinery can manage multiple sinks side-by-side. An empty suffix (`""`, the default) targets the legacy `VRCPilotMic` and preserves backward compatibility; a non-empty suffix (e.g. `"alt"`) targets the `VRCPilotMic_<suffix>` derived sink. `suffix` may contain only `[A-Za-z0-9_-]`; anything else raises `ValueError`.
+
+**Importing this submodule on non-Linux platforms raises `ImportError` at import time** (`raise ImportError("vrcpilot.mic.linux is Linux-only")`), so guard accesses with `sys.platform == "linux"` (or import lazily) when writing cross-platform code.
 
 ### `vrcpilot.mic.linux.register_virtual_mic`
 
 ```python
-def register_virtual_mic(*, runtime_load: bool = True) -> RegisterResult: ...
+def register_virtual_mic(
+    *,
+    suffix: str = "",
+    runtime_load: bool = True,
+) -> RegisterResult: ...
 ```
 
-Persist the `VRCPilotMic` `module-null-sink` to
-`$XDG_CONFIG_HOME/pipewire/pipewire.conf.d/vrcpilot-mic.conf` (falling back to `~/.config/...` when the variable is unset) and, when `runtime_load=True`, additionally call `pulsectl.Pulse.module_load("module-null-sink", ...)` so the sink is usable immediately. The runtime step is best-effort — failures (missing `pulsectl`, control-plane error) are surfaced via `RegisterResult.runtime_warning` rather than raised, because the persistent config is the source of truth and will be picked up after the next PipeWire restart / re-login.
+Persist the `VRCPilotMic` (or `VRCPilotMic_<suffix>`) `module-null-sink` to
+`$XDG_CONFIG_HOME/pipewire/pipewire.conf.d/vrcpilot-mic[-<suffix>].conf` (falling back to `~/.config/...` when the variable is unset) and, when `runtime_load=True`, additionally call `pulsectl.Pulse.module_load("module-null-sink", ...)` so the sink is usable immediately. The runtime step is best-effort — failures (missing `pulsectl`, control-plane error) are surfaced via `RegisterResult.runtime_warning` rather than raised, because the persistent config is the source of truth and will be picked up after the next PipeWire restart / re-login.
+
+`suffix` selects which sink to act on. An empty suffix (the default) targets the existing `VRCPilotMic`; a non-empty suffix targets `VRCPilotMic_<suffix>`. Re-calling with the same suffix is idempotent — any pre-existing runtime module is unloaded before the fresh load, so re-registration never double-stacks.
 
 **Returns**: a `RegisterResult` describing what was done.
 
-**Raises**: `OSError` when the persistent config cannot be written (permission errors, filesystem failures).
+**Raises**: `OSError` when the persistent config cannot be written (permission errors, filesystem failures); `ValueError` when `suffix` contains illegal characters.
 
 ### `vrcpilot.mic.linux.unregister_virtual_mic`
 
 ```python
-def unregister_virtual_mic() -> bool: ...
+def unregister_virtual_mic(*, suffix: str = "") -> bool: ...
 ```
 
-Remove the persistent config fragment and unload any currently loaded `VRCPilotMic` `module-null-sink`. Returns `True` if anything was actually removed (config file deleted, runtime module unloaded, or both); `False` when neither artefact existed. Idempotent — safe to call repeatedly.
+Remove the persistent config fragment for `suffix` and unload any currently loaded `module-null-sink` with the matching name. An empty suffix (the default) targets `VRCPilotMic`; a non-empty suffix targets `VRCPilotMic_<suffix>`. Returns `True` if anything was actually removed (config file deleted, runtime module unloaded, or both); `False` when neither artefact existed. Idempotent — safe to call repeatedly.
+
+**Raises**: `ValueError` when `suffix` contains illegal characters.
 
 ### `vrcpilot.mic.linux.is_registered`
 
 ```python
-def is_registered() -> bool: ...
+def is_registered(*, suffix: str = "") -> bool: ...
 ```
 
-Return whether the persistent config fragment exists. Does not consult PulseAudio — use the `vrcpilot linux-mic status` CLI or call `open_pulse_control()` directly to inspect the runtime module list.
+Return whether the persistent config fragment for `suffix` exists. An empty suffix checks the default `VRCPilotMic`; a non-empty suffix checks `VRCPilotMic_<suffix>`. Does not consult PulseAudio — use the `vrcpilot linux-mic status` CLI or call `open_pulse_control()` directly to inspect the runtime module list.
+
+**Raises**: `ValueError` when `suffix` contains illegal characters.
+
+### `vrcpilot.mic.linux.config_path`
+
+```python
+def config_path(*, suffix: str = "") -> Path: ...
+```
+
+Absolute path of the PipeWire config fragment for `suffix` (empty suffix → `vrcpilot-mic.conf`, non-empty → `vrcpilot-mic-<suffix>.conf`). Honours `$XDG_CONFIG_HOME` with `~/.config` as the XDG fallback. Public so `vrcpilot linux-mic status` can surface the location.
+
+**Raises**: `ValueError` when `suffix` contains illegal characters.
+
+### `vrcpilot.mic.linux.iter_registered_suffixes`
+
+```python
+def iter_registered_suffixes() -> list[str]: ...
+```
+
+Scan `pipewire.conf.d/` for `vrcpilot-mic*.conf` fragments and recover the suffix from each filename. The empty suffix (the default sink) sorts first; the remainder is in lexicographic order so callers — CLI listings, e2e enumerations — get a stable ordering. Returns `[]` if the config directory does not exist yet.
 
 ### `vrcpilot.mic.linux.RegisterResult`
 
@@ -393,6 +443,7 @@ class RegisterResult:
     created_config: bool
     runtime_loaded: bool
     runtime_warning: str | None
+    suffix: str
 ```
 
 Outcome of `register_virtual_mic`:
@@ -401,6 +452,7 @@ Outcome of `register_virtual_mic`:
 - `created_config` — `True` iff the call wrote the file (`False` when it already existed with the expected contents).
 - `runtime_loaded` — `True` iff the immediate `pulsectl` `module_load` succeeded. `False` when skipped via `runtime_load=False` or when the runtime step failed (in which case `runtime_warning` is populated).
 - `runtime_warning` — human-readable description of the runtime-load failure, or `None` when no failure occurred.
+- `suffix` — the normalised suffix that was registered (empty string for the default sink). The value passed to `register_virtual_mic(suffix=...)` round-trips here unchanged.
 
 ______________________________________________________________________
 
