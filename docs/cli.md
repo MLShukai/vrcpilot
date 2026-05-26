@@ -258,9 +258,9 @@ Manage the persistent `VRCPilotMic` virtual mic on Linux (PipeWire
 subparser:
 
 ```
-vrcpilot linux-mic register [--no-runtime-load]
-vrcpilot linux-mic unregister
-vrcpilot linux-mic status
+vrcpilot linux-mic register   [--no-runtime-load] [--suffix NAME]
+vrcpilot linux-mic unregister [--suffix NAME | --all]
+vrcpilot linux-mic status     [--suffix NAME | --all]
 ```
 
 | Action       | Description                                                                                                                                        |
@@ -269,9 +269,11 @@ vrcpilot linux-mic status
 | `unregister` | Remove the config fragment and unload any matching runtime module. Idempotent — exits `0` even when nothing was registered.                        |
 | `status`     | Report whether the config is present, whether the runtime module is loaded, and whether `soundcard` can see the device. Always exits `0` on Linux. |
 
-| Option              | Applies to | Default | Description                                                                                                                                  |
-| ------------------- | ---------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--no-runtime-load` | `register` | off     | Skip the immediate `pulsectl` `module_load` step. The persistent config is still written; restart PipeWire to pick it up on a later session. |
+| Option              | Applies to              | Default | Description                                                                                                                                                                                                      |
+| ------------------- | ----------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--no-runtime-load` | `register`              | off     | Skip the immediate `pulsectl` `module_load` step. The persistent config is still written; restart PipeWire to pick it up on a later session.                                                                     |
+| `--suffix NAME`     | all actions             | unset   | `register` creates a named additional sink (`VRCPilotMic_<NAME>`). `unregister` / `status` target only the given suffix. The default (unset) is the empty-suffix `VRCPilotMic`. Mutually exclusive with `--all`. |
+| `--all`             | `unregister` / `status` | off     | `unregister` removes every registered suffix in one go. `status` enumerates every registered suffix. Mutually exclusive with `--suffix`.                                                                         |
 
 **Output**: human-readable progress goes to stderr (config path, runtime
 load result, VRChat-side hint). The `status` action additionally writes
@@ -279,6 +281,12 @@ a machine-readable summary to stdout with the fixed vocabulary
 `config: {present|absent}`, `config_path: <path>`, `runtime: {loaded|not loaded|unavailable}`, and `soundcard: {visible|not visible|unavailable}` (one key per line). `unavailable` is paired with
 an `error: <message>` line on stderr describing the underlying probe
 failure.
+
+The `status` output layout varies with the selected option:
+
+- No flag (empty-suffix default) — emits the four lines above, unchanged.
+- `--suffix NAME` — prepends a `suffix: <name>` line, producing five lines total.
+- `--all` — enumerates each registered suffix as a block (leading `suffix:` line followed by the existing four lines, i.e. five lines per entry), separated by a **single blank line**. When nothing is registered, stdout contains `suffix: (none)` / `config: absent` / `config_path: <dir>/`, an advisory message goes to stderr, and the command exits `0`.
 
 **Exit codes**:
 
@@ -289,11 +297,15 @@ failure.
 
 **Side effects**: writes / removes
 `$XDG_CONFIG_HOME/pipewire/pipewire.conf.d/vrcpilot-mic.conf` (or
-`~/.config/...` when the variable is unset). When the runtime load is
-enabled, calls `pulsectl.Pulse.module_load("module-null-sink", ...)` —
-runtime failures (missing `pulsectl`, control-plane error) degrade to a
-warning on stderr without changing the exit code, because the
-persistent config is the source of truth.
+`~/.config/...` when the variable is unset). When `--suffix NAME` is
+supplied, the file written to the same directory is
+`vrcpilot-mic-<NAME>.conf` instead — each suffix lives in its own
+independent file alongside the empty-suffix `vrcpilot-mic.conf`. When
+the runtime load is enabled, calls
+`pulsectl.Pulse.module_load("module-null-sink", ...)` — runtime
+failures (missing `pulsectl`, control-plane error) degrade to a warning
+on stderr without changing the exit code, because the persistent config
+is the source of truth.
 
 ______________________________________________________________________
 

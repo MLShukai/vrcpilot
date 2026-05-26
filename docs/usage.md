@@ -214,6 +214,25 @@ ______________________________________________________________________
 Check the status anytime with `vrcpilot linux-mic status`; remove the
 registration with `vrcpilot linux-mic unregister`.
 
+### Run multiple virtual mics in parallel
+
+Use `--suffix <name>` to register additional named sinks alongside the
+default one. The primary motivation is running multiple AI agent
+instances in parallel: each instance gets its own dedicated virtual mic
+(`VRCPilotMic_<name>`) so their TTS streams never cross-contaminate one
+another's input path.
+
+```bash
+vrcpilot linux-mic register --suffix bot   # creates VRCPilotMic_bot
+vrcpilot linux-mic register --suffix obs   # creates VRCPilotMic_obs
+vrcpilot linux-mic status --all            # list every registered suffix
+vrcpilot linux-mic unregister --suffix bot # remove only bot
+vrcpilot linux-mic unregister --all        # remove every suffix
+```
+
+Omitting `--suffix` targets the original `VRCPilotMic` (empty suffix).
+Allowed suffix characters are `[A-Za-z0-9_-]` only.
+
 ### Smoke test
 
 ```bash

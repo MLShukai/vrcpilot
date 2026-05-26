@@ -51,30 +51,83 @@ def register(subparsers: SubParsersAction) -> None:
             "still written; restart PipeWire to pick it up)."
         ),
     )
+    register_parser.add_argument(
+        "--suffix",
+        default="",
+        metavar="NAME",
+        help=(
+            "register a named additional sink (VRCPilotMic_<suffix>); "
+            "default: VRCPilotMic"
+        ),
+    )
 
-    actions.add_parser(
+    unregister_parser = actions.add_parser(
         "unregister",
         help=(
             "Remove the PipeWire config fragment and unload any matching "
             "runtime module."
         ),
     )
+    unregister_excl = unregister_parser.add_mutually_exclusive_group()
+    unregister_excl.add_argument(
+        "--suffix",
+        default="",
+        metavar="NAME",
+        help="unregister a specific suffix (default: VRCPilotMic)",
+    )
+    unregister_excl.add_argument(
+        "--all",
+        action="store_true",
+        help="unregister every vrcpilot-mic*.conf in the config directory",
+    )
 
-    actions.add_parser(
+    status_parser = actions.add_parser(
         "status",
         help=(
             "Report current registration state: config present, runtime "
             "module loaded, soundcard visibility."
         ),
     )
+    status_excl = status_parser.add_mutually_exclusive_group()
+    status_excl.add_argument(
+        "--suffix",
+        default="",
+        metavar="NAME",
+        help="show status for a specific suffix (default: VRCPilotMic)",
+    )
+    status_excl.add_argument(
+        "--all",
+        action="store_true",
+        help="show status for every registered suffix",
+    )
 
 
-def _run_register(args: argparse.Namespace) -> int:
-    """Execute the ``register`` action."""
+def _run_register(*, suffix: str, runtime_load: bool) -> int:
+    """Execute the ``register`` action.
+
+    Maps the ``ValueError`` :func:`vrcpilot.mic.linux._normalize_suffix`
+    raises for malformed suffixes to exit code 2 (argparse-style usage
+    error) so scripts can distinguish "you typed it wrong" from a real
+    PipeWire failure.
+    """
     from vrcpilot.mic import linux as mic_linux
 
-    result = mic_linux.register_virtual_mic(runtime_load=not args.no_runtime_load)
-    print(f"Wrote PipeWire config to {result.config_path}", file=sys.stderr)
+    try:
+        result = mic_linux.register_virtual_mic(
+            suffix=suffix,
+            runtime_load=runtime_load,
+        )
+    except ValueError as exc:
+        print(f"vrcpilot: invalid suffix: {exc}", file=sys.stderr)
+        return 2
+
+    if result.created_config:
+        print(f"Wrote PipeWire config to {result.config_path}", file=sys.stderr)
+    else:
+        print(
+            f"PipeWire config already up to date at {result.config_path}",
+            file=sys.stderr,
+        )
     if result.runtime_loaded:
         print("Loaded module-null-sink immediately", file=sys.stderr)
     elif result.runtime_warning is not None:
@@ -87,19 +140,45 @@ def _run_register(args: argparse.Namespace) -> int:
     # Always print the VRChat-side setup hint; the persistent config is
     # the source of truth regardless of whether the runtime load
     # succeeded, so users still need this step.
+    description = mic_linux.description_for(result.suffix)
     print(
-        "In VRChat Audio settings, select 'Monitor of VRCPilot Virtual "
-        "Mic' as the microphone input",
+        f"In VRChat Audio settings, select 'Monitor of {description}' "
+        "as the microphone input",
         file=sys.stderr,
     )
     return 0
 
 
-def _run_unregister() -> int:
-    """Execute the ``unregister`` action."""
+def _run_unregister(*, suffix: str, all_: bool) -> int:
+    """Execute the ``unregister`` action.
+
+    ``all_`` sweeps every registered suffix discovered by
+    :func:`vrcpilot.mic.linux.iter_registered_suffixes` -- the user-
+    friendly cleanup path for hosts that accumulated multiple sinks
+    across runs. Otherwise a single ``suffix`` (empty for the default
+    sink) is removed and an invalid value exits 2.
+    """
     from vrcpilot.mic import linux as mic_linux
 
-    removed = mic_linux.unregister_virtual_mic()
+    if all_:
+        suffixes = mic_linux.iter_registered_suffixes()
+        if not suffixes:
+            print("No VRCPilotMic registrations to remove", file=sys.stderr)
+            return 0
+        for s in suffixes:
+            mic_linux.unregister_virtual_mic(suffix=s)
+            print(
+                f"Removed VRCPilotMic config and/or runtime sink (suffix: {s})",
+                file=sys.stderr,
+            )
+        return 0
+
+    try:
+        removed = mic_linux.unregister_virtual_mic(suffix=suffix)
+    except ValueError as exc:
+        print(f"vrcpilot: invalid suffix: {exc}", file=sys.stderr)
+        return 2
+
     if removed:
         print(
             "Removed VRCPilotMic config and/or runtime sink",
@@ -187,8 +266,49 @@ def _soundcard_visible(sink_name: str) -> tuple[bool, str | None]:
     return True, None
 
 
-def _run_status() -> int:
+def _print_status_block(suffix: str, *, include_suffix_header: bool) -> None:
+    """Print one ``config / runtime / soundcard`` status block.
+
+    ``include_suffix_header`` controls whether a leading ``suffix: ...``
+    line is emitted. The empty-suffix, no-argument default path keeps
+    its historical four-line output to preserve back-compat with
+    existing pins.
+    """
+    from vrcpilot.mic import linux as mic_linux
+
+    if include_suffix_header:
+        print(f"suffix: {suffix}")
+
+    config_present = mic_linux.is_registered(suffix=suffix)
+    cfg_path = mic_linux.config_path(suffix=suffix)
+    print(f"config: {'present' if config_present else 'absent'}")
+    print(f"config_path: {cfg_path}")
+
+    sink_name = mic_linux.sink_name_for(suffix)
+
+    loaded, runtime_err = _runtime_loaded(sink_name)
+    if runtime_err is not None:
+        print("runtime: unavailable")
+        print(f"runtime: error: {runtime_err}", file=sys.stderr)
+    else:
+        print(f"runtime: {'loaded' if loaded else 'not loaded'}")
+
+    visible, sc_err = _soundcard_visible(sink_name)
+    if sc_err is not None:
+        print("soundcard: unavailable")
+        print(f"soundcard: error: {sc_err}", file=sys.stderr)
+    else:
+        print(f"soundcard: {'visible' if visible else 'not visible'}")
+
+
+def _run_status(*, suffix: str, all_: bool) -> int:
     """Execute the ``status`` action.
+
+    ``all_`` enumerates every registered suffix in turn (blank-line
+    separated, with a leading ``suffix:`` header per block) so users
+    can audit accumulated registrations at a glance; otherwise a single
+    block prints for ``suffix`` and the empty-suffix default keeps its
+    historical header-less four-line layout for back-compat with pins.
 
     Machine-readable state lands on stdout with a stable vocabulary
     (``present`` / ``absent`` for config, ``loaded`` / ``unavailable`` /
@@ -200,28 +320,27 @@ def _run_status() -> int:
     parentheticals.
     """
     from vrcpilot.mic import linux as mic_linux
-    from vrcpilot.mic.base import VIRTUAL_MIC_SINK_NAME
 
-    config_present = mic_linux.is_registered()
-    cfg_path = mic_linux.config_path()
+    if all_:
+        suffixes = mic_linux.iter_registered_suffixes()
+        if not suffixes:
+            cfg_dir = mic_linux.config_path().parent
+            print("suffix: (none)")
+            print("config: absent")
+            print(f"config_path: {cfg_dir}/")
+            print(
+                "No vrcpilot-mic config fragments found. "
+                "Run 'vrcpilot linux-mic register' first.",
+                file=sys.stderr,
+            )
+            return 0
+        for idx, s in enumerate(suffixes):
+            if idx > 0:
+                print()
+            _print_status_block(s, include_suffix_header=True)
+        return 0
 
-    print(f"config: {'present' if config_present else 'absent'}")
-    print(f"config_path: {cfg_path}")
-
-    loaded, runtime_err = _runtime_loaded(VIRTUAL_MIC_SINK_NAME)
-    if runtime_err is not None:
-        print("runtime: unavailable")
-        print(f"runtime: error: {runtime_err}", file=sys.stderr)
-    else:
-        print(f"runtime: {'loaded' if loaded else 'not loaded'}")
-
-    visible, sc_err = _soundcard_visible(VIRTUAL_MIC_SINK_NAME)
-    if sc_err is not None:
-        print("soundcard: unavailable")
-        print(f"soundcard: error: {sc_err}", file=sys.stderr)
-    else:
-        print(f"soundcard: {'visible' if visible else 'not visible'}")
-
+    _print_status_block(suffix, include_suffix_header=bool(suffix))
     return 0
 
 
@@ -229,14 +348,20 @@ def run(args: argparse.Namespace) -> int:
     """Dispatch the requested ``linux-mic`` action.
 
     Reaching this function implies Linux; the module's import guard
-    raises on every other platform.
+    raises on every other platform. ``args.suffix`` / ``args.all`` are
+    pulled out here so each ``_run_*`` helper takes only the domain
+    values it actually needs.
     """
+    suffix = cast(str, getattr(args, "suffix", ""))
     match args.action:
         case "register":
-            return _run_register(args)
+            return _run_register(
+                suffix=suffix,
+                runtime_load=not args.no_runtime_load,
+            )
         case "unregister":
-            return _run_unregister()
+            return _run_unregister(suffix=suffix, all_=args.all)
         case "status":
-            return _run_status()
+            return _run_status(suffix=suffix, all_=args.all)
         case _:  # pragma: no cover - argparse required=True prevents this
             raise AssertionError(f"Unknown linux-mic action: {args.action!r}")

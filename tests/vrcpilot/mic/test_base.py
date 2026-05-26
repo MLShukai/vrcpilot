@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import pytest
 
-from vrcpilot.mic.base import SAMPLE_RATE, MicDeviceNotFoundError
+from vrcpilot.mic.base import (
+    SAMPLE_RATE,
+    MicDeviceNotFoundError,
+)
 from vrcpilot.speaker.base import SAMPLE_RATE as SPEAKER_SAMPLE_RATE
 
 

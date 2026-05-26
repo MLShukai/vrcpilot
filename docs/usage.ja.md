@@ -214,6 +214,24 @@ ______________________________________________________________________
 ステータスは `vrcpilot linux-mic status` でいつでも確認でき、
 `vrcpilot linux-mic unregister` で登録を解除できます。
 
+### 複数の仮想マイクを並列運用する
+
+`--suffix <name>` で名前付きの追加 sink を登録できます。本来の目的は、
+複数の AI インスタンスを並列に走らせる際に、各インスタンスへ独立した
+仮想マイク (`VRCPilotMic_<name>`) を割り当てて、それぞれの TTS 音声が
+別インスタンスの入力に混線しないようにすることです。
+
+```bash
+vrcpilot linux-mic register --suffix bot   # VRCPilotMic_bot を作る
+vrcpilot linux-mic register --suffix obs   # VRCPilotMic_obs を作る
+vrcpilot linux-mic status --all            # 登録済み全 suffix を列挙
+vrcpilot linux-mic unregister --suffix bot # bot だけ削除
+vrcpilot linux-mic unregister --all        # 全部削除
+```
+
+`--suffix` を省略すると既存の `VRCPilotMic`（空 suffix）が対象です。
+suffix に使える文字は `[A-Za-z0-9_-]` のみです。
+
 ### スモークテスト
 
 ```bash

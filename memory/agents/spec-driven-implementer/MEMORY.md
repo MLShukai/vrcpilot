@@ -16,6 +16,7 @@ shared な規約 ([private モジュール規約](../../feedback_private_module_
 - [docformatter は Japanese 全角句点を . に置換](feedback_docformatter_japanese_summary.md) — summary を `。"""` で終わらせると `。."""` に書き換えられ wrapping が走って 2 行に折れる。ASCII `.` で締める
 - [Parallel fixer file-scope isolation](feedback_parallel_fixer_isolation.md) — 並列 fixer 実行時は commit 前に out-of-scope ファイルを reset。pre-commit の stash/restore で他 fixer の在庫を引き込みうる
 - [e2e PyAV-recorder pattern](feedback_e2e_pyav_recorder_pattern.md) — `tests/e2e/_pyav_recorder.py` に小さな PyAV helper を置く。CLI 内部 muxer を import しない。クラス名は `_` で始めない
+- [Platform-specific helpers placement](feedback_platform_specific_helpers_placement.md) — `sink_name_for` のような platform 固有概念のヘルパは `<modality>/<platform>.py` 内に定義。base.py には置かない（非 platform 環境から見えてしまう）
 
 ## reference
 

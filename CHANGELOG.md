@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`vrcpilot linux-mic` gains `--suffix <NAME>` / `--all`**, primarily so multiple AI agent instances can run in parallel with each instance owning a dedicated virtual mic instead of fighting over a single shared `VRCPilotMic`. Suffixed sinks (e.g. `VRCPilotMic_bot`) can now be registered side-by-side; omitting `--suffix` preserves the original `VRCPilotMic` sink name. `status --all` / `unregister --all` enumerate / bulk-remove every `vrcpilot-mic*.conf` under the PipeWire config directory.
+
 ## [0.3.0] - 2026-05-25
 
 First-class multi-instance VRChat support: every PID-dependent Python API and CLI subcommand now takes an explicit target PID, and `launch()` defaults to spawning the EAC-aware `launch.exe` wrapper directly (Windows: `launch.exe`, Linux: `umu-run launch.exe`) instead of going through Steam. Linux also gets a fix for the long-standing "first synthetic key / mouse event silently dropped" issue, by waiting for the kernel to propagate the freshly created `/dev/uinput` device to X11 / libinput listeners before emitting the first event.

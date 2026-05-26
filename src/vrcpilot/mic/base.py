@@ -11,7 +11,8 @@ SAMPLE_RATE: Final[int] = 48000
 DEVICE_ENV_VAR: Final[str] = "VRCPILOT_MIC_DEVICE"
 
 #: PipeWire sink name registered by :mod:`vrcpilot.mic.linux` and the
-#: Linux default for :func:`vrcpilot.mic.default_device_name`.
+#: Linux default for :func:`vrcpilot.mic.default_device_name`. Suffixed
+#: sinks are derived from this inside :mod:`vrcpilot.mic.linux`.
 VIRTUAL_MIC_SINK_NAME: Final[str] = "VRCPilotMic"
 
 #: Shared install hint for libpulse failures. Kept in one place so the
