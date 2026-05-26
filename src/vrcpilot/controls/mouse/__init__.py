@@ -9,7 +9,8 @@ from __future__ import annotations
 import sys
 
 from vrcpilot.controls.guard import ensure_target as ensure_target
-from vrcpilot.controls.mouse.base import Mouse, MouseButton
+
+from .base import Mouse, MouseButton
 
 __all__ = [
     "Mouse",

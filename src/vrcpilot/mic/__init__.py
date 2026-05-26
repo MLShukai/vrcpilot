@@ -9,14 +9,14 @@ Linux-only registration helpers live in :mod:`vrcpilot.mic.linux`,
 which raises on import off-Linux.
 """
 
-from vrcpilot.mic.base import (
+from .base import (
     DEVICE_ENV_VAR,
     SAMPLE_RATE,
     VIRTUAL_MIC_SINK_NAME,
     MicDeviceNotFoundError,
 )
-from vrcpilot.mic.devices import default_device_name
-from vrcpilot.mic.session import Mic
+from .devices import default_device_name
+from .session import Mic
 
 __all__ = [
     "DEVICE_ENV_VAR",

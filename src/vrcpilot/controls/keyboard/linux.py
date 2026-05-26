@@ -16,7 +16,7 @@ from typing import override
 
 import inputtino
 
-from vrcpilot.controls.keyboard.base import Key, Keyboard
+from .base import Key, Keyboard
 
 # Grace period after ``inputtino.Keyboard()`` creates the ``/dev/uinput``
 # device, before the first key event is allowed through. X11 / libinput

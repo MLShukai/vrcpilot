@@ -18,8 +18,9 @@ from numpy.typing import NDArray
 
 from vrcpilot.speaker import SpeakerLoop
 from vrcpilot.speaker.base import CHANNELS, SAMPLE_RATE
-from vrcpilot.speaker.routing.base import AudioDevice
-from vrcpilot.speaker.routing.devices import default_device, find_device
+
+from .base import AudioDevice
+from .devices import default_device, find_device
 
 # Aliases for the untyped ``soundcard`` surface. Keeping them named
 # makes the intent clear at every consumption site and localises the

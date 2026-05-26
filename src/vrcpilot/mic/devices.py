@@ -11,7 +11,7 @@ import os
 import sys
 from typing import Any, Final
 
-from vrcpilot.mic.base import (
+from .base import (
     DEVICE_ENV_VAR,
     VIRTUAL_MIC_SINK_NAME,
     MicDeviceNotFoundError,

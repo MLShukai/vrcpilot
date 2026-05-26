@@ -12,8 +12,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from vrcpilot.speaker.routing.base import AudioDevice
-from vrcpilot.speaker.routing.errors import (
+from .base import AudioDevice
+from .errors import (
     AudioRoutingError,
     DeviceNotFoundError,
 )

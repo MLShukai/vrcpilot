@@ -18,7 +18,8 @@ import numpy as np
 from numpy.typing import NDArray
 
 from vrcpilot.process import resolve_pid
-from vrcpilot.speaker.base import SpeakerBackend
+
+from .base import SpeakerBackend
 
 
 def _select_speaker_backend(

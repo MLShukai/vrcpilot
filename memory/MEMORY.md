@@ -19,6 +19,7 @@
 ## feedback（規約・ガイドライン）
 
 - [private モジュール規約](feedback_private_module_convention.md) — `_` prefix はテスト無しの真 private 限定。テストするなら prefix を外す
+- [import スタイル](feedback_import_style.md) — 同じサブパッケージ内は相対 import、サブパッケージ境界を跨ぐなら絶対 import。迷ったら絶対
 - [tests ミラーレイアウト](feedback_test_layout_mirror.md) — `tests/` は `src/vrcpilot/` を 1 対 1 でミラーリングする
 - [テスト戦略 4 区分](feedback_test_strategy.md) — unit / integration-with-fakes / integration-real / e2e。skip はファイル先頭で
 - [lint ツーリング集約](feedback_lint_tooling.md) — ruff/docformatter 等は pre-commit に集約。指示・報告では「`just run`」「pre-commit 全 hook」と書く

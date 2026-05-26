@@ -17,7 +17,7 @@ from typing import Any, override
 # clean instead of needing reportUnknownMemberType ignores per call.
 import pydirectinput as _pydirectinput_module  # pyright: ignore[reportMissingTypeStubs]
 
-from vrcpilot.controls.keyboard.base import Key, Keyboard
+from .base import Key, Keyboard
 
 pydirectinput: Any = _pydirectinput_module
 

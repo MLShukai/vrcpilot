@@ -18,7 +18,7 @@ from typing import Any, override
 # clean instead of needing reportUnknownMemberType ignores per call.
 import pydirectinput as _pydirectinput_module  # pyright: ignore[reportMissingTypeStubs]
 
-from vrcpilot.controls.mouse.base import Mouse, MouseButton
+from .base import Mouse, MouseButton
 
 pydirectinput: Any = _pydirectinput_module
 
