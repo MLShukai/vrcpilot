@@ -7,9 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
+### Fixed
 
-- **Linux: VRChat 音声録音中、default sink への loopback bridge を廃止しました。** 録音中は VRChat 音がユーザの耳に届かなくなります (`Speaker.close()` 後は PulseAudio の自動再ルーティングで default sink に戻ります)。これは per-PID 分離不具合 (2 VRChat 並列録音で WAV が bit-identical になる) の切り分けに伴う一時的な UX 変更です。
+- **Linux: per-PID isolation bug where recording several VRChat instances in parallel produced all-silent WAVs is fixed.** The capture path was rebuilt around two stages of explicit global-port-id links (`pw-link`): (1) the VRChat stream's output ports → the per-PID null-sink (`vrcpilot_tap_<pid>`) playback ports, and (2) the tap's monitor ports → the input ports of a `pw-record` spawned with `--target=0`. The root cause was twofold and both were Wireplumber session policies. The old `sink_input_move` (i.e. `target.object` metadata manipulation) was reverted after the call reported success, and the name-based `pw-record --target=<sink>.monitor` was redirected to the default sink's monitor whenever more than one sink existed. Wireplumber's policy does not interfere with explicit global-port-id links the user creates, and port ids stay unique even when two instances share the same node name (`VRChat.exe`), so isolation is reliable. As a side effect the VRChat stream stays linked to the default sink as well, so **the user keeps hearing VRChat audio while recording is in progress**.
 
 ### Added
 

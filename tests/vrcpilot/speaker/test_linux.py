@@ -1,13 +1,18 @@
 """Tests for :class:`vrcpilot.speaker.linux.PipeWireSpeakerBackend`.
 
 The PipeWire backend wires together three 3rd-party surfaces (pulsectl,
-``pw-record`` subprocess, ``psutil``) that the testing skill **forbids**
-mirroring with fakes. The strategy here therefore splits cleanly:
+``pw-record`` / ``pw-link`` subprocesses, ``psutil``) that the testing
+skill **forbids** mirroring with fakes. The strategy here therefore
+splits cleanly:
 
 * **Hermetic tests** -- those that fire **before** the backend touches
-  any of those surfaces (constructor validation, the missing-CLI guard,
-  pure-helper math). These can run on any Linux host, even without
-  PipeWire installed.
+  any of those surfaces: constructor validation, the missing-CLI guard,
+  pure-helper math, the ``pw-dump`` graph parsing / lookup helpers
+  (``_parse_pw_dump`` / ``_find_node_id_by_name`` / ``_find_ports``),
+  and the port-level
+  ``pw-link`` routing logic exercised through the project-owned
+  ``_pw_link_run_raw`` seam. These can run on any Linux host, even
+  without PipeWire installed.
 * **Integration-real tests** -- the full backend constructor /
   data-plane / teardown cycle against a real PipeWire daemon. Marked
   skip-if-infra-missing and otherwise exercised end-to-end. Some
@@ -15,16 +20,46 @@ mirroring with fakes. The strategy here therefore splits cleanly:
   ``tests/e2e/`` because the setup (a stand-in VRChat node piping
   sine into the bus) is non-trivial.
 
+Routing design under test (v2 -- global port-id linking)
+--------------------------------------------------------
+
+VRChat's per-PID isolation no longer relies on ``Pulse.sink_input_move``
+(Wireplumber reverted those moves and left recordings silent), nor on
+the v1 single ``pw-link <node> <tap>`` form (that returned rc=255 while
+creating zero links on real hardware). The deterministic, collision-free
+form is **per-channel ``pw-link`` between global port ids**, in two
+stages:
+
+1. VRChat output ports -> per-PID null-sink playback ports.
+2. The null-sink monitor ports -> the ``pw-record`` capture node's
+   input ports (``pw-record`` is spawned with ``--target=0`` so
+   Wireplumber cannot redirect it to the default sink's monitor -- the
+   bug that made two concurrent backends record bit-identical silence).
+
+The port graph comes from ``pw-dump`` (parsed by the pure
+``_parse_pw_dump`` / ``_find_*`` helpers). The global port id is the
+top-level ``"id"`` of each ``PipeWire:Interface:Port`` object; the
+per-node ``port.id`` is always ``0`` and is **not** used for linking.
+
 Why no fake-backed unit tests for the pulsectl / subprocess seams: see
 project policy -- ``FakePulse`` / ``FakePwRecordProcess`` style
 stand-ins drift from upstream and let CI go green while the real
-PipeWire path is broken.
+PipeWire path is broken. The pure ``_parse_pw_dump`` / ``_find_*``
+helpers take a plain ``list[dict]`` graph and so touch **no** 3rd-party
+surface at all -- they are the highest-value tests here. The
+``_pw_link_run_raw`` / ``_pw_dump_raw`` / ``_link_*`` /
+``_resolve_vrchat_node_ids`` methods are **project-owned** test seams
+(not 3rd-party surfaces), so substituting them via
+``mocker.patch.object`` follows the policy.
 """
 
 from __future__ import annotations
 
+import json
 import shutil
+import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -39,7 +74,10 @@ from vrcpilot.speaker.linux import (  # noqa: E402
     _REQUIRED_CLIS,
     PipeWireSpeakerBackend,
     _extract_tap_pid,
+    _find_node_id_by_name,
+    _find_ports,
     _null_sink_args,
+    _parse_pw_dump,
     _pw_record_argv,
     _tap_sink_name,
 )
@@ -47,6 +85,21 @@ from vrcpilot.speaker.linux import (  # noqa: E402
 # ---------------------------------------------------------------------------
 # Hermetic
 # ---------------------------------------------------------------------------
+
+
+class TestRequiredCLIs:
+    """The v2 routing path drives ``pw-link`` and reads the port graph via
+    ``pw-dump``, so all three CLIs are hard dependencies."""
+
+    def test_required_clis_include_pw_record_pw_link_pw_dump(self) -> None:
+        # pw-record pipes the tap monitor to stdout; pw-link wires the
+        # per-channel port links; pw-dump enumerates the port graph the
+        # link targets are resolved from. All three must be declared so
+        # the missing-CLI guard names them and the install hint stays
+        # actionable.
+        assert "pw-record" in _REQUIRED_CLIS
+        assert "pw-link" in _REQUIRED_CLIS
+        assert "pw-dump" in _REQUIRED_CLIS
 
 
 class TestConstructorValidation:
@@ -106,10 +159,18 @@ class TestHelperFunctions:
         assert "channels=2" in args
         assert "format=float32le" in args
 
-    def test_pw_record_argv_targets_per_pid_monitor(self) -> None:
+    def test_pw_record_argv_targets_zero_to_block_wireplumber_redirect(self) -> None:
+        # v2: pw-record is spawned with ``--target=0`` (no auto-connect)
+        # so Wireplumber cannot redirect it to the default sink's monitor
+        # when multiple sinks exist -- the explicit monitor->record port
+        # links are what actually feed it. Targeting the tap monitor by
+        # name (the v1 form) was the root cause of two concurrent backends
+        # recording bit-identical silence.
         argv = _pw_record_argv(4242)
         assert argv[0] == "pw-record"
-        assert any(a == "--target=vrcpilot_tap_4242.monitor" for a in argv)
+        assert "--target=0" in argv
+        # The v1 monitor-by-name target must be gone.
+        assert not any(a.startswith("--target=vrcpilot_tap") for a in argv), argv
         assert "--format=f32" in argv
         assert "--rate=48000" in argv
         assert "--channels=2" in argv
@@ -170,6 +231,600 @@ class TestHelperFunctions:
 
 
 # ---------------------------------------------------------------------------
+# pw-dump graph parsing + port-level pw-link routing (hermetic)
+# ---------------------------------------------------------------------------
+#
+# DEPENDENCY NOTE (reconcile with B1's real-hardware v2 contract):
+#
+# * pw-dump object shape -- the fixture below is built from B1's measured
+#   ``pw-dump`` output: a global port id is the top-level ``"id"`` of a
+#   ``PipeWire:Interface:Port`` object; the per-node ``port.id`` is always
+#   ``0`` and must NOT be used as a link endpoint. Node identity comes
+#   from ``info.props["object.id"]`` / ``node.name`` /
+#   ``application.process.id``. If B1's measured keys differ, only the
+#   fixture builders here need updating.
+# * ``_pw_link_run_raw`` arg shape -- the port-link tests assert only
+#   that the out/in port ids appear *somewhere* in the args list passed
+#   to the seam, never the exact ``pw-link`` CLI string (B1 finalises the
+#   precise flags on real hardware).
+# * "already-present" stderr wording -- the representative sentinel
+#   (``_EXISTING_LINK_STDERR``) stands in for whatever ``pw-link`` prints
+#   when a link already exists. B1 reports rc=255 + ``File exists`` for
+#   this case; if the wording differs, only that one constant changes.
+# * ``_parse_pw_dump`` malformed-input behaviour -- the contract for
+#   empty / non-JSON bytes is B1's to define; the test below pins only
+#   the loose, defensible property (no raise; returns a list) and notes
+#   that a stricter contract may tighten it.
+
+#: Representative stderr ``pw-link`` emits when the requested link
+#: already exists (B1 reports rc=255 with this text). The backend's
+#: idempotency branch only needs *some* substring of this line to be
+#: recognised as "already present".
+_EXISTING_LINK_STDERR: bytes = b"failed to link ports: File exists\n"
+
+
+def _completed(
+    returncode: int, stderr: bytes = b"", stdout: bytes = b""
+) -> subprocess.CompletedProcess[bytes]:
+    """Build a real :class:`subprocess.CompletedProcess` for the seam.
+
+    Constructing the genuine stdlib result type (rather than a mock) is
+    data construction, not mocking a 3rd-party surface -- the
+    ``_pw_link_run_raw`` seam is contracted to return exactly this type.
+    """
+    return subprocess.CompletedProcess(
+        args=["pw-link"], returncode=returncode, stdout=stdout, stderr=stderr
+    )
+
+
+def _bare_backend(pid: int) -> PipeWireSpeakerBackend:
+    """A backend with just the attributes the routing paths read.
+
+    ``object.__new__`` skips ``__init__`` so no real pulsectl connection
+    is opened and no daemon / event thread is started. Only the fields
+    the routing methods touch are set: ``_pid`` (emitted in every link
+    log) and ``_stop_events`` (read by ``_on_pulse_event`` as its
+    drop-out signal).
+    """
+    backend: PipeWireSpeakerBackend = object.__new__(PipeWireSpeakerBackend)
+    backend._pid = pid
+    backend._stop_events = __import__("threading").Event()
+    return backend
+
+
+def _link_logs(caplog: pytest.LogCaptureFixture, needle: str) -> list[str]:
+    """INFO/WARNING messages from the backend logger containing ``needle``."""
+    return [
+        rec.getMessage()
+        for rec in caplog.records
+        if rec.name == "vrcpilot.speaker.linux" and needle in rec.getMessage()
+    ]
+
+
+# --- pw-dump graph fixture builders (B1's measured object shape) -----------
+
+
+def _dump_node(
+    node_id: int,
+    *,
+    node_name: str,
+    process_id: int | None = None,
+    media_class: str | None = None,
+) -> dict[str, object]:
+    """A ``PipeWire:Interface:Node`` object shaped like B1's pw-dump output."""
+    props: dict[str, object] = {
+        "object.id": node_id,
+        "node.name": node_name,
+        "application.process.id": process_id,
+    }
+    if media_class is not None:
+        props["media.class"] = media_class
+    return {
+        "id": node_id,
+        "type": "PipeWire:Interface:Node",
+        "info": {"props": props},
+    }
+
+
+def _dump_port(
+    port_id: int,
+    *,
+    node_id: int,
+    direction: str,
+    channel: str,
+    port_name: str,
+) -> dict[str, object]:
+    """A ``PipeWire:Interface:Port`` object.
+
+    The global port id is the top-level ``"id"`` (== ``object.id``); the
+    per-node ``port.id`` is always ``0`` and is intentionally NOT a
+    usable link endpoint.
+    """
+    return {
+        "id": port_id,
+        "type": "PipeWire:Interface:Port",
+        "info": {
+            "props": {
+                "node.id": node_id,
+                "object.id": port_id,
+                "port.id": 0,
+                "port.name": port_name,
+                "port.direction": direction,
+                "audio.channel": channel,
+            }
+        },
+    }
+
+
+#: VRChat output node (process.id null on this host -- B1's measured
+#: case) plus its two output ports, the per-PID null-sink's playback +
+#: monitor ports, and the pw-record capture node's input ports. Mirrors
+#: B1's documented pw-dump shape so the pure helpers see a realistic
+#: graph.
+def _sample_dump(
+    *, vrchat_node: int = 112, tap_node: int = 48
+) -> list[dict[str, object]]:
+    return [
+        _dump_node(
+            vrchat_node,
+            node_name="VRChat.exe",
+            process_id=None,
+            media_class="Stream/Output/Audio",
+        ),
+        _dump_port(
+            80,
+            node_id=vrchat_node,
+            direction="out",
+            channel="FL",
+            port_name="output_FL",
+        ),
+        _dump_port(
+            81,
+            node_id=vrchat_node,
+            direction="out",
+            channel="FR",
+            port_name="output_FR",
+        ),
+        # Per-PID null-sink: playback (in) + monitor (out) ports.
+        _dump_node(tap_node, node_name="vrcpilot_tap_4242", media_class="Audio/Sink"),
+        _dump_port(
+            48, node_id=tap_node, direction="in", channel="FL", port_name="playback_FL"
+        ),
+        _dump_port(
+            49, node_id=tap_node, direction="in", channel="FR", port_name="playback_FR"
+        ),
+        _dump_port(
+            50, node_id=tap_node, direction="out", channel="FL", port_name="monitor_FL"
+        ),
+        _dump_port(
+            51, node_id=tap_node, direction="out", channel="FR", port_name="monitor_FR"
+        ),
+    ]
+
+
+class TestParsePwDump:
+    """``_parse_pw_dump`` turns raw ``pw-dump`` bytes into a list of
+    objects."""
+
+    def test_parses_valid_json_array_to_list_of_dicts(self) -> None:
+        raw = json.dumps(_sample_dump()).encode("utf-8")
+        parsed = _parse_pw_dump(raw)
+        assert isinstance(parsed, list)
+        # Every element of a pw-dump array is a PipeWire interface object
+        # carrying a top-level "id" -- the global identifier the link
+        # helpers index on.
+        assert all(isinstance(obj, dict) for obj in parsed)
+        ids = [obj.get("id") for obj in parsed]
+        assert 112 in ids and 80 in ids, ids
+
+    def test_empty_bytes_returns_empty_list_without_raising(self) -> None:
+        # DEPENDENCY NOTE: B1 defines the precise malformed-input policy.
+        # The defensible, loosely-pinned property is "don't crash the
+        # constructor on a transiently-empty pw-dump" -- so an empty /
+        # unparsable payload must degrade to an empty list, not raise.
+        assert _parse_pw_dump(b"") == []
+
+    def test_non_json_bytes_returns_empty_list_without_raising(self) -> None:
+        assert _parse_pw_dump(b"not json at all") == []
+
+
+class TestFindNodeIdByName:
+    """``_find_node_id_by_name`` maps a ``node.name`` to its global node id."""
+
+    def test_finds_vrchat_node_by_name(self) -> None:
+        dump = _sample_dump()
+        assert _find_node_id_by_name(dump, "VRChat.exe") == 112
+
+    def test_finds_tap_node_by_name(self) -> None:
+        dump = _sample_dump()
+        assert _find_node_id_by_name(dump, "vrcpilot_tap_4242") == 48
+
+    def test_returns_none_when_node_name_absent(self) -> None:
+        dump = _sample_dump()
+        assert _find_node_id_by_name(dump, "no_such_node") is None
+
+
+class TestFindPorts:
+    """``_find_ports`` returns ``{audio.channel: global port id}`` for one node
+    + direction, never mixing in another node's ports."""
+
+    def test_returns_output_ports_for_vrchat_node(self) -> None:
+        dump = _sample_dump()
+        ports = _find_ports(dump, 112, "out")
+        assert ports == {"FL": 80, "FR": 81}, ports
+
+    def test_returns_only_playback_in_ports_for_tap_node(self) -> None:
+        dump = _sample_dump()
+        # The tap node (48) has both "in" (playback) and "out" (monitor)
+        # ports; direction="in" must pick up only the playback ports.
+        ports = _find_ports(dump, 48, "in")
+        assert ports == {"FL": 48, "FR": 49}, ports
+
+    def test_returns_only_monitor_out_ports_for_tap_node(self) -> None:
+        dump = _sample_dump()
+        ports = _find_ports(dump, 48, "out")
+        assert ports == {"FL": 50, "FR": 51}, ports
+
+    def test_does_not_mix_ports_from_other_nodes(self) -> None:
+        dump = _sample_dump()
+        # Asking for VRChat node's "in" ports yields nothing -- its ports
+        # are all outputs. Crucially the tap node's "in" playback ports
+        # (48/49) must not leak in.
+        assert _find_ports(dump, 112, "in") == {}
+
+
+class TestPwLinkPorts:
+    """``_pw_link_ports`` links one out-port to one in-port via the project-
+    owned ``_pw_link_run_raw`` seam, with a three-way log contract.
+
+    The real ``pw-link`` subprocess is never spawned: the seam returns a
+    real :class:`subprocess.CompletedProcess`. Tests pin the log prefixes
+    (``port link ok`` / ``port link already present`` / ``port link
+    failed``) and the stderr forwarding, and verify both port ids reach
+    the seam args without asserting the exact CLI string.
+    """
+
+    def test_link_ok_logs_info(
+        self, mocker: MockerFixture, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        pid = 4242
+        out_port, in_port = 80, 48
+        backend = _bare_backend(pid)
+        run = mocker.patch.object(
+            backend, "_pw_link_run_raw", return_value=_completed(0)
+        )
+
+        with caplog.at_level("INFO", logger="vrcpilot.speaker.linux"):
+            caplog.clear()
+            backend._pw_link_ports(out_port, in_port)
+
+        ok = _link_logs(caplog, "port link ok")
+        assert len(ok) == 1, f"expected one 'port link ok' INFO; got {ok}"
+        msg = ok[0]
+        assert f"out_port={out_port}" in msg, msg
+        assert f"in_port={in_port}" in msg, msg
+        assert f"self_pid={pid}" in msg, msg
+
+        # Both port ids reach the seam args; the exact CLI form is B1's
+        # to finalise so we avoid an exact-args assertion.
+        run.assert_called_once()
+        (args,) = run.call_args.args
+        flat = " ".join(args)
+        assert str(out_port) in flat, flat
+        assert str(in_port) in flat, flat
+
+    def test_already_present_is_idempotent(
+        self, mocker: MockerFixture, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        pid = 4242
+        backend = _bare_backend(pid)
+        mocker.patch.object(
+            backend,
+            "_pw_link_run_raw",
+            return_value=_completed(255, stderr=_EXISTING_LINK_STDERR),
+        )
+
+        with caplog.at_level("INFO", logger="vrcpilot.speaker.linux"):
+            caplog.clear()
+            # Re-linking an already-present port pair is the steady state
+            # of the relink-on-event path; it must not raise.
+            backend._pw_link_ports(80, 48)
+
+        present = _link_logs(caplog, "port link already present")
+        assert len(present) == 1, (
+            f"expected one 'port link already present' INFO for an "
+            f"existing link; got {present}"
+        )
+        # And it must NOT be misclassified as a hard failure.
+        assert _link_logs(caplog, "port link failed") == []
+
+    def test_failure_logs_warning_with_returncode(
+        self, mocker: MockerFixture, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        pid = 4242
+        backend = _bare_backend(pid)
+        mocker.patch.object(
+            backend,
+            "_pw_link_run_raw",
+            return_value=_completed(1, stderr=b"failed to link ports: No such port\n"),
+        )
+
+        with caplog.at_level("INFO", logger="vrcpilot.speaker.linux"):
+            caplog.clear()
+            backend._pw_link_ports(80, 48)
+
+        failed = [
+            rec.getMessage()
+            for rec in caplog.records
+            if rec.name == "vrcpilot.speaker.linux"
+            and rec.levelname == "WARNING"
+            and "port link failed" in rec.getMessage()
+        ]
+        assert len(failed) == 1, (
+            f"expected one 'port link failed' WARNING for a genuine link "
+            f"error; got {failed}"
+        )
+        msg = failed[0]
+        assert "returncode=1" in msg, msg
+        assert f"self_pid={pid}" in msg, msg
+
+        # A genuine failure must not be swallowed as "already present".
+        assert _link_logs(caplog, "port link already present") == []
+
+    def test_stderr_forwarded_to_info(
+        self, mocker: MockerFixture, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        backend = _bare_backend(4242)
+        mocker.patch.object(
+            backend,
+            "_pw_link_run_raw",
+            return_value=_completed(
+                1, stderr=b"first diagnostic line\nsecond diagnostic line\n"
+            ),
+        )
+
+        with caplog.at_level("INFO", logger="vrcpilot.speaker.linux"):
+            caplog.clear()
+            backend._pw_link_ports(80, 48)
+
+        forwarded = _link_logs(caplog, "pw-link stderr")
+        assert any("first diagnostic line" in m for m in forwarded), forwarded
+        assert any("second diagnostic line" in m for m in forwarded), forwarded
+
+
+class TestLinkPortsBetweenNodes:
+    """``_link_ports_between_nodes`` links every common channel between two
+    nodes and returns the channel count, with a ``port link summary`` log.
+
+    Both ``_find_ports`` and ``_pw_link_ports`` are project-owned seams;
+    substituting them isolates the channel-pairing logic from the pw-dump
+    parsing and the subprocess call.
+    """
+
+    def test_links_each_common_channel_and_returns_count(
+        self, mocker: MockerFixture, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        pid = 4242
+        backend = _bare_backend(pid)
+        dump = _sample_dump()
+        # src node 112 outputs FL=80/FR=81; dst node 48 inputs FL=48/FR=49.
+        link = mocker.patch.object(backend, "_pw_link_ports")
+
+        with caplog.at_level("INFO", logger="vrcpilot.speaker.linux"):
+            caplog.clear()
+            channels = backend._link_ports_between_nodes(dump, 112, "out", 48, "in")
+
+        assert channels == 2, f"expected 2 common channels (FL/FR); got {channels}"
+        # One link per common channel, pairing src-out to dst-in by
+        # channel: FL 80->48, FR 81->49.
+        assert link.call_count == 2, link.call_args_list
+        linked_pairs = {tuple(call.args) for call in link.call_args_list}
+        assert (80, 48) in linked_pairs, linked_pairs
+        assert (81, 49) in linked_pairs, linked_pairs
+
+        summary = _link_logs(caplog, "port link summary")
+        assert (
+            len(summary) == 1
+        ), f"expected one 'port link summary' INFO line; got {summary}"
+        msg = summary[0]
+        assert "src_node=112" in msg, msg
+        assert "dst_node=48" in msg, msg
+        assert "channels=2" in msg, msg
+        assert f"self_pid={pid}" in msg, msg
+
+    def test_unpaired_channel_is_skipped_not_linked(
+        self, mocker: MockerFixture, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # OPEN QUESTION (orchestrator to reconcile with B1): the v2
+        # contract said "片チャネル欠落時はスキップ + WARNING", but B1's
+        # implementation skips the unpaired channel *silently* and lets
+        # the ``port link summary | channels=1`` line carry the
+        # discrepancy instead of a dedicated per-channel WARNING. The
+        # load-bearing behaviour -- "the unpaired channel is NOT linked
+        # and the count reflects only paired channels" -- is unambiguous
+        # under both readings, so this test pins exactly that plus the
+        # summary count, and deliberately does NOT assert a missing-channel
+        # WARNING the implementation does not emit. If the contract truly
+        # requires the WARNING, that is an implementation change for B1
+        # and this test should grow the assertion back.
+        pid = 4242
+        backend = _bare_backend(pid)
+        # src node has FL+FR outputs; dst node has ONLY FL input, so FR
+        # cannot be paired and must be skipped (not linked) -- a
+        # half-wired stereo stream is a real failure mode the count must
+        # surface.
+        dump = [
+            _dump_node(112, node_name="VRChat.exe", media_class="Stream/Output/Audio"),
+            _dump_port(
+                80, node_id=112, direction="out", channel="FL", port_name="output_FL"
+            ),
+            _dump_port(
+                81, node_id=112, direction="out", channel="FR", port_name="output_FR"
+            ),
+            _dump_node(48, node_name="vrcpilot_tap_4242", media_class="Audio/Sink"),
+            _dump_port(
+                48, node_id=48, direction="in", channel="FL", port_name="playback_FL"
+            ),
+        ]
+        link = mocker.patch.object(backend, "_pw_link_ports")
+
+        with caplog.at_level("INFO", logger="vrcpilot.speaker.linux"):
+            caplog.clear()
+            channels = backend._link_ports_between_nodes(dump, 112, "out", 48, "in")
+
+        # Only FL had a counterpart, so exactly one link and a count of 1.
+        assert channels == 1, f"expected only FL linked; got channels={channels}"
+        assert link.call_count == 1, link.call_args_list
+        assert link.call_args_list[0].args == (80, 48), link.call_args_list
+
+        # The half-wired result must be visible in the summary count.
+        summary = _link_logs(caplog, "port link summary")
+        assert len(summary) == 1, summary
+        assert "channels=1" in summary[0], summary[0]
+
+
+class TestOnPulseEvent:
+    """``_on_pulse_event`` re-links VRChat sink_inputs as they appear."""
+
+    def test_relink_on_new_sink_input(
+        self, mocker: MockerFixture, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A ``sink_input``/``new`` pulse event triggers a re-link and logs the
+        contract-shaped ``on_pulse_event`` INFO line."""
+        pid = 4242
+        backend = _bare_backend(pid)
+        relink = mocker.patch.object(backend, "_link_existing_vrchat_nodes_to_tap")
+        event = SimpleNamespace(facility="sink_input", t="new")
+
+        with caplog.at_level("INFO", logger="vrcpilot.speaker.linux"):
+            caplog.clear()
+            backend._on_pulse_event(event)
+
+        relink.assert_called_once()
+        observed = _link_logs(caplog, "on_pulse_event")
+        assert len(observed) == 1, (
+            f"expected one 'on_pulse_event' INFO line per received event; "
+            f"got {observed}"
+        )
+        msg = observed[0]
+        assert "facility=sink_input" in msg, msg
+        assert "type=new" in msg, msg
+        assert f"self_pid={pid}" in msg, msg
+
+    def test_ignores_non_sink_input_facility(self, mocker: MockerFixture) -> None:
+        """A non-``sink_input`` event (e.g. ``sink``) must not re-link.
+
+        Only freshly-created VRChat sink_inputs need re-wiring; reacting
+        to every facility would re-run the link path on unrelated daemon
+        churn.
+        """
+        backend = _bare_backend(4242)
+        relink = mocker.patch.object(backend, "_link_existing_vrchat_nodes_to_tap")
+        event = SimpleNamespace(facility="sink", t="new")
+
+        backend._on_pulse_event(event)
+
+        relink.assert_not_called()
+
+
+def _sink_input(
+    index: int,
+    *,
+    process_id: int | None = None,
+    object_id: int | None = None,
+) -> SimpleNamespace:
+    """A sink_input data carrier shaped like pulsectl's ``PulseSinkInputInfo``.
+
+    This is **data construction for the resolution seam's input**, not a
+    behavioural mock of pulsectl: the object carries only ``.index`` and
+    ``.proplist`` (a plain dict), the attributes
+    ``_resolve_vrchat_node_ids`` reads. ``None`` values are omitted from
+    the proplist so the resolver exercises its key-absent fallbacks.
+
+    DEPENDENCY NOTE: the node identifier is taken from ``object.id``
+    (B1's v2 contract: ``_resolve_vrchat_node_ids`` is object.id-based).
+    Matching is by ``application.process.id``. If B1's measured proplist
+    keys differ, only this helper needs updating.
+    """
+    proplist: dict[str, object] = {}
+    if process_id is not None:
+        proplist["application.process.id"] = str(process_id)
+    if object_id is not None:
+        proplist["object.id"] = str(object_id)
+    return SimpleNamespace(index=index, proplist=proplist)
+
+
+class _SinkInputListPulse:
+    """Minimal stand-in exposing only ``sink_input_list``.
+
+    ``_resolve_vrchat_node_ids`` reads exactly one method off
+    ``self._pulse``. Rather than mirror the whole ``pulsectl.Pulse``
+    surface (forbidden by policy), this stand-in implements only the
+    single read the resolver performs and returns pre-built data
+    carriers. The pure ``pw-dump`` helpers above need no such stand-in;
+    this is the one place the resolution tests lean on a pulsectl-shaped
+    surface.
+    """
+
+    def __init__(self, inputs: list[SimpleNamespace]) -> None:
+        self._inputs = inputs
+
+    def sink_input_list(self) -> list[SimpleNamespace]:
+        return self._inputs
+
+
+class TestResolveVrchatNodeIds:
+    """``_resolve_vrchat_node_ids`` extracts pw-link node identifiers for the
+    backend's own PID only.
+
+    A sink_input is ours iff its ``application.process.id`` equals
+    ``self._pid``; the node identifier is its ``object.id``. Other VRChat
+    instances (different PID) are excluded so concurrent recordings never
+    cross-wire.
+    """
+
+    def test_only_self_pid_sink_input_object_id_is_returned(self) -> None:
+        my_pid = 4242
+        other_pid = 9999
+        ours = _sink_input(index=1, process_id=my_pid, object_id=701)
+        theirs = _sink_input(index=2, process_id=other_pid, object_id=702)
+
+        backend = _bare_backend(my_pid)
+        backend._pulse = _SinkInputListPulse([ours, theirs])
+
+        node_ids = backend._resolve_vrchat_node_ids()
+
+        # Only our PID's node, identified by its ``object.id``.
+        assert node_ids == [701], f"expected only self-pid node [701]; got {node_ids}"
+
+    def test_emits_candidate_and_summary_diagnostics(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The scan keeps the diagnostic contract: a ``sink_input candidate``
+        line per candidate and a single ``sink_input scan summary``
+        line."""
+        my_pid = 4242
+        ours = _sink_input(index=1, process_id=my_pid, object_id=701)
+
+        backend = _bare_backend(my_pid)
+        backend._pulse = _SinkInputListPulse([ours])
+
+        with caplog.at_level("INFO", logger="vrcpilot.speaker.linux"):
+            caplog.clear()
+            backend._resolve_vrchat_node_ids()
+
+        candidates = _link_logs(caplog, "sink_input candidate")
+        assert candidates, "expected at least one 'sink_input candidate' INFO"
+
+        summaries = _link_logs(caplog, "sink_input scan summary")
+        assert len(summaries) == 1, (
+            f"expected exactly one 'sink_input scan summary' INFO per "
+            f"scan; got {summaries}"
+        )
+        assert f"self_pid={my_pid}" in summaries[0], summaries[0]
+
+
+# ---------------------------------------------------------------------------
 # Integration-real
 # ---------------------------------------------------------------------------
 
@@ -200,10 +855,10 @@ class TestPipeWireSpeakerBackendAgainstRealDaemon:
       ``pw-cli info 0``)
 
     The PID used here is the *current* process PID -- the backend
-    creates a per-pid null-sink and moves any VRChat-like sink_inputs
-    onto the tap (none, in a normal CI run), so the test only
-    validates that the constructor and close cycle survive the real
-    plumbing.
+    creates a per-pid null-sink and ``pw-link``s any VRChat-like nodes
+    for that PID onto the tap (none, in a normal CI run), so the test
+    only validates that the constructor and close cycle survive the
+    real plumbing.
     """
 
     def setup_method(self) -> None:
@@ -216,9 +871,9 @@ class TestPipeWireSpeakerBackendAgainstRealDaemon:
 
     def test_constructor_loads_and_close_unloads_real_null_sink(self) -> None:
         # We need a PID for the constructor -- our own process PID is
-        # fine because the move-streams step only touches VRChat-like
-        # sink_inputs, and we have none. The interesting bit is that
-        # the backend's real null-sink load + atexit cleanup succeeds
+        # fine because the node-link step only touches VRChat-like
+        # nodes, and we have none. The interesting bit is that the
+        # backend's real null-sink load + atexit cleanup succeeds
         # against a live PipeWire daemon (1.0+ syntax compatibility).
         import os
 
@@ -474,13 +1129,14 @@ class TestPipeWireSpeakerBackendAgainstRealDaemon:
         """The sink_input scan must emit a contract-shaped INFO summary on
         every construction.
 
-        Phase A pins the diagnostic-log contract for
-        :meth:`PipeWireSpeakerBackend._enumerate_vrchat_sink_inputs`:
-        every call ends with a ``sink_input scan summary`` INFO line
-        carrying ``self_pid``, ``matched=[...]``, ``ambiguous=[...]``
-        and ``total_candidates=<n>``. The constructor invokes the scan
-        exactly once via ``_move_existing_streams_to_tap``, so capture
-        spans construction.
+        The diagnostic-log contract for
+        :meth:`PipeWireSpeakerBackend._resolve_vrchat_node_ids` is
+        preserved across the pw-link migration: every call ends with a
+        ``sink_input scan summary`` INFO line carrying ``self_pid``,
+        ``matched=[...]``, ``ambiguous=[...]`` and
+        ``total_candidates=<n>``. The constructor invokes the scan
+        exactly once via ``_link_existing_vrchat_nodes_to_tap``, so
+        capture spans construction.
 
         We use the current process PID (which is not a VRChat PID), so
         the contract holds independent of whether the host happens to
@@ -528,7 +1184,11 @@ class TestPipeWireSpeakerBackendAgainstRealDaemon:
         )
         msg = summaries[0]
         # Substring checks pin the contract without depending on
-        # whitespace or trailing-field order.
+        # whitespace or trailing-field order. DEPENDENCY NOTE: the
+        # ``matched=``/``ambiguous=`` field names carry over from the
+        # pre-pw-link scan summary; B1 declared the summary line is
+        # preserved. If B1's summary schema drops those fields, relax
+        # these two assertions to ``self_pid`` + ``total_candidates``.
         assert "matched=[]" in msg, msg
         assert "ambiguous=[]" in msg, msg
         assert f"self_pid={my_pid}" in msg, msg
@@ -536,49 +1196,6 @@ class TestPipeWireSpeakerBackendAgainstRealDaemon:
         # is part of the contract even though the integer is
         # environment-dependent.
         assert re.search(r"total_candidates=\d+", msg) is not None, msg
-
-    def test_no_post_move_verify_log_when_no_matching_sink_inputs(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """The ``sink_input_move post-verify`` log must only fire for streams
-        that were actually moved.
-
-        Phase A (A-6) introduces a post-move re-query log that runs
-        only after a successful ``sink_input_move``. When this backend
-        is constructed against a non-VRChat PID (the test process's
-        own PID), no sink_input matches ``self_pid``, so
-        ``_move_existing_streams_to_tap`` makes zero move calls and
-        therefore zero post-verify log lines should appear. A VRChat
-        instance on the host (matching some other PID) is still
-        classified ``skipped-no-vrchat-marker`` rather than moved
-        because its ``application.process.id`` is not ours, so the
-        contract holds whether or not the developer machine happens to
-        be running VRChat. This is the regression detector for "the
-        post-verify log accidentally fires even when zero streams were
-        moved".
-        """
-        import os
-
-        my_pid = os.getpid()
-        # Capture spans construction; the constructor is where the
-        # synchronous move attempt happens, before the event listener
-        # thread is started.
-        with caplog.at_level("INFO", logger="vrcpilot.speaker.linux"):
-            caplog.clear()
-            backend = PipeWireSpeakerBackend(pid=my_pid)
-            backend.close()
-
-        post_verify_lines = [
-            rec.getMessage()
-            for rec in caplog.records
-            if rec.name == "vrcpilot.speaker.linux"
-            and "sink_input_move post-verify" in rec.getMessage()
-        ]
-        assert post_verify_lines == [], (
-            f"no 'sink_input_move post-verify' log should fire when no "
-            f"VRChat sink_inputs match this backend's pid; saw "
-            f"{post_verify_lines}"
-        )
 
     def test_pulse_client_name_is_per_pid_unique(self) -> None:
         """The backend's pulse control connection registers under ``vrcpilot-

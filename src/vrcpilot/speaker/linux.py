@@ -7,33 +7,53 @@ resources keyed by its VRChat ``pid``:
   never share a capture sink;
 * a ``pw-record`` subprocess piping the monitor into a drain thread.
 
-Routing replacement (no monitor bridge)
----------------------------------------
+Two-stage explicit global-port-id linking
+------------------------------------------
 
-VRChat's ``sink_input`` is *moved* onto the per-pid tap via
-``Pulse.sink_input_move`` — the stream's link to the default sink is
-replaced, not duplicated. The backend deliberately does **not** load a
-``module-loopback`` from the tap monitor back to the default sink:
-the previous design did so and was the load-bearing leak that broke
-per-PID separation when two VRChat instances were captured at once.
-**Therefore while recording is active the user no longer hears VRChat
-audio through the default speakers** — this is a known UX trade-off
-for isolation correctness, not a bug. When :meth:`close` unloads the
-null-sink, PulseAudio auto-routes the sink_input back to the default
-sink, so VRChat audio returns to the user's speakers without an
-explicit move-back.
+Audio reaches the recorder through two explicit ``pw-link`` hops, each
+made by **global PipeWire port id** rather than node / port name:
+
+#. *producer -> tap*: VRChat's ``sink_input`` output ports are linked
+   onto the per-pid ``vrcpilot_tap_{pid}`` null-sink's playback ports.
+   The stream's existing link to the default sink is left in place —
+   the tap is an extra consumer, not a replacement route, so **the user
+   keeps hearing VRChat through the default speakers while recording.**
+#. *tap monitor -> recorder*: the tap's monitor ports are linked onto a
+   ``pw-record`` subprocess spawned with ``--target=0`` (auto-connect
+   disabled, so its input ports stay free for us to wire explicitly).
+
+Linking by global port id is the only form that is both deterministic
+*and* collision-free. Two concurrent VRChat instances share the node
+name ``VRChat.exe``, so a name-based ``pw-link`` would always resolve
+the same producer and silently cross-wire the taps; and the node-id
+form returns a non-zero exit code even on success, so it cannot drive
+returncode branching. Global port ids are unique per port, so each hop
+links exactly the intended ports. Port ids are resolved from
+``pw-dump`` (the only source that maps a node id to its ports under a
+name collision).
+
+The earlier design moved the stream with ``Pulse.sink_input_move``
+(``target.object`` metadata via the Pulse-compat layer); Wireplumber's
+session policy (``stream-restore`` / ``follow-default-target``) silently
+reverted that move after the API call returned success. The same policy
+also redirects a name-targeted ``pw-record`` to the default sink monitor
+when more than one sink exists — which is why the recorder is spawned
+with ``--target=0`` and wired by explicit port id instead. User-created
+explicit ``pw-link`` port links are not subject to that policy.
 
 Diagnostic surface
 ------------------
 
-Routing decisions are observable from the log stream alone. Every
+Linking decisions are observable from the log stream alone. Every
 VRChat-like ``sink_input`` is logged at INFO with a pipe-delimited
-schema, each ``sink_input_move`` is post-verified by re-querying the
-input's live ``sink`` (mismatches surface auto-routing policies that
-returned API-success while reverting the move), and ``pw-record``'s
-stderr is forwarded line-by-line (so target-node fallbacks and ALSA
-errors are not lost to the subprocess's own stream). This contract is
-what the Phase A e2e captures rely on for post-mortem reconstruction.
+schema, each ``pw-link`` invocation's outcome is logged with a fixed
+prefix (``port link ok`` / ``port link already present`` / ``port link
+failed``) keyed by the global port ids, each node-to-node pass ends in
+a ``port link summary`` line, the listener emits an ``on_pulse_event``
+line per event so a post-mortem can confirm the listener actually
+fired, and ``pw-record``'s stderr is forwarded line-by-line. This
+contract is what the multi-instance e2e captures rely on for
+post-mortem reconstruction.
 
 State / cleanup
 ---------------
@@ -63,12 +83,14 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 import warnings
+from collections.abc import Callable
 from contextlib import ExitStack
 from pathlib import Path
-from typing import Any, Final, override
+from typing import Any, Final, TypeVar, override
 
 import numpy as np
 import psutil
@@ -78,9 +100,11 @@ from vrcpilot.speaker.base import CHANNELS, SpeakerBackend
 
 _logger = logging.getLogger(__name__)
 
-#: External CLIs the backend relies on. Missing this is a hard
+_T = TypeVar("_T")
+
+#: External CLIs the backend relies on. Missing any is a hard
 #: start-up failure with an actionable error message.
-_REQUIRED_CLIS: Final[tuple[str, ...]] = ("pw-record",)
+_REQUIRED_CLIS: Final[tuple[str, ...]] = ("pw-record", "pw-link", "pw-dump")
 
 #: Match a ``vrcpilot_tap_<pid>`` null-sink argument. The trailing
 #: ``\s`` is load-bearing — see :func:`_extract_tap_pid` for why
@@ -116,6 +140,19 @@ def _tap_sink_name(pid: int) -> str:
     return f"vrcpilot_tap_{pid}"
 
 
+def _record_node_name(pid: int) -> str:
+    """Return the per-PID ``pw-record`` node name.
+
+    A ``pw-record`` node does not expose ``application.process.id`` in
+    its PipeWire props, so the recorder cannot be located by OS pid.
+    Instead it is spawned with a unique ``node.name`` (this value, via
+    ``pw-record -P``) so two concurrent backends never clash: a plain
+    ``pw-record`` node name would collide and the capture-side link
+    could attach to the wrong recorder.
+    """
+    return f"vrcpilot_rec_{pid}"
+
+
 def _null_sink_args(pid: int) -> str:
     """``module-null-sink`` argument string for the ``pid`` tap.
 
@@ -132,13 +169,21 @@ def _null_sink_args(pid: int) -> str:
 def _pw_record_argv(pid: int) -> tuple[str, ...]:
     """Argv template for the ``pw-record`` subprocess of ``pid``'s tap.
 
-    The trailing ``-`` writes raw PCM to stdout. Format / rate / channel
-    count match :mod:`vrcpilot.speaker.base` exactly so no resampling
-    is required.
+    ``--target=0`` disables auto-connect so the recorder's input ports
+    stay free; the backend then links the tap's monitor ports onto them
+    by explicit global port id (a name-targeted recorder would be
+    redirected to the default sink monitor by the session manager when
+    more than one sink exists). ``-P node.name=...`` tags the node with
+    a unique per-pid name so the capture-side link can find it without
+    colliding with a concurrent backend's recorder. The trailing ``-``
+    writes raw PCM to stdout; format / rate / channel count match
+    :mod:`vrcpilot.speaker.base` exactly so no resampling is required.
     """
     return (
         "pw-record",
-        f"--target={_tap_sink_name(pid)}.monitor",
+        "--target=0",
+        "-P",
+        f"node.name={_record_node_name(pid)}",
         "--format=f32",
         "--rate=48000",
         "--channels=2",
@@ -168,6 +213,164 @@ def _extract_tap_pid(module_name: str | None, argument: str | None) -> int | Non
     return int(m.group(1)) if m else None
 
 
+def _coerce_optional_int(value: Any) -> int | None:
+    """Return ``value`` as an ``int`` or ``None`` if it cannot convert.
+
+    PipeWire proplist values arrive as strings (e.g. ``object.serial =
+    '9228'``); this normalises them to ``int`` for use as node
+    identifiers, dropping anything non-numeric without raising.
+    """
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_str(value: Any) -> str | None:
+    """Return ``value`` if it is a ``str``, else ``None``.
+
+    Narrows a proplist value to ``str`` so the diagnostic / classification
+    logic in :meth:`PipeWireSpeakerBackend._resolve_vrchat_node_ids` can
+    treat any non-string (or missing) field uniformly as absent.
+    """
+    return value if isinstance(value, str) else None
+
+
+def _pw_link_already_linked(stderr: str) -> bool:
+    """Whether ``pw-link`` stderr signals an already-existing link.
+
+    The deterministic explicit-port form returns a non-zero exit code
+    with ``failed to link ports: File exists`` when the requested port
+    pair is already linked. That is the idempotent case (a re-link from
+    the event listener, or a stream that was already routed), not a
+    failure — see the empirically captured ``pw-link`` behaviour in the
+    module's reference notes.
+
+    >>> _pw_link_already_linked("failed to link ports: File exists")
+    True
+    >>> _pw_link_already_linked("failed to link ports: No such file or directory")
+    False
+    """
+    return "File exists" in stderr
+
+
+def _parse_pw_dump(raw: bytes) -> list[dict[str, Any]]:
+    """Parse ``pw-dump`` output into a list of object dicts.
+
+    ``pw-dump`` emits a JSON array of PipeWire objects. Returns an empty
+    list (never raises) when the payload is empty, not valid JSON, or
+    not a JSON array — the helpers that consume the dump degrade to "no
+    match" rather than aborting start-up, and ``pw-dump`` piped output
+    can intermittently be empty under daemon contention.
+
+    Non-dict array elements are dropped so downstream ``info.props``
+    access is always against a mapping.
+    """
+    if not raw:
+        return []
+    try:
+        data: Any = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return []
+    if not isinstance(data, list):
+        return []
+    objects: list[dict[str, Any]] = [
+        obj  # pyright: ignore[reportUnknownVariableType]
+        for obj in data  # pyright: ignore[reportUnknownVariableType]
+        if isinstance(obj, dict)
+    ]
+    return objects
+
+
+def _dump_props(obj: dict[str, Any]) -> dict[str, Any]:
+    """Return ``obj['info']['props']`` as a dict, or ``{}`` when absent."""
+    info_raw: Any = obj.get("info")
+    if not isinstance(info_raw, dict):
+        return {}
+    info: dict[Any, Any] = info_raw  # pyright: ignore[reportUnknownVariableType]
+    props_raw: Any = info.get("props")
+    if not isinstance(props_raw, dict):
+        return {}
+    props: dict[Any, Any] = props_raw  # pyright: ignore[reportUnknownVariableType]
+    return props
+
+
+def _find_node_id_by_name(dump: list[dict[str, Any]], node_name: str) -> int | None:
+    """Return the global id of the Node whose ``node.name`` matches.
+
+    Scans ``dump`` for a ``PipeWire:Interface:Node`` object whose
+    ``info.props['node.name']`` equals ``node_name`` and returns its
+    top-level ``id`` (the global object id). Returns ``None`` when no
+    such node exists. The first match wins; the backend's tap and
+    recorder names are unique per pid, so a collision is not expected.
+    """
+    for obj in dump:
+        if obj.get("type") != "PipeWire:Interface:Node":
+            continue
+        props = _dump_props(obj)
+        if props.get("node.name") == node_name:
+            node_id = _coerce_optional_int(obj.get("id"))
+            if node_id is not None:
+                return node_id
+    return None
+
+
+def _find_ports(
+    dump: list[dict[str, Any]], node_id: int, direction: str
+) -> dict[str, int]:
+    """Return ``{audio.channel: global port id}`` for a node's ports.
+
+    Scans ``dump`` for ``PipeWire:Interface:Port`` objects owned by
+    ``node_id`` (``info.props['node.id']``) in the given ``direction``
+    (``'in'`` or ``'out'``) and maps each port's ``audio.channel`` (e.g.
+    ``'FL'`` / ``'FR'``) to its top-level global ``id``. Ports without a
+    usable channel or global id are skipped.
+
+    Filtering by direction matters: a ``pw-record`` node carries both
+    ``input_<CH>`` (in) and ``monitor_<CH>`` (out) ports, and a null
+    sink carries both ``playback_<CH>`` (in) and ``monitor_<CH>`` (out)
+    ports, so only the direction-matched set is returned.
+    """
+    ports: dict[str, int] = {}
+    for obj in dump:
+        if obj.get("type") != "PipeWire:Interface:Port":
+            continue
+        props = _dump_props(obj)
+        if _coerce_optional_int(props.get("node.id")) != node_id:
+            continue
+        if props.get("port.direction") != direction:
+            continue
+        channel_raw: Any = props.get("audio.channel")
+        if not isinstance(channel_raw, str):
+            continue
+        port_id = _coerce_optional_int(obj.get("id"))
+        if port_id is None:
+            continue
+        ports[channel_raw] = port_id
+    return ports
+
+
+def _poll_for(probe: Callable[[], _T | None]) -> _T | None:
+    """Call ``probe`` until it returns non-``None`` or the budget runs out.
+
+    Shared readiness-gate loop for both PipeWire resources that take a few
+    ms to register after they are requested: the tap ``module-null-sink``
+    (visible by name in ``sink_list``) and the ``pw-record`` node (visible
+    by name in ``pw-dump``). Spins :data:`_SINK_LOOKUP_RETRIES` times with
+    a :data:`_SINK_LOOKUP_INTERVAL_SEC` sleep between attempts and returns
+    the first non-``None`` probe result, or ``None`` if it never appeared
+    within the budget.
+    """
+    for _ in range(_SINK_LOOKUP_RETRIES):
+        result = probe()
+        if result is not None:
+            return result
+        time.sleep(_SINK_LOOKUP_INTERVAL_SEC)
+    return None
+
+
 class PipeWireSpeakerBackend(SpeakerBackend):
     """SpeakerBackend that captures one VRChat process via native PipeWire.
 
@@ -182,7 +385,7 @@ class PipeWireSpeakerBackend(SpeakerBackend):
             before returning an empty array. Must be ``> 0``.
         pid: Target VRChat PID. A dedicated ``vrcpilot_tap_{pid}``
             null-sink is created and only that process's sink_inputs
-            are moved onto it, so concurrent VRChat instances stay
+            are linked onto it, so concurrent VRChat instances stay
             isolated. Callers (typically
             :class:`vrcpilot.speaker.Speaker`) pre-resolve the PID
             rather than re-resolving here, so the backend's lifetime
@@ -263,8 +466,19 @@ class PipeWireSpeakerBackend(SpeakerBackend):
             self._state_file = self._write_state_file()
             stack.callback(self._safe_remove_state_file)
 
-            self._move_existing_streams_to_tap()
+            # The tap's playback ports must be daemon-visible before the
+            # producer / capture links resolve them; gate on the sink
+            # appearing. A miss is logged and tolerated (the links below
+            # then no-op against an absent tap and read() surfaces empty
+            # audio rather than crashing start-up).
+            if not self._wait_for_tap_ready():
+                _logger.warning(
+                    "tap sink not yet visible at start-up | self_pid=%d",
+                    self._pid,
+                )
 
+            # Spawn the recorder first (with auto-connect disabled) so its
+            # free input ports exist for the capture-side link.
             self._record_proc = self._spawn_pw_record()
             stack.callback(self._safe_terminate_record_proc)
 
@@ -287,6 +501,20 @@ class PipeWireSpeakerBackend(SpeakerBackend):
             )
             self._drain_thread.start()
             stack.callback(self._safe_join_drain_thread)
+
+            # Capture side: wait for the recorder's node/ports to register,
+            # then link the tap monitor onto them. Then wire the producer
+            # side (VRChat sink_inputs -> tap). A missing recorder node is
+            # logged and tolerated; links garbage-collect with the tap.
+            if self._wait_for_record_node() is None:
+                _logger.warning(
+                    "pw-record node not visible, skipping capture link | self_pid=%d",
+                    self._pid,
+                )
+            else:
+                self._link_tap_monitor_to_record()
+
+            self._link_existing_vrchat_nodes_to_tap()
 
             self._event_thread = threading.Thread(
                 target=self._listen_events,
@@ -340,6 +568,55 @@ class PipeWireSpeakerBackend(SpeakerBackend):
             bufsize=0,
         )
 
+    def _pw_link_run_raw(self, args: list[str]) -> subprocess.CompletedProcess[bytes]:
+        """Run ``pw-link`` once and return the completed process.
+
+        The single subprocess surface through which the backend touches
+        ``pw-link``. Same test-seam role as :meth:`_open_pulse` /
+        :meth:`_spawn_pw_record` / :meth:`_module_load_raw`: tests
+        substitute the per-call outcome via
+        ``mocker.patch.object(backend, '_pw_link_run_raw',
+        side_effect=[...])`` without monkey-patching :mod:`subprocess`
+        itself (which the project's testing policy forbids for 3rd-party
+        surfaces).
+
+        ``check=False`` so callers can branch on ``returncode`` /
+        ``stderr`` — an already-present link is a non-zero,
+        non-exceptional outcome.
+        """
+        return subprocess.run(
+            ["pw-link", *args],
+            capture_output=True,
+            check=False,
+        )
+
+    def _pw_dump_raw(self) -> bytes:
+        """Run ``pw-dump`` and return its raw stdout bytes.
+
+        The single subprocess surface through which the backend touches
+        ``pw-dump``; same test-seam role as :meth:`_open_pulse` /
+        :meth:`_spawn_pw_record` / :meth:`_pw_link_run_raw`.
+
+        ``pw-dump`` is written to a temporary file and read back rather
+        than captured straight from the pipe: piping ``pw-dump`` output
+        directly is racy under daemon contention (it intermittently
+        returns an empty or truncated payload), whereas redirecting to a
+        file yields the complete dump. The temp file is always removed.
+        """
+        with tempfile.NamedTemporaryFile(
+            prefix="vrcpilot-pw-dump-", suffix=".json", delete=False
+        ) as handle:
+            dump_path = handle.name
+        try:
+            with open(dump_path, "wb") as out:
+                subprocess.run(["pw-dump"], stdout=out, check=False)
+            return Path(dump_path).read_bytes()
+        finally:
+            try:
+                os.unlink(dump_path)
+            except OSError:
+                pass
+
     # ------------------------------------------------------------------
     # Start-up helpers
     # ------------------------------------------------------------------
@@ -366,10 +643,8 @@ class PipeWireSpeakerBackend(SpeakerBackend):
 
         null_sinks: list[tuple[int, int]] = []
         for module in modules:
-            name_raw: Any = getattr(module, "name", None)
-            arg_raw: Any = getattr(module, "argument", None)
-            name = name_raw if isinstance(name_raw, str) else None
-            arg = arg_raw if isinstance(arg_raw, str) else None
+            name = _optional_str(getattr(module, "name", None))
+            arg = _optional_str(getattr(module, "argument", None))
             pid = _extract_tap_pid(name, arg)
             if pid is None:
                 continue
@@ -565,37 +840,50 @@ class PipeWireSpeakerBackend(SpeakerBackend):
             warnings.warn(f"state file write failed: {exc}", stacklevel=2)
             return None
 
-    def _resolve_tap_sink_index(self) -> int:
-        """Return the per-pid sink's PulseAudio index, retrying briefly.
+    def _wait_for_tap_ready(self) -> bool:
+        """Spin until the per-pid tap sink is visible by name, or give up.
 
         PipeWire-Pulse can take a few ms to expose a freshly-loaded
-        sink in ``sink_list()``. Spin a few times before giving up
-        rather than racing the daemon.
+        ``module-null-sink`` in ``sink_list()`` (and, equivalently, to
+        expose its ``playback_<CH>`` ports to ``pw-link``). Both the
+        ``pw-link`` linking and the ``pw-record`` capture target the
+        tap *by name*, so the daemon must have published the sink before
+        either is invoked. Spin a few times before giving up rather than
+        racing the daemon.
+
+        Returns ``True`` once the tap is visible, ``False`` if it never
+        appeared within the retry budget (the caller logs and degrades
+        rather than aborting start-up — ``pw-record``'s own stderr drain
+        surfaces a missing target).
         """
         target = _tap_sink_name(self._pid)
-        for _ in range(_SINK_LOOKUP_RETRIES):
+
+        def probe() -> bool | None:
             sinks: list[Any]
             try:
                 sinks = self._pulse.sink_list()  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
             except Exception as exc:  # noqa: BLE001
                 _logger.warning("sink_list failed: %s", exc)
-                sinks = []
+                return None
             for sink in sinks:
-                name_raw: Any = getattr(sink, "name", None)
-                if name_raw != target:
-                    continue
-                index_raw: Any = getattr(sink, "index", None)
-                if isinstance(index_raw, int):
-                    return index_raw
-            time.sleep(_SINK_LOOKUP_INTERVAL_SEC)
-        raise RuntimeError(
-            f"could not resolve sink index for {target} after "
-            f"{_SINK_LOOKUP_RETRIES} retries"
-        )
+                if getattr(sink, "name", None) == target:
+                    return True
+            return None
 
-    def _enumerate_vrchat_sink_inputs(self) -> list[int]:
-        """Return ``sink_input.index`` values for VRChat streams of
+        return _poll_for(probe) is not None
+
+    def _resolve_vrchat_node_ids(self) -> list[int]:
+        """Return PipeWire node identifiers for VRChat streams of
         ``self._pid``.
+
+        Each VRChat ``sink_input`` carries its PipeWire node identity in
+        its proplist. ``object.id`` is the PipeWire node's global id and
+        is the returned identifier — it equals the ``pw-dump`` Node's
+        top-level ``id`` and its Ports' ``node.id``, so it keys the
+        ``pw-dump`` port lookup in
+        :meth:`_link_existing_vrchat_nodes_to_tap`. ``object.serial`` is
+        a *different* value (it does not map to ``pw-dump`` node ids) and
+        is recorded only as a diagnostic field.
 
         Filter precedence:
 
@@ -605,16 +893,17 @@ class PipeWireSpeakerBackend(SpeakerBackend):
            ``'VRChat'`` substring in ``application.name`` /
            ``media.name``. Conservative: if multiple ambiguous streams
            exist alongside any PID-matched stream the ambiguous ones
-           are dropped to avoid misrouting audio that might belong to
-           a different VRChat instance.
+           are dropped to avoid linking audio that might belong to a
+           different VRChat instance.
 
         Diagnostic contract: every VRChat-like candidate emits one
-        ``sink_input candidate | ...`` INFO line and the call ends with
-        a single ``sink_input scan summary | ...`` line. Tests and the
-        Phase A e2e captures depend on those prefixes existing so a
-        post-mortem can reconstruct which streams the routing layer
-        saw and how each was classified — change the prefix or schema
-        only with the diagnostic consumers in mind.
+        ``sink_input candidate | ...`` INFO line (now carrying
+        ``node_serial`` / ``node_object_id`` / ``node_name``) and the
+        call ends with a single ``sink_input scan summary | ...`` line.
+        Tests and the multi-instance e2e captures depend on those
+        prefixes existing so a post-mortem can reconstruct which streams
+        the linking layer saw and how each was classified — change the
+        prefix or schema only with the diagnostic consumers in mind.
         """
         try:
             inputs: list[Any] = self._pulse.sink_input_list()  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
@@ -635,31 +924,16 @@ class PipeWireSpeakerBackend(SpeakerBackend):
                 continue
 
             proc_id_raw: Any = proplist.get("application.process.id")
-            proc_id: int | None
-            if proc_id_raw is None:
-                proc_id = None
-            else:
-                try:
-                    proc_id = int(proc_id_raw)
-                except (TypeError, ValueError):
-                    proc_id = None
+            proc_id = _coerce_optional_int(proc_id_raw)
 
-            binary_raw: Any = proplist.get("application.process.binary")
-            binary: str | None = binary_raw if isinstance(binary_raw, str) else None
-            app_name_raw: Any = proplist.get("application.name")
-            app_name: str | None = (
-                app_name_raw if isinstance(app_name_raw, str) else None
-            )
-            host_raw: Any = proplist.get("application.process.host")
-            host: str | None = host_raw if isinstance(host_raw, str) else None
-            media_name_raw: Any = proplist.get("media.name")
-            media_name: str | None = (
-                media_name_raw if isinstance(media_name_raw, str) else None
-            )
-            current_sink_raw: Any = getattr(inp, "sink", None)
-            current_sink: int | None = (
-                current_sink_raw if isinstance(current_sink_raw, int) else None
-            )
+            binary = _optional_str(proplist.get("application.process.binary"))
+            app_name = _optional_str(proplist.get("application.name"))
+            host = _optional_str(proplist.get("application.process.host"))
+            media_name = _optional_str(proplist.get("media.name"))
+
+            node_serial = _coerce_optional_int(proplist.get("object.serial"))
+            node_object_id = _coerce_optional_int(proplist.get("object.id"))
+            node_name = _optional_str(proplist.get("node.name"))
 
             looks_like_vrchat = (
                 binary == "VRChat.exe"
@@ -667,13 +941,26 @@ class PipeWireSpeakerBackend(SpeakerBackend):
                 or (media_name is not None and "VRChat" in media_name)
             )
 
+            # ``object.id`` IS the PipeWire node global id (it equals the
+            # pw-dump Node ``id`` / Port ``node.id``), so it is the
+            # identifier used for the port lookup. ``object.serial`` is a
+            # different value that does not map to pw-dump node ids and is
+            # only logged for diagnostics.
+            node_id = node_object_id
+
             classification: str
             if proc_id is not None and proc_id == self._pid:
-                matched.append(index_raw)
-                classification = "matched"
+                if node_id is not None:
+                    matched.append(node_id)
+                    classification = "matched"
+                else:
+                    classification = "matched-no-node-identifier"
             elif proc_id is None and looks_like_vrchat:
-                ambiguous.append(index_raw)
-                classification = "ambiguous"
+                if node_id is not None:
+                    ambiguous.append(node_id)
+                    classification = "ambiguous"
+                else:
+                    classification = "ambiguous-no-node-identifier"
             elif looks_like_vrchat:
                 # VRChat-like but ``process.id`` rules it out (belongs
                 # to a different VRChat PID).
@@ -688,7 +975,8 @@ class PipeWireSpeakerBackend(SpeakerBackend):
                 "sink_input candidate | sink_input_index=%d | "
                 "process_id_raw=%r | process_id_int=%s | binary=%s | "
                 "app_name=%s | host=%s | media_name=%s | "
-                "current_sink_index=%s | self_pid=%d | classification=%s",
+                "node_serial=%s | node_object_id=%s | node_name=%s | "
+                "self_pid=%d | classification=%s",
                 index_raw,
                 proc_id_raw,
                 proc_id,
@@ -696,7 +984,9 @@ class PipeWireSpeakerBackend(SpeakerBackend):
                 app_name,
                 host,
                 media_name,
-                current_sink,
+                node_serial,
+                node_object_id,
+                node_name,
                 self._pid,
                 classification,
             )
@@ -724,102 +1014,196 @@ class PipeWireSpeakerBackend(SpeakerBackend):
         _logger.warning(
             "%d VRChat-like sink_inputs lack application.process.id; "
             "cannot disambiguate against pid=%d. Skipping ambiguous "
-            "inputs to avoid misrouted audio.",
+            "inputs to avoid mis-linked audio.",
             len(ambiguous),
             self._pid,
         )
         return matched
 
-    def _move_existing_streams_to_tap(self) -> None:
-        """Move every matching VRChat sink_input onto the per-pid tap.
+    def _wait_for_record_node(self) -> int | None:
+        """Spin until the ``pw-record`` node appears in ``pw-dump``.
 
-        Uses ``Pulse.sink_input_move`` — a *replacement* of the input's
-        routing, not an added link. After the move VRChat's audio
-        leaves the default sink entirely (see module docstring); the
-        per-pid null-sink is the only path that sees the stream.
+        ``_spawn_pw_record`` returns as soon as the subprocess is forked,
+        but the recorder's PipeWire node (and its free input ports) take
+        a few ms to register with the daemon. The capture-side link
+        cannot resolve those ports until then, so poll ``pw-dump`` for
+        the node named :func:`_record_node_name` and return its global
+        id.
 
-        Every successful ``sink_input_move`` is post-verified by
-        :meth:`_verify_sink_input_moved`. The verification exists
-        because ``pulsectl.sink_input_move`` can return success while
-        the PipeWire-Pulse bridge silently fails to apply the move
-        (auto-routing policies, ``stream.target`` hints set by the
-        client, or session-manager policy can all revert the route
-        without surfacing an error on the call site). Without the
-        re-query the only symptom would be "the recording is empty
-        even though startup logged success".
+        Returns the node id once visible, or ``None`` if it never
+        appeared within the retry budget (the caller logs and degrades;
+        ``read`` will then surface empty audio rather than crashing).
+        """
+        target = _record_node_name(self._pid)
 
-        Idempotent: an input already routed to our tap stays put.
-        Per-input move failures are logged at WARNING and the loop
-        continues so a transient daemon hiccup on one stream never
-        aborts the whole startup.
+        def probe() -> int | None:
+            dump = _parse_pw_dump(self._pw_dump_raw())
+            return _find_node_id_by_name(dump, target)
+
+        return _poll_for(probe)
+
+    def _pw_link_ports(self, out_port_id: int, in_port_id: int) -> None:
+        """Link one output port to one input port by global port id.
+
+        The deterministic, collision-free ``pw-link`` form: both sides
+        are global PipeWire port ids, so exactly the intended ports are
+        connected (a name-based link cross-wires under the shared
+        ``VRChat.exe`` node name; a node-id link returns non-zero even on
+        success). Outcome is branched off the returncode:
+
+        * returncode 0 → INFO ``port link ok``;
+        * non-zero whose stderr signals an existing link (``File
+          exists``) → INFO ``port link already present`` (idempotent
+          re-link, e.g. from the event listener);
+        * any other non-zero → WARNING ``port link failed`` with the
+          returncode.
+
+        The ``pw-link`` stderr is forwarded line-by-line at INFO under
+        ``pw-link stderr | ...`` regardless of returncode.
         """
         try:
-            sink_idx = self._resolve_tap_sink_index()
-        except RuntimeError as exc:
-            _logger.warning("tap sink not yet visible, skipping moves: %s", exc)
-            return
-        for inp_idx in self._enumerate_vrchat_sink_inputs():
-            try:
-                self._pulse.sink_input_move(inp_idx, sink_idx)  # pyright: ignore[reportUnknownMemberType]
-            except Exception as exc:  # noqa: BLE001
-                _logger.warning(
-                    "sink_input_move %d -> %d failed: %s",
-                    inp_idx,
-                    sink_idx,
-                    exc,
-                )
-                continue
-            self._verify_sink_input_moved(inp_idx, sink_idx)
-
-    def _verify_sink_input_moved(self, inp_idx: int, expected_sink_idx: int) -> None:
-        """Re-query the sink_input and warn if its sink does not match.
-
-        Exists because ``sink_input_move`` can succeed at the pulsectl
-        API boundary while the underlying PipeWire-Pulse layer leaves
-        the route on whichever sink the session manager last decided
-        — the only reliable detector is reading the input's live
-        ``sink`` field back. Tests assert on the ``post-verify ok`` /
-        ``post-verify failed`` log prefixes, so they double as the
-        diagnostic contract.
-
-        The ``sink_input_info`` lookup can itself fail (e.g. the input
-        disappeared between move and verify); that case is downgraded
-        to a ``post-verify query failed`` WARNING so the move loop
-        keeps going for the surviving inputs.
-        """
-        try:
-            info: Any = self._pulse.sink_input_info(inp_idx)  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
+            result = self._pw_link_run_raw([str(out_port_id), str(in_port_id)])
         except Exception as exc:  # noqa: BLE001
+            # ``pw-link`` is on PATH (checked at start-up); an exception
+            # here is a process-spawn failure, not a link rejection.
             _logger.warning(
-                "sink_input_move post-verify query failed | "
-                "sink_input_index=%d | self_pid=%d | error=%s",
-                inp_idx,
+                "port link failed | out_port=%d | in_port=%d | "
+                "returncode=%d | self_pid=%d",
+                out_port_id,
+                in_port_id,
+                -1,
                 self._pid,
+            )
+            _logger.warning(
+                "pw-link spawn failed | out_port=%d | in_port=%d | error=%s",
+                out_port_id,
+                in_port_id,
                 exc,
             )
             return
-        actual_sink_raw: Any = getattr(info, "sink", None)
-        actual_sink: int | None = (
-            actual_sink_raw if isinstance(actual_sink_raw, int) else None
-        )
-        if actual_sink == expected_sink_idx:
+
+        stderr_text = result.stderr.decode("utf-8", errors="replace")
+        for line in stderr_text.splitlines():
+            stripped = line.rstrip()
+            if stripped:
+                _logger.info("pw-link stderr | %s", stripped)
+
+        if result.returncode == 0:
             _logger.info(
-                "sink_input_move post-verify ok | sink_input_index=%d | "
-                "sink_index=%d | self_pid=%d",
-                inp_idx,
-                expected_sink_idx,
+                "port link ok | out_port=%d | in_port=%d | self_pid=%d",
+                out_port_id,
+                in_port_id,
+                self._pid,
+            )
+        elif _pw_link_already_linked(stderr_text):
+            _logger.info(
+                "port link already present | out_port=%d | in_port=%d | self_pid=%d",
+                out_port_id,
+                in_port_id,
                 self._pid,
             )
         else:
             _logger.warning(
-                "sink_input_move post-verify failed | "
-                "sink_input_index=%d | expected_sink_index=%d | "
-                "actual_sink_index=%s | self_pid=%d",
-                inp_idx,
-                expected_sink_idx,
-                actual_sink,
+                "port link failed | out_port=%d | in_port=%d | "
+                "returncode=%d | self_pid=%d",
+                out_port_id,
+                in_port_id,
+                result.returncode,
                 self._pid,
             )
+
+    def _link_ports_between_nodes(
+        self,
+        dump: list[dict[str, Any]],
+        src_node_id: int,
+        src_direction: str,
+        dst_node_id: int,
+        dst_direction: str,
+    ) -> int:
+        """Link every shared channel between two nodes by global port id.
+
+        Resolves both nodes' port maps from ``dump`` (source ports in
+        ``src_direction``, destination ports in ``dst_direction``) and
+        links each channel present on both sides via
+        :meth:`_pw_link_ports`. Returns the number of channels linked.
+
+        Ends with one ``port link summary`` INFO line so a post-mortem
+        can see how many channels were wired between the two nodes
+        without parsing every per-port line.
+        """
+        src_ports = _find_ports(dump, src_node_id, src_direction)
+        dst_ports = _find_ports(dump, dst_node_id, dst_direction)
+        channels = 0
+        for channel, out_port in src_ports.items():
+            in_port = dst_ports.get(channel)
+            if in_port is None:
+                continue
+            self._pw_link_ports(out_port, in_port)
+            channels += 1
+        _logger.info(
+            "port link summary | src_node=%d | dst_node=%d | channels=%d | self_pid=%d",
+            src_node_id,
+            dst_node_id,
+            channels,
+            self._pid,
+        )
+        return channels
+
+    def _link_existing_vrchat_nodes_to_tap(self) -> None:
+        """Link every resolved VRChat node's output ports onto the tap.
+
+        Producer side of the chain: snapshots ``pw-dump`` once, resolves
+        the tap node id by name, and for each VRChat node id (from
+        :meth:`_resolve_vrchat_node_ids`) links its output ports onto the
+        tap's playback ports by global port id.
+
+        No link is ever explicitly torn down: when either the VRChat
+        node or the tap ``module-null-sink`` is destroyed, PipeWire
+        garbage-collects the dangling link. :meth:`close` unloads the
+        null-sink, which removes the tap's ports and so reaps every link
+        this method created.
+
+        Idempotent (re-runnable from the event listener): an
+        already-linked channel re-reports ``port link already present``
+        without side effects.
+        """
+        node_ids = self._resolve_vrchat_node_ids()
+        if not node_ids:
+            return
+        dump = _parse_pw_dump(self._pw_dump_raw())
+        tap_node_id = _find_node_id_by_name(dump, _tap_sink_name(self._pid))
+        if tap_node_id is None:
+            _logger.warning(
+                "tap node not found in pw-dump, skipping producer links | self_pid=%d",
+                self._pid,
+            )
+            return
+        for node_id in node_ids:
+            self._link_ports_between_nodes(dump, node_id, "out", tap_node_id, "in")
+
+    def _link_tap_monitor_to_record(self) -> None:
+        """Link the tap's monitor ports onto the ``pw-record`` input ports.
+
+        Capture side of the chain: snapshots ``pw-dump`` once, resolves
+        the tap node (by name) and the recorder node (by its unique
+        ``node.name``, since ``pw-record`` does not expose a process id),
+        then links the tap's monitor ports onto the recorder's input
+        ports by global port id. Without this the ``--target=0`` recorder
+        stays unconnected and captures silence.
+        """
+        dump = _parse_pw_dump(self._pw_dump_raw())
+        tap_node_id = _find_node_id_by_name(dump, _tap_sink_name(self._pid))
+        record_node_id = _find_node_id_by_name(dump, _record_node_name(self._pid))
+        if tap_node_id is None or record_node_id is None:
+            _logger.warning(
+                "capture-side nodes not found in pw-dump | tap_found=%s | "
+                "record_found=%s | self_pid=%d",
+                tap_node_id is not None,
+                record_node_id is not None,
+                self._pid,
+            )
+            return
+        self._link_ports_between_nodes(dump, tap_node_id, "out", record_node_id, "in")
 
     # ------------------------------------------------------------------
     # Data plane
@@ -859,16 +1243,14 @@ class PipeWireSpeakerBackend(SpeakerBackend):
 
         Background-thread body. Exits on EOF / read error.
 
-        Exists because ``pw-record`` will *silently* fall back to a
-        different source when its ``--target=...`` argument can't be
-        resolved (the resolver picks whichever node the session
-        manager considers nearest), and the only signal of that fallback
-        is a single stderr line. Without this drain the backend would
-        keep producing audio from the wrong sink with no visible error
-        — every line is forwarded at INFO under the ``pw-record stderr
-        | ...`` prefix so target-node fallbacks, ALSA / PipeWire
-        connection errors, and xrun warnings show up in the same log
-        stream as the routing diagnostics.
+        The recorder is spawned with ``--target=0`` and wired by
+        explicit port id, so it never auto-connects to the wrong node;
+        but it can still emit ALSA / PipeWire connection errors and xrun
+        warnings, and the only signal of those is a stderr line. Every
+        line is forwarded at INFO under the ``pw-record stderr | ...``
+        prefix so they show up in the same log stream as the linking
+        diagnostics rather than being lost to the subprocess's own
+        stream.
 
         Errors reading stderr are logged but never escalated — losing
         the diagnostic stream must not take down the data plane.
@@ -946,16 +1328,22 @@ class PipeWireSpeakerBackend(SpeakerBackend):
             _logger.warning("pulse event listener exited: %s", exc)
 
     def _on_pulse_event(self, event: Any) -> None:
-        """Re-route freshly-created VRChat ``sink_input``s onto the tap.
+        """Link freshly-created VRChat ``sink_input``s onto the tap.
 
         Without this callback, a new sink_input that VRChat creates
         mid-session (e.g. when the user opens a UI dialog with its own
-        audio stream) would land on the default sink and bypass the
-        capture entirely.
+        audio stream, or a world reload re-plugs the stream) would only
+        be linked to the default sink and bypass the capture entirely.
+        Re-linking is idempotent (already-present ports re-report
+        ``link already present``).
 
-        Pulsectl callback. Failures are logged but swallowed — the
-        listener must keep running. Honours :attr:`_stop_events` as the
-        exit signal back into :meth:`_listen_events`.
+        Pulsectl callback. Every event emits one ``on_pulse_event |
+        ...`` INFO line so a post-mortem can confirm the listener
+        actually fired (the data plane being silent while the listener
+        never woke up is a distinct failure mode). Failures are logged
+        but swallowed — the listener must keep running. Honours
+        :attr:`_stop_events` as the exit signal back into
+        :meth:`_listen_events`.
         """
         if self._stop_events.is_set():
             try:
@@ -965,12 +1353,18 @@ class PipeWireSpeakerBackend(SpeakerBackend):
             return
         facility = getattr(event, "facility", None)
         event_type = getattr(event, "t", None)
+        _logger.info(
+            "on_pulse_event | facility=%s | type=%s | self_pid=%d",
+            facility,
+            event_type,
+            self._pid,
+        )
         if facility != "sink_input" or event_type != "new":
             return
         try:
-            self._move_existing_streams_to_tap()
+            self._link_existing_vrchat_nodes_to_tap()
         except Exception as exc:  # noqa: BLE001
-            _logger.warning("auto-move failed for event %s: %s", event, exc)
+            _logger.warning("auto-link failed for event %s: %s", event, exc)
 
     # ------------------------------------------------------------------
     # Teardown helpers — each one logs failures and returns normally so
@@ -1103,10 +1497,10 @@ class PipeWireSpeakerBackend(SpeakerBackend):
         # 2. pw-record next, which lets both drain threads observe EOF.
         # 3. Stdout drain joined first among the data plane, then the
         #    stderr drain — pw-record closes stderr after stdout.
-        # 4. Null-sink unload. When the sink VRChat's sink_input was
-        #    moved to disappears, PulseAudio auto-routes the input back
-        #    to the default sink, so no explicit move-back is needed —
-        #    the user hears VRChat again without a gap.
+        # 4. Null-sink unload. Removing the tap's ports lets PipeWire
+        #    garbage-collect every pw-link we created, so no explicit
+        #    unlink is needed. VRChat's own link to the default sink was
+        #    never touched, so the user keeps hearing it throughout.
         # 5. State file after the module is gone — a concurrent
         #    janitor must never see the breadcrumb without its sink.
         # 6. Pulse control connection last (everything above needs it).
