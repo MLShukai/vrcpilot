@@ -253,7 +253,7 @@ ______________________________________________________________________
 
 ## Mic（音声再生）
 
-VRChat にライブマイク入力として認識させるために、float32 PCM を仮想ケーブルの出力デバイスへストリーミングします。主なユースケースは、LLM エージェントの TTS チャンクを実マイクや中間音声ファイルを介さずに VRChat へ直接流し込むことです。セッションは `__init__` で `soundcard` のプレイヤーを開き、インスタンスがクローズされるまで生かし続けます。`play(chunk)` は呼び出しごとに 1 チャンクだけ書き込むので、ペースは呼び出し側が制御します（`for chunk in tts.stream(): mic.play(chunk)`）。Windows ではデフォルトデバイスは VB-Audio Virtual Cable の `"CABLE Input"`、Linux では [`vrcpilot.mic.linux.register_virtual_mic`](#vrcpilotmiclinux)（または `vrcpilot linux-mic register` の実行）で作成される `"VRCPilotMic"` の PipeWire シンクです（`vrcpilot.mic.linux.register_virtual_mic(suffix=...)` で `VRCPilotMic_<suffix>` 派生シンクを並べて登録し、複数の仮想マイクを並列運用することも可能です）。
+VRChat にライブマイク入力として認識させるために、float32 PCM を仮想ケーブルの出力デバイスへストリーミングします。主なユースケースは、LLM エージェントの TTS チャンクを実マイクや中間音声ファイルを介さずに VRChat へ直接流し込むことです。セッションは `__init__` で `soundcard` のプレイヤーを開き、インスタンスがクローズされるまで生かし続けます。`play(chunk)` は呼び出しごとに 1 チャンクだけ書き込むので、ペースは呼び出し側が制御します（`for chunk in tts.stream(): mic.play(chunk)`）。Windows ではデフォルトデバイスは VB-Audio Virtual Cable の `"CABLE Input"`、Linux では [`vrcpilot.mic.linux.register_virtual_mic`](#vrcpilotmiclinux)（または `vrcpilot linux-mic register` の実行）で作成される `"VRCPilotMic"` の PipeWire シンクです（複数の AI インスタンスを並列に走らせる場合は、`vrcpilot.mic.linux.register_virtual_mic(suffix=...)` で各インスタンス用の `VRCPilotMic_<suffix>` を別々に登録し、TTS 音声経路を分離できます）。
 
 ### `vrcpilot.Mic`
 
@@ -373,7 +373,7 @@ ______________________________________________________________________
 
 PipeWire 上の永続的な `VRCPilotMic` 仮想マイクを管理する Linux 専用ヘルパーです。これは `vrcpilot linux-mic` CLI のプログラム上の対応物で、両者は同じ config 断片を書き込み、同じ PulseAudio の `module_load` 経路を呼び出します。
 
-すべての公開関数は `suffix` キーワード引数を受け取り、同じ仕組みを複数のシンクに対して並行運用できます。空 suffix (`""`、既定) は従来の `VRCPilotMic` を対象にして後方互換を保ち、非空 suffix（例: `"alt"`）は `VRCPilotMic_<suffix>` 派生シンクを対象にします。`suffix` に使える文字は `[A-Za-z0-9_-]` のみで、それ以外を渡すと `ValueError` が送出されます。
+すべての公開関数は `suffix` キーワード引数を受け取り、同じ仕組みで複数のシンクを並列管理できます — 主な用途は、複数の AI インスタンスを同時に走らせるときに各インスタンスへ独立した仮想マイクを割り当てることです。空 suffix (`""`、既定) は従来の `VRCPilotMic` を対象にして後方互換を保ち、非空 suffix（例: `"alt"`）は `VRCPilotMic_<suffix>` 派生シンクを対象にします。`suffix` に使える文字は `[A-Za-z0-9_-]` のみで、それ以外を渡すと `ValueError` が送出されます。
 
 **Linux 以外のプラットフォームでこのサブモジュールをインポートすると、インポート時点で `ImportError` が送出されます**（`raise ImportError("vrcpilot.mic.linux is Linux-only")`）。クロスプラットフォームなコードを書く際は `sys.platform == "linux"` でガードする（または遅延 import する）ようにしてください。
 

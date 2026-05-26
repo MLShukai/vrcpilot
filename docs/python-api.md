@@ -253,7 +253,7 @@ ______________________________________________________________________
 
 ## Mic (audio playback)
 
-Stream float32 PCM into a virtual-cable output device so it appears to VRChat as live microphone input. The primary use case is piping an LLM agent's TTS chunks directly into VRChat without ever touching a real microphone or an intermediate audio file. The session opens a `soundcard` player in `__init__` and keeps it alive until the instance is closed; `play(chunk)` writes a single chunk per call so callers drive the cadence themselves (`for chunk in tts.stream(): mic.play(chunk)`). On Windows the default device is VB-Audio Virtual Cable's `"CABLE Input"`; on Linux the default is the `"VRCPilotMic"` PipeWire sink created by [`vrcpilot.mic.linux.register_virtual_mic`](#vrcpilotmiclinux) (or by running `vrcpilot linux-mic register`) — you can also register additional `VRCPilotMic_<suffix>` sinks side-by-side via `vrcpilot.mic.linux.register_virtual_mic(suffix=...)` to run multiple virtual mics in parallel.
+Stream float32 PCM into a virtual-cable output device so it appears to VRChat as live microphone input. The primary use case is piping an LLM agent's TTS chunks directly into VRChat without ever touching a real microphone or an intermediate audio file. The session opens a `soundcard` player in `__init__` and keeps it alive until the instance is closed; `play(chunk)` writes a single chunk per call so callers drive the cadence themselves (`for chunk in tts.stream(): mic.play(chunk)`). On Windows the default device is VB-Audio Virtual Cable's `"CABLE Input"`; on Linux the default is the `"VRCPilotMic"` PipeWire sink created by [`vrcpilot.mic.linux.register_virtual_mic`](#vrcpilotmiclinux) (or by running `vrcpilot linux-mic register`) — when running multiple AI agent instances in parallel, register a dedicated `VRCPilotMic_<suffix>` for each via `vrcpilot.mic.linux.register_virtual_mic(suffix=...)` so each instance's TTS gets its own isolated input path into VRChat.
 
 ### `vrcpilot.Mic`
 
@@ -373,7 +373,7 @@ ______________________________________________________________________
 
 Linux-only helpers that manage the persistent `VRCPilotMic` virtual mic in PipeWire. This is the programmatic counterpart of the `vrcpilot linux-mic` CLI; both write the same config fragment and call the same PulseAudio `module_load` path.
 
-Every public function takes a `suffix` keyword so the same machinery can manage multiple sinks side-by-side. An empty suffix (`""`, the default) targets the legacy `VRCPilotMic` and preserves backward compatibility; a non-empty suffix (e.g. `"alt"`) targets the `VRCPilotMic_<suffix>` derived sink. `suffix` may contain only `[A-Za-z0-9_-]`; anything else raises `ValueError`.
+Every public function takes a `suffix` keyword so the same machinery can manage multiple sinks side-by-side — the primary use case being running multiple AI agent instances in parallel, each with its own dedicated virtual mic. An empty suffix (`""`, the default) targets the legacy `VRCPilotMic` and preserves backward compatibility; a non-empty suffix (e.g. `"alt"`) targets the `VRCPilotMic_<suffix>` derived sink. `suffix` may contain only `[A-Za-z0-9_-]`; anything else raises `ValueError`.
 
 **Importing this submodule on non-Linux platforms raises `ImportError` at import time** (`raise ImportError("vrcpilot.mic.linux is Linux-only")`), so guard accesses with `sys.platform == "linux"` (or import lazily) when writing cross-platform code.
 

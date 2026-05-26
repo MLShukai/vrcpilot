@@ -217,9 +217,10 @@ registration with `vrcpilot linux-mic unregister`.
 ### Run multiple virtual mics in parallel
 
 Use `--suffix <name>` to register additional named sinks alongside the
-default one. This covers cases like routing OBS monitor and a TTS bot
-through separate inputs into one VRChat instance, or feeding distinct
-audio sources to multiple VRChat instances.
+default one. The primary motivation is running multiple AI agent
+instances in parallel: each instance gets its own dedicated virtual mic
+(`VRCPilotMic_<name>`) so their TTS streams never cross-contaminate one
+another's input path.
 
 ```bash
 vrcpilot linux-mic register --suffix bot   # creates VRCPilotMic_bot
