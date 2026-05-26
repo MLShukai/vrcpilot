@@ -102,16 +102,15 @@ def register(subparsers: SubParsersAction) -> None:
     )
 
 
-def _run_register(args: argparse.Namespace) -> int:
+def _run_register(*, suffix: str, runtime_load: bool) -> int:
     """Execute the ``register`` action."""
     from vrcpilot.mic import linux as mic_linux
     from vrcpilot.mic.base import description_for
 
-    suffix = cast(str, args.suffix)
     try:
         result = mic_linux.register_virtual_mic(
             suffix=suffix,
-            runtime_load=not args.no_runtime_load,
+            runtime_load=runtime_load,
         )
     except ValueError as exc:
         print(f"vrcpilot: invalid suffix: {exc}", file=sys.stderr)
@@ -145,24 +144,23 @@ def _run_register(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_unregister(args: argparse.Namespace) -> int:
+def _run_unregister(*, suffix: str, all_: bool) -> int:
     """Execute the ``unregister`` action."""
     from vrcpilot.mic import linux as mic_linux
 
-    if args.all:
+    if all_:
         suffixes = mic_linux.iter_registered_suffixes()
         if not suffixes:
             print("No VRCPilotMic registrations to remove", file=sys.stderr)
             return 0
-        for suffix in suffixes:
-            mic_linux.unregister_virtual_mic(suffix=suffix)
+        for s in suffixes:
+            mic_linux.unregister_virtual_mic(suffix=s)
             print(
-                f"Removed VRCPilotMic config and/or runtime sink (suffix: {suffix})",
+                f"Removed VRCPilotMic config and/or runtime sink (suffix: {s})",
                 file=sys.stderr,
             )
         return 0
 
-    suffix = cast(str, args.suffix)
     try:
         removed = mic_linux.unregister_virtual_mic(suffix=suffix)
     except ValueError as exc:
@@ -292,7 +290,7 @@ def _print_status_block(suffix: str, *, include_suffix_header: bool) -> None:
         print(f"soundcard: {'visible' if visible else 'not visible'}")
 
 
-def _run_status(args: argparse.Namespace) -> int:
+def _run_status(*, suffix: str, all_: bool) -> int:
     """Execute the ``status`` action.
 
     Machine-readable state lands on stdout with a stable vocabulary
@@ -306,7 +304,7 @@ def _run_status(args: argparse.Namespace) -> int:
     """
     from vrcpilot.mic import linux as mic_linux
 
-    if args.all:
+    if all_:
         suffixes = mic_linux.iter_registered_suffixes()
         if not suffixes:
             cfg_dir = mic_linux.config_path().parent
@@ -319,13 +317,12 @@ def _run_status(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 0
-        for idx, suffix in enumerate(suffixes):
+        for idx, s in enumerate(suffixes):
             if idx > 0:
                 print()
-            _print_status_block(suffix, include_suffix_header=True)
+            _print_status_block(s, include_suffix_header=True)
         return 0
 
-    suffix = cast(str, args.suffix)
     _print_status_block(suffix, include_suffix_header=bool(suffix))
     return 0
 
@@ -334,14 +331,20 @@ def run(args: argparse.Namespace) -> int:
     """Dispatch the requested ``linux-mic`` action.
 
     Reaching this function implies Linux; the module's import guard
-    raises on every other platform.
+    raises on every other platform. ``args.suffix`` / ``args.all`` are
+    pulled out here so each ``_run_*`` helper takes only the domain
+    values it actually needs.
     """
+    suffix = cast(str, getattr(args, "suffix", ""))
     match args.action:
         case "register":
-            return _run_register(args)
+            return _run_register(
+                suffix=suffix,
+                runtime_load=not args.no_runtime_load,
+            )
         case "unregister":
-            return _run_unregister(args)
+            return _run_unregister(suffix=suffix, all_=args.all)
         case "status":
-            return _run_status(args)
+            return _run_status(suffix=suffix, all_=args.all)
         case _:  # pragma: no cover - argparse required=True prevents this
             raise AssertionError(f"Unknown linux-mic action: {args.action!r}")
