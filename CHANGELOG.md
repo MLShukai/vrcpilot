@@ -10,9 +10,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **`vrcpilot linux-mic` gains `--suffix <NAME>` / `--all`**, primarily so multiple AI agent instances can run in parallel with each instance owning a dedicated virtual mic instead of fighting over a single shared `VRCPilotMic`. Suffixed sinks (e.g. `VRCPilotMic_bot`) can now be registered side-by-side; omitting `--suffix` preserves the original `VRCPilotMic` sink name. `status --all` / `unregister --all` enumerate / bulk-remove every `vrcpilot-mic*.conf` under the PipeWire config directory.
-- **`vrcpilot.mic.linux` registration API accepts a keyword `suffix`**: `register_virtual_mic(suffix="bot")`, `unregister_virtual_mic(suffix="bot")`, `is_registered(suffix="bot")`, and `config_path(suffix="bot")`. Default `""` preserves the previous behaviour.
-- **`vrcpilot.mic.sink_name_for(suffix)` / `description_for(suffix)`** public helpers that derive the PulseAudio sink name / device description from a suffix, so user code can write `Mic(sink_name_for("bot"))` instead of hardcoding the string.
-- **`RegisterResult` gains a `suffix: str` field**. Existing fields are unaffected.
 
 ## [0.3.0] - 2026-05-25
 

@@ -308,31 +308,11 @@ The stream is released by `close()`, by leaving the `with` block, or as a best-e
 def default_device_name() -> str | None: ...
 ```
 
-The OS-specific default output-device substring. Returns `"CABLE Input"` on Windows and `"VRCPilotMic"` on Linux (after `vrcpilot linux-mic register`). Returns `None` on other platforms. When you register additional sinks via `vrcpilot.mic.linux.register_virtual_mic(suffix=...)`, target them explicitly with `Mic(sink_name_for("<suffix>"))` — `default_device_name()` only ever returns the empty-suffix `"VRCPilotMic"`.
+The OS-specific default output-device substring. Returns `"CABLE Input"` on Windows and `"VRCPilotMic"` on Linux (after `vrcpilot linux-mic register`). Returns `None` on other platforms. When you register additional sinks via `vrcpilot linux-mic register --suffix <name>` (or `vrcpilot.mic.linux.register_virtual_mic(suffix="<name>")`), target them explicitly by sink name (e.g. `Mic("VRCPilotMic_<name>")`) — `default_device_name()` only ever returns the empty-suffix `"VRCPilotMic"`.
 
 ### `VRCPILOT_MIC_DEVICE`
 
 Environment variable consulted between the constructor argument and `default_device_name()`. Useful for keeping device names out of source code, or for overriding the Windows default without code changes.
-
-### `vrcpilot.mic.sink_name_for`
-
-```python
-def sink_name_for(suffix: str = "") -> str: ...
-```
-
-Build the PipeWire sink name for `suffix`. An empty suffix (the default) returns `"VRCPilotMic"`; a non-empty suffix returns `f"VRCPilotMic_{suffix}"`. The result can be passed straight to `Mic`'s `device` argument (e.g. `Mic(sink_name_for("bot"))`), which is convenient after registering a derived sink via `register_virtual_mic(suffix="bot")`.
-
-**Raises**: `ValueError` when `suffix` contains characters outside `[A-Za-z0-9_-]`.
-
-### `vrcpilot.mic.description_for`
-
-```python
-def description_for(suffix: str = "") -> str: ...
-```
-
-Build the PulseAudio `device.description` for `suffix`. Empty suffix returns `"VRCPilot_Virtual_Mic"`; non-empty returns `f"VRCPilot_Virtual_Mic_{suffix}"`. Underscores instead of spaces keep the value a single PulseAudio token inside `module-null-sink` argument strings (matches the speaker backend's style).
-
-**Raises**: `ValueError` when `suffix` contains characters outside `[A-Za-z0-9_-]`.
 
 ### End-to-end snippets
 

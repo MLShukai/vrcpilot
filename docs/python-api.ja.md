@@ -308,31 +308,11 @@ class Mic:
 def default_device_name() -> str | None: ...
 ```
 
-OS 別の既定出力デバイス部分文字列です。Windows では `"CABLE Input"`、Linux では（`vrcpilot linux-mic register` 実行後に）`"VRCPilotMic"` を返します。それ以外のプラットフォームでは `None` を返します。`vrcpilot.mic.linux.register_virtual_mic(suffix=...)` で派生シンク (`VRCPilotMic_<suffix>`) を追加した場合は、`Mic(sink_name_for("<suffix>"))` のように明示的に指定してください — `default_device_name()` は空 suffix の `"VRCPilotMic"` のみを返します。
+OS 別の既定出力デバイス部分文字列です。Windows では `"CABLE Input"`、Linux では（`vrcpilot linux-mic register` 実行後に）`"VRCPilotMic"` を返します。それ以外のプラットフォームでは `None` を返します。`vrcpilot linux-mic register --suffix <name>`（または `vrcpilot.mic.linux.register_virtual_mic(suffix="<name>")`）で派生シンクを追加した場合は、`Mic("VRCPilotMic_<name>")` のようにシンク名を直接指定してください — `default_device_name()` は空 suffix の `"VRCPilotMic"` のみを返します。
 
 ### `VRCPILOT_MIC_DEVICE`
 
 コンストラクタ引数と `default_device_name()` の間に参照される環境変数です。デバイス名をソースコードに埋め込みたくない場合や、Windows のデフォルトをコード変更なしで上書きしたい場合に便利です。
-
-### `vrcpilot.mic.sink_name_for`
-
-```python
-def sink_name_for(suffix: str = "") -> str: ...
-```
-
-`suffix` から PipeWire シンク名を組み立てます。空 suffix（既定）は `"VRCPilotMic"` を、非空 suffix は `f"VRCPilotMic_{suffix}"` を返します。戻り値は `Mic` の `device` 引数にそのまま渡せます（例: `Mic(sink_name_for("bot"))`）ので、派生シンクを `register_virtual_mic(suffix="bot")` で登録した後の参照に便利です。
-
-**Raises**: `suffix` に `[A-Za-z0-9_-]` 以外の文字が含まれる場合は `ValueError`。
-
-### `vrcpilot.mic.description_for`
-
-```python
-def description_for(suffix: str = "") -> str: ...
-```
-
-`suffix` から PulseAudio の `device.description` を組み立てます。空 suffix は `"VRCPilot_Virtual_Mic"`、非空は `f"VRCPilot_Virtual_Mic_{suffix}"` を返します。空白の代わりにアンダースコアを使うのは、`module-null-sink` の引数文字列内で値が単一の PulseAudio トークンになるようにするためです（speaker バックエンドと同じ流儀）。
-
-**Raises**: `suffix` に `[A-Za-z0-9_-]` 以外の文字が含まれる場合は `ValueError`。
 
 ### エンドツーエンドのスニペット
 
