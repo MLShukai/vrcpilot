@@ -213,8 +213,12 @@ def iter_registered_suffixes() -> list[str]:
 
 
 def _write_config(path: Path, contents: str) -> bool:
-    """Write ``contents`` to ``path``; ``True`` iff the file actually
-    changed."""
+    """Write ``contents`` to ``path``; ``True`` iff the file actually changed.
+
+    Idempotent on the byte level so re-running ``register`` does not
+    perturb the file's mtime when nothing has changed -- which keeps
+    PipeWire's config-reload watchers quiet on no-op invocations.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists() and path.read_text() == contents:
         return False
@@ -315,11 +319,13 @@ def register_virtual_mic(
 
     ``suffix`` allows callers to register additional sinks alongside
     the default one without colliding on sink name, filename, or
-    runtime module. Set ``runtime_load=False`` for headless CI /
-    chroot setups without a PipeWire daemon -- the persistent config
-    still writes. Runtime failures surface via
-    :attr:`RegisterResult.runtime_warning` rather than raising;
-    filesystem failures still propagate as ``OSError``.
+    runtime module; an empty suffix preserves the legacy single-sink
+    layout. Set ``runtime_load=False`` for headless CI / chroot setups
+    without a PipeWire daemon -- the persistent config still writes.
+    Runtime failures surface via :attr:`RegisterResult.runtime_warning`
+    rather than raising; filesystem failures still propagate as
+    ``OSError`` and invalid suffixes raise ``ValueError`` via
+    :func:`_normalize_suffix`.
     """
     normalized = _normalize_suffix(suffix)
     path = config_path(suffix=normalized)
@@ -369,9 +375,14 @@ def _runtime_unload_null_sink(*, suffix: str = "") -> bool:
 
 
 def unregister_virtual_mic(*, suffix: str = "") -> bool:
-    """Remove the persistent config and unload the runtime sink.
+    """Remove the persistent config and unload the runtime sink for ``suffix``.
 
-    Returns ``True`` iff anything was actually removed.
+    Default empty suffix targets the legacy ``VRCPilotMic`` sink; a
+    non-empty suffix scopes the teardown to that single
+    ``VRCPilotMic_<suffix>`` and leaves other registered sinks alone.
+    Returns ``True`` iff anything was actually removed (file deleted,
+    runtime module unloaded, or both). Invalid suffixes raise
+    ``ValueError`` via :func:`_normalize_suffix`.
     """
     normalized = _normalize_suffix(suffix)
     path = config_path(suffix=normalized)

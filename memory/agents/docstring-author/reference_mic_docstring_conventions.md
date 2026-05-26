@@ -38,6 +38,18 @@ soundcard migration. Match them when extending the surface.
 - **`#:` attribute docstrings**: prefer over docstrings on the
   following line for module-level constants -- matches the rest of the
   codebase (`vrcpilot.mic.base`, `vrcpilot.mic.linux`).
+- **Suffix-aware registration vocabulary** (`mic/base.py`,
+  `mic/linux.py`, `cli/linux_mic.py`): empty suffix is always
+  described as "preserves the legacy single-sink behaviour /
+  layout" -- this is the explicit back-compat contract callers depend
+  on. Non-empty suffixes are described as "register additional sinks
+  side-by-side without colliding on sink name, filename, or runtime
+  module" -- name the three collision axes, do not generalise. Invalid
+  suffixes raise `ValueError` via `_normalize_suffix`; CLI handlers
+  map this to exit code 2 (argparse-style usage error). The
+  `_unload_matching_null_sinks` trailing-space-needle trick (so
+  `VRCPilotMic` does not unload `VRCPilotMic_alt`) is the one
+  non-obvious internal detail to call out explicitly.
 
 \[\[reference-soundcard-quirks\]\] (in
 `memory/agents/spec-driven-implementer/`) is the upstream reference

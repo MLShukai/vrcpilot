@@ -103,7 +103,13 @@ def register(subparsers: SubParsersAction) -> None:
 
 
 def _run_register(*, suffix: str, runtime_load: bool) -> int:
-    """Execute the ``register`` action."""
+    """Execute the ``register`` action.
+
+    Maps the ``ValueError`` :func:`vrcpilot.mic.base._normalize_suffix`
+    raises for malformed suffixes to exit code 2 (argparse-style usage
+    error) so scripts can distinguish "you typed it wrong" from a real
+    PipeWire failure.
+    """
     from vrcpilot.mic import linux as mic_linux
     from vrcpilot.mic.base import description_for
 
@@ -145,7 +151,14 @@ def _run_register(*, suffix: str, runtime_load: bool) -> int:
 
 
 def _run_unregister(*, suffix: str, all_: bool) -> int:
-    """Execute the ``unregister`` action."""
+    """Execute the ``unregister`` action.
+
+    ``all_`` sweeps every registered suffix discovered by
+    :func:`vrcpilot.mic.linux.iter_registered_suffixes` -- the user-
+    friendly cleanup path for hosts that accumulated multiple sinks
+    across runs. Otherwise a single ``suffix`` (empty for the default
+    sink) is removed and an invalid value exits 2.
+    """
     from vrcpilot.mic import linux as mic_linux
 
     if all_:
@@ -292,6 +305,12 @@ def _print_status_block(suffix: str, *, include_suffix_header: bool) -> None:
 
 def _run_status(*, suffix: str, all_: bool) -> int:
     """Execute the ``status`` action.
+
+    ``all_`` enumerates every registered suffix in turn (blank-line
+    separated, with a leading ``suffix:`` header per block) so users
+    can audit accumulated registrations at a glance; otherwise a single
+    block prints for ``suffix`` and the empty-suffix default keeps its
+    historical header-less four-line layout for back-compat with pins.
 
     Machine-readable state lands on stdout with a stable vocabulary
     (``present`` / ``absent`` for config, ``loaded`` / ``unavailable`` /

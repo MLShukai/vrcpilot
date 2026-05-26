@@ -66,11 +66,13 @@ def config_filename_for(suffix: str = "") -> str:
 
 
 def _normalize_suffix(suffix: str) -> str:
-    """Strip ``suffix`` and validate against ``[A-Za-z0-9_-]``.
+    """Canonicalise ``suffix`` so all derivation helpers agree on its shape.
 
-    Empty / whitespace-only inputs normalise to ``""``. Any other
-    character raises ``ValueError`` so a typo cannot silently produce
-    a different sink name than the caller expected.
+    Empty / whitespace-only inputs collapse to ``""`` (the legacy
+    single-sink path). Any character outside ``[A-Za-z0-9_-]`` raises
+    ``ValueError`` so a typo cannot silently produce a different sink
+    name -- and so the suffix stays safe to splice straight into
+    filenames, PulseAudio tokens, and PipeWire node names downstream.
     """
     if not suffix:
         return ""
