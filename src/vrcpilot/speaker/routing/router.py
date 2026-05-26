@@ -21,6 +21,12 @@ from vrcpilot.speaker.base import CHANNELS, SAMPLE_RATE
 from vrcpilot.speaker.routing.base import AudioDevice
 from vrcpilot.speaker.routing.devices import default_device, find_device
 
+# Aliases for the untyped ``soundcard`` surface. Keeping them named
+# makes the intent clear at every consumption site and localises the
+# ``# pyright: ignore`` clusters to the helper that creates the value.
+_PlayerCtx = ContextManager[Any]
+_Player = Any
+
 
 def _resolve_device(device: str | AudioDevice | None) -> AudioDevice:
     if device is None:
@@ -32,7 +38,7 @@ def _resolve_device(device: str | AudioDevice | None) -> AudioDevice:
 
 def _open_player(
     device: AudioDevice, blocksize: int | None
-) -> tuple[ContextManager[Any], Any]:
+) -> tuple[_PlayerCtx, _Player]:
     """Resolve the ``soundcard`` speaker and enter its player context.
 
     Returns ``(context_manager, entered_player)``; caller is responsible
@@ -43,13 +49,12 @@ def _open_player(
     sc_speaker: Any = sc.get_speaker(  # pyright: ignore[reportUnknownMemberType]
         device.id
     )
-    ctx: ContextManager[Any] = sc_speaker.player(  # pyright: ignore[reportUnknownMemberType]
+    ctx: _PlayerCtx = sc_speaker.player(  # pyright: ignore[reportUnknownMemberType]
         samplerate=SAMPLE_RATE,
         channels=CHANNELS,
         blocksize=blocksize,
     )
-    player: Any = ctx.__enter__()
-    return ctx, player
+    return ctx, ctx.__enter__()
 
 
 class Router:
@@ -79,8 +84,8 @@ class Router:
     _device: AudioDevice
     _chunk_seconds: float
     _blocksize: int | None
-    _sc_player_ctx: ContextManager[Any] | None
-    _sc_player: Any
+    _sc_player_ctx: _PlayerCtx | None
+    _sc_player: _Player
     _loop: SpeakerLoop | None
 
     def __init__(
@@ -140,11 +145,9 @@ class Router:
         except BaseException:
             # Roll back the already-entered player so the partial start
             # leaves no resource attached.
-            try:
-                ctx.__exit__(None, None, None)
-            finally:
-                self._sc_player = None
-                self._sc_player_ctx = None
+            self._sc_player = None
+            self._sc_player_ctx = None
+            ctx.__exit__(None, None, None)
             raise
 
         self._loop = loop
@@ -162,15 +165,14 @@ class Router:
         its captured exception after re-raising, so a second ``stop()``
         following an exception-bearing first one runs cleanly (F2.12).
         """
+        # Snapshot then clear up front so a callback firing concurrently
+        # with stop() sees a ``None`` player and skips its play() call
+        # (mirrors the _on_frames defensive read).
         loop = self._loop
         ctx = self._sc_player_ctx
-
         self._loop = None
         self._sc_player_ctx = None
         self._sc_player = None
-
-        if loop is None and ctx is None:
-            return
 
         try:
             if loop is not None:
