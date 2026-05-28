@@ -586,7 +586,7 @@ class Screenshot:
     y: int
     width: int
     height: int
-    monitor_index: int         # mss.MSS().monitors index
+    monitor_index: int         # deprecated; always 0, removed in 0.6.0
     captured_at: datetime      # UTC
 
     def save(self, png_path: Path | None = None) -> str: ...
@@ -594,21 +594,23 @@ class Screenshot:
     def load(cls, text: str) -> Screenshot: ...
 ```
 
-Pixel data plus the window's on-screen geometry (`x` / `y` are the window's top-left in desktop-absolute pixels; `monitor_index` records the `mss` monitor the capture came from). OCR / detect results are window-local, so this geometry is informational rather than required for clicking. `eq=False` because numpy arrays cannot be compared element-wise in `__eq__`.
+Pixel data plus the window's on-screen geometry (`x` / `y` are the window's top-left in desktop-absolute pixels; `width` / `height` are the captured image's dimensions). OCR / detect results are window-local, so this geometry is informational rather than required for clicking. `eq=False` because numpy arrays cannot be compared element-wise in `__eq__`.
+
+`monitor_index` is a deprecated field kept only for 0.5.x compatibility — `take_screenshot()` always sets it to `0`, and it will be removed in 0.6.0. Constructing a `Screenshot` (or `load()`-ing YAML) with a non-zero value emits a `DeprecationWarning`.
 
 `save()` returns a YAML string. When `png_path` is provided the PNG is written there and the YAML stores `path:`; otherwise the YAML embeds the PNG as base64 under `image:`. `load()` restores either form.
 
 ### `vrcpilot.take_screenshot`
 
 ```python
-def take_screenshot(*, settle_seconds: float = 0.05) -> Screenshot | None: ...
+def take_screenshot(*, pid: int | None = None) -> Screenshot | None: ...
 ```
 
-Focus VRChat, sleep `settle_seconds`, and grab a one-shot capture of the VRChat window only.
+Grab a one-shot capture of the VRChat window only. This reads the window's framebuffer through [`Capture`](#vrcpilotcapturecapture), so the window is neither focused nor raised first; `width` / `height` on the returned `Screenshot` reflect the captured image.
 
-**Returns**: a `Screenshot`, or `None` on a recoverable failure (Wayland-native, focus refused, window unmapped, mss error).
+**Returns**: a `Screenshot`, or `None` on a recoverable failure (Wayland-native session, VRChat not running, window not mapped, or a backend `RuntimeError` / `TimeoutError`).
 
-**Raises**: `NotImplementedError` on unsupported platforms; `ValueError` when `settle_seconds < 0`.
+**Raises**: `NotImplementedError` on unsupported platforms; `VRChatMultipleInstancesError` when `pid` is omitted and several VRChat instances are running (propagated, not swallowed).
 
 ______________________________________________________________________
 

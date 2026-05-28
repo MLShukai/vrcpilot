@@ -16,3 +16,4 @@
 
 - [pulsectl session pattern](project_pulsectl_session_pattern.md) — `vrcpilot.mic.linux._pulse_session(client_name)` で `open_pulse_control` → `try/finally close` の boilerplate を集約。pulsectl を使う新規コードはこの CM を経由する
 - [speaker.linux seams / log contract](project_speaker_linux_seams.md) — PipeWire backend の pinned seam・ログ prefix 契約・pure helper 一覧。リファクタ前に触ってよい/だめな境界を確認
+- [screenshot.py pinned contract](project_screenshot_pinned_contract.md) — pid 素通し / width-height は image 由来 / monitor_index 廃止は __post_init__ 警告 / save の YAML キー順。mss 除去後は無変更が正解

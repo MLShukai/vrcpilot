@@ -3,8 +3,9 @@
 Drives ``vrcpilot.take_screenshot()`` against a real running VRChat
 client to confirm that the returned :class:`vrcpilot.Screenshot`
 contains **only** the VRChat window region (not the surrounding
-desktop, taskbar, or other applications) and that its on-screen
-geometry metadata matches what mss saw.
+desktop, taskbar, or other applications). The pixels now come from
+``Capture`` (window-content capture), so the saved PNG is the window's
+own framebuffer rather than a cropped desktop region.
 
 VRChat is launched in Desktop mode with a 1280x720 window so the client
 is smaller than the screen. That makes the cropping behaviour observable

@@ -30,7 +30,7 @@ OCR and detect emit one coordinate space per match:
 
 `vrcpilot mouse move X Y` interprets `(X, Y)` in the **same window-local frame**, so OCR / detect output and `mouse move` round-trip without any translation. There is no separate desktop-absolute view — the previous `display_pos.{polygon,bbox}` field has been removed.
 
-If you need the desktop-absolute position of the window itself, the `screenshot` YAML still records the window top-left under `x` / `y` (and the monitor index under `monitor_index`).
+If you need the desktop-absolute position of the window itself, the `screenshot` YAML still records the window top-left under `x` / `y`. (The YAML also still emits a `monitor_index` key, but it is deprecated — always `0` and removed in 0.6.0 — so do not rely on it.)
 
 ______________________________________________________________________
 
@@ -145,7 +145,7 @@ vrcpilot screenshot [-o PATH]
 
 - `path` (file mode) or `image` (inline mode)
 - `x`, `y`, `width`, `height`
-- `monitor_index`
+- `monitor_index` (deprecated; always `0`, removed in 0.6.0)
 - `captured_at` (ISO-8601 UTC)
 
 **Exit codes**: `0` on success, `1` if capture fails.
@@ -467,7 +467,7 @@ vrcpilot ocr [-s YAML | --screenshot YAML] [--viz [PATH]]
 **Output**: a YAML document on stdout:
 
 - `captured_at` (ISO-8601 UTC)
-- `window` — `x`, `y`, `width`, `height`, `monitor_index`
+- `window` — `x`, `y`, `width`, `height`, `monitor_index` (deprecated; always `0`, removed in 0.6.0)
 - `words[]` — each entry has `text`, `confidence`, `pos.{polygon,bbox}` (window-local pixels)
 - `viz_path` — present only when `--viz` was used
 
@@ -499,7 +499,7 @@ vrcpilot detect -q QUERY_PATH [-s YAML | --screenshot YAML]
 **Output**: a YAML document on stdout:
 
 - `captured_at` (ISO-8601 UTC)
-- `window` — `x`, `y`, `width`, `height`, `monitor_index`
+- `window` — `x`, `y`, `width`, `height`, `monitor_index` (deprecated; always `0`, removed in 0.6.0)
 - `query` — `path`, `width`, `height`
 - `detections[]` — each entry has `confidence`, `scale`, `rotation`, `pos.{polygon,bbox}` (window-local pixels)
 - `viz_path` — present only when `--viz` was used
