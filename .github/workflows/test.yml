@@ -9,6 +9,9 @@ on:
       - ".github/workflows/test.yml"
       - "pyproject.toml"
       - "uv.lock"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust/**"
   pull_request:
     branches: [main, release/*]
     paths:
@@ -17,6 +20,9 @@ on:
       - ".github/workflows/test.yml"
       - "pyproject.toml"
       - "uv.lock"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust/**"
 
 env:
   UV_VERSION: "0.7.20"
@@ -43,6 +49,16 @@ jobs:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
 
+      # The vrcpilot._native extension is built by maturin during `uv sync`,
+      # so every leg needs a Rust toolchain.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
       # inputtino-python is fetched from git on Linux and built natively
       # against libevdev. See https://github.com/games-on-whales/inputtino/tree/stable/bindings/python
       - name: Install inputtino build dependencies (Ubuntu)
@@ -54,6 +70,15 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --all-extras
+
+      # Rust gate. `cargo test` runs with --no-default-features so the test
+      # binary links libpython; `uv run` puts the project interpreter on PATH
+      # for pyo3's build script.
+      - name: Rust format / lint / test
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+          uv run cargo test --no-default-features
 
       - name: Check installed packages
         run: |

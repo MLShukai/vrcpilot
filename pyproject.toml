@@ -69,11 +69,22 @@ ocr = [
 ]
 
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[tool.maturin]
+# Keep the existing src-layout: the pure-Python package stays at
+# src/vrcpilot/ and the compiled cdylib is dropped in beside it as
+# vrcpilot._native. abi3 (set via the pyo3 feature in Cargo.toml) means a
+# single wheel per platform spans CPython 3.12-3.14, mirroring the
+# windows-capture dependency's cp39-abi3 wheel.
+python-source = "src"
+module-name = "vrcpilot._native"
+manifest-path = "Cargo.toml"
 
 [dependency-groups]
 dev = [
+    "maturin>=1.7,<2",
     "pre-commit>=4.2.0",
     "pyright>=1.1.398",
     "pytest>=8.3.5",

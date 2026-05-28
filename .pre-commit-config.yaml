@@ -78,6 +78,8 @@ repos:
       - id: codespell
         args:
           - --skip=*.ipynb**
+          # "crate" is the Rust term, not a misspelling of "create".
+          - --ignore-words-list=crate
 
   # Additional Python checks
   - repo: https://github.com/pre-commit/pygrep-hooks
@@ -90,3 +92,25 @@ repos:
       - id: rst-backticks
       - id: rst-directive-colons
       - id: rst-inline-touching-normal
+
+  # Rust (native backend). Scoped to .rs files and pinned to the `manual`
+  # stage: they need a Rust toolchain, so the pre-commit CI job stays
+  # toolchain-free and fmt/clippy are enforced by the Test workflow's cargo
+  # steps instead. Run locally with `pre-commit run --hook-stage manual` or
+  # via `just rust-check`.
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: cargo fmt --
+        language: system
+        types: [rust]
+        pass_filenames: false
+        stages: [manual]
+      - id: cargo-clippy
+        name: cargo clippy
+        entry: cargo clippy --all-targets -- -D warnings
+        language: system
+        types: [rust]
+        pass_filenames: false
+        stages: [manual]

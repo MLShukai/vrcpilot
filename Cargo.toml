@@ -1,0 +1,33 @@
+[package]
+name = "vrcpilot-native"
+version = "0.4.0"
+edition = "2021"
+publish = false
+description = "Native (Rust/PyO3) backend for the vrcpilot Python package."
+license = "MIT"
+rust-version = "1.82"
+
+# Single cdylib compiled to `src/vrcpilot/_native.<abi3>.{so,pyd}` by
+# maturin (see `[tool.maturin]` in pyproject.toml). Sources live under
+# `rust/` -- deliberately outside `src/` so pyright (`./src`) and ruff
+# (`*.py`) never scan `.rs` files.
+[lib]
+name = "vrcpilot_native"
+crate-type = ["cdylib"]
+path = "rust/lib.rs"
+
+[dependencies]
+# abi3-py312: build against the 3.12+ stable ABI so one wheel spans
+# 3.12-3.14. `extension-module` is intentionally NOT listed here -- see
+# the `[features]` block below for why.
+pyo3 = { version = "0.27.2", features = ["abi3-py312"] }
+
+[features]
+# `extension-module` tells pyo3 not to link libpython (symbols are
+# resolved at runtime by the host interpreter). That is required when
+# building the wheel, but it breaks `cargo test`: a test binary cannot
+# resolve those symbols at runtime. So we gate it behind a feature that is
+# on by default (maturin/`cargo build` get it) and turn it off for tests
+# with `cargo test --no-default-features`, which links libpython normally.
+default = ["extension-module"]
+extension-module = ["pyo3/extension-module"]

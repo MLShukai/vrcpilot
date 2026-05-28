@@ -5,7 +5,6 @@ on:
     tags: ["v*"]
 
 env:
-  PYTHON_VERSION: "3.12"
   UV_VERSION: "0.7.20"
 
 concurrency:
@@ -13,54 +12,82 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
-    name: Build distributions
+  check-version:
+    name: Verify tag matches version
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
 
-      # inputtino-python is fetched from git on Linux and built natively
-      # against libevdev. See https://github.com/games-on-whales/inputtino/tree/stable/bindings/python
-      - name: Install inputtino build dependencies (Ubuntu)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            cmake build-essential pkg-config libevdev-dev
-
-      - name: Install uv and set the python version
-        uses: astral-sh/setup-uv@v4
-        with:
-          version: ${{ env.UV_VERSION }}
-          python-version: ${{ env.PYTHON_VERSION }}
-          enable-cache: true
-
+      # Plain python3 (preinstalled, has tomllib) -- avoids triggering a
+      # maturin build just to read the version.
       - name: Verify tag matches pyproject version
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME#v}"
-          PROJ=$(uv run python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+          PROJ=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
           echo "tag=${TAG} project=${PROJ}"
           if [ "${TAG}" != "${PROJ}" ]; then
             echo "::error::tag (${TAG}) does not match pyproject.toml version (${PROJ})"
             exit 1
           fi
 
-      - name: Build sdist and wheel
-        run: uv build
+  build-wheels:
+    name: Build wheel (${{ matrix.platform.target }})
+    needs: check-version
+    runs-on: ${{ matrix.platform.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          # abi3 (cp312-abi3) -> one wheel per platform spans 3.12-3.14.
+          # manylinux 2_28 baseline leaves room for PipeWire's runtime libs
+          # (linked by the speaker backend in a later workstream).
+          - { runner: ubuntu-latest, target: x86_64, manylinux: "2_28" }
+          - { runner: windows-latest, target: x64, manylinux: "auto" }
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: List built artifacts
-        run: ls -la dist/
+      - uses: dtolnay/rust-toolchain@stable
 
-      - name: Upload distributions
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          args: --release --out dist
+          target: ${{ matrix.platform.target }}
+          manylinux: ${{ matrix.platform.manylinux }}
+
+      - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dist
-          path: dist/
+          name: wheels-${{ matrix.platform.target }}
+          path: dist/*.whl
+
+  build-sdist:
+    name: Build sdist
+    needs: check-version
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+
+      - name: Upload sdist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
 
   publish-to-testpypi:
     name: Publish to Test PyPI
-    needs: build
+    needs: [build-wheels, build-sdist]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment:
@@ -69,11 +96,11 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - name: Download distributions
+      - name: Download all distributions
         uses: actions/download-artifact@v4
         with:
-          name: dist
-          path: dist/
+          path: dist
+          merge-multiple: true
 
       - name: Publish to Test PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
@@ -91,11 +118,11 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - name: Download distributions
+      - name: Download all distributions
         uses: actions/download-artifact@v4
         with:
-          name: dist
-          path: dist/
+          path: dist
+          merge-multiple: true
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
@@ -111,11 +138,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download distributions
+      - name: Download all distributions
         uses: actions/download-artifact@v4
         with:
-          name: dist
-          path: dist/
+          path: dist
+          merge-multiple: true
 
       - name: Sign distributions with sigstore
         uses: sigstore/gh-action-sigstore-python@v3.0.0

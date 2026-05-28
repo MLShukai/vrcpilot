@@ -41,8 +41,22 @@ test:
 type:
     uv run pyright
 
-# Run all workflow (format, test, type)
-run: format test type
+# Rebuild the native (Rust) extension into the venv after editing rust/.
+# `uv sync` builds it on first setup; this forces a rebuild on .rs changes
+# while preserving uv's editable install of the Python sources.
+build-native:
+    uv sync --reinstall-package vrcpilot
+
+# Rust gate: format check, lint, and unit tests. `cargo test` runs with
+# --no-default-features (so libpython links) under `uv run` so pyo3 finds
+# the project interpreter.
+rust-check:
+    cargo fmt --check
+    cargo clippy --all-targets -- -D warnings
+    uv run cargo test --no-default-features
+
+# Run all workflow (format, rust gate, native rebuild, test, type)
+run: format rust-check build-native test type
 
 # Run an end-to-end scenario script (default: all scenarios; e.g. `just e2e-test launch_terminate`)
 # On Linux SSH sessions, falls back to the active local X11 display so GUI apps render on the desktop.

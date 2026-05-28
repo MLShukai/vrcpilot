@@ -184,3 +184,9 @@ _e2e_artifacts/
 
 # Claude Code harness scratch memory (canonical store is memory/agents/)
 .claude/agent-memory/
+
+# Rust / Cargo (native backend crate; Cargo.lock IS tracked for
+# reproducible builds, the compiled cdylib is covered by *.so above and
+# the .pyd extension here)
+/target/
+*.pyd
