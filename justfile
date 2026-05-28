@@ -45,7 +45,7 @@ type:
 # `uv sync` builds it on first setup; this forces a rebuild on .rs changes
 # while preserving uv's editable install of the Python sources.
 build-native:
-    uv sync --reinstall-package vrcpilot
+    uv sync --all-extras --reinstall-package vrcpilot
 
 # Rust gate: format check, lint, and unit tests. `cargo test` runs with
 # --no-default-features (so libpython links) under `uv run` so pyo3 finds

@@ -44,6 +44,7 @@ import pytest
 from vrcpilot.process import (
     PID_WAIT_INTERVAL,
     PID_WAIT_TIMEOUT,
+    VRCHAT_PROCESS_NAME,
     VRChatMultipleInstancesError,
     VRChatNotRunningError,
     find_pids,
@@ -309,9 +310,46 @@ class TestTerminateExplicitPid:
         assert short_lived_subprocess.poll() is None
 
 
+class TestFindPidsNativeScan:
+    """Real-resource checks on the native ``find_pids`` scan.
+
+    The autouse ``_no_real_vrchat`` fixture stubs the native scan so the
+    rest of the suite observes "no VRChat". These tests undo that to
+    exercise the *real* native process-table walk and pin two contracts
+    against the live host: it never reports a non-VRChat process, and it
+    agrees with an independent ``psutil`` enumeration of the same host.
+    Nothing is mocked -- this is a narrow integration-real check of the
+    Rust adapter against the real OS process table.
+    """
+
+    @pytest.mark.integration_real
+    def test_ignores_non_vrchat_and_agrees_with_psutil(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        short_lived_subprocess: subprocess.Popen[bytes],
+    ):
+        # Drop the autouse isolation so find_pids() runs the real native
+        # scan instead of the empty stub.
+        monkeypatch.undo()
+
+        native = set(find_pids())
+
+        # Our spawned child is a Python interpreter, never VRChat.exe, so
+        # the name filter must exclude it.
+        assert short_lived_subprocess.pid not in native
+        # The native scan agrees with an independent psutil enumeration of
+        # VRChat.exe on this host (typically empty under CI).
+        oracle = {
+            proc.pid
+            for proc in psutil.process_iter(["name"])
+            if proc.info["name"] == VRCHAT_PROCESS_NAME
+        }
+        assert native == oracle
+
+
 # NOTE: The success path of terminate() -- actually killing a running
 # VRChat.exe and observing psutil.wait_procs() complete -- requires a
 # real VRChat instance and lives in tests/e2e/. find_pids() with a
 # populated result (single / multi / create_time ordering / AccessDenied
-# skip) is similarly e2e-only because the test policy forbids
-# individual tests from re-patching ``vrcpilot.process.pid.psutil.process_iter``.
+# skip) is similarly e2e-only: the native scan only reports a real
+# ``VRChat.exe``, which cannot be faked as an ordinary subprocess.

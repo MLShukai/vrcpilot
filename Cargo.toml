@@ -21,6 +21,7 @@ path = "rust/lib.rs"
 # 3.12-3.14. `extension-module` is intentionally NOT listed here -- see
 # the `[features]` block below for why.
 pyo3 = { version = "0.27.2", features = ["abi3-py312"] }
+sysinfo = { version = "0.36.1", default-features = false, features = ["system"] }
 
 [features]
 # `extension-module` tells pyo3 not to link libpython (symbols are

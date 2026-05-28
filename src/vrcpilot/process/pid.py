@@ -7,6 +7,8 @@ from typing import Final
 
 import psutil
 
+from vrcpilot import _native
+
 from .errors import VRChatMultipleInstancesError, VRChatNotRunningError
 
 #: Process name used by VRChat. On Linux/Steam Deck the client runs under
@@ -37,18 +39,13 @@ def find_pids() -> list[int]:
     it as an error would make cross-session enumeration explode. The
     downstream cost: if the *only* running VRChat is hidden behind
     ``AccessDenied``, :func:`resolve_pid` will report "not running".
+
+    The process-table scan runs in the native extension
+    (:mod:`vrcpilot._native`) with the GIL released, so calling this on
+    the input hot-loop (``ensure_target`` before every key/mouse event)
+    does not block concurrent Python threads.
     """
-    pairs: list[tuple[float, int]] = []
-    for proc in psutil.process_iter(["name"]):
-        if proc.info["name"] != VRCHAT_PROCESS_NAME:
-            continue
-        try:
-            ct = proc.create_time()
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
-        pairs.append((ct, proc.pid))
-    pairs.sort(key=lambda kv: kv[0], reverse=True)
-    return [pid for _, pid in pairs]
+    return _native.process.find_pids()
 
 
 def resolve_pid(pid: int | None) -> int:
