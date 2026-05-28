@@ -1,8 +1,8 @@
 """Tests for :mod:`vrcpilot.controls.mouse.linux`.
 
 Linux-only and requires both ``/dev/uinput`` write access (for
-``inputtino.Mouse``) and a reachable X11 display (for
-``open_x11_display`` to read the root-screen dimensions
+``inputtino.Mouse``) and a reachable X11 display (for the
+``x11_display`` context manager to read the root-screen dimensions
 (``width_in_pixels`` / ``height_in_pixels``) via python-xlib at
 construction time). Three module-level skips gate the rest of the
 file:
@@ -10,8 +10,8 @@ file:
 1. Non-Linux platforms (the module raises :class:`ImportError`).
 2. ``/dev/uinput`` not writable (inputtino opens the device at
    constructor time; see ``tests/e2e/mouse.py`` for the udev setup).
-3. No X11 display reachable (``open_x11_display`` returns ``None`` and
-   the constructor raises :class:`RuntimeError`).
+3. No X11 display reachable (the ``x11_display`` context manager
+   yields ``None`` and the constructor raises :class:`RuntimeError`).
 
 The tests cover only the pure-logic parts of the backend:
 
@@ -31,7 +31,9 @@ that owns the cursor.
 
 from __future__ import annotations
 
+import contextlib
 import sys
+from collections.abc import Iterator
 
 import pytest
 
@@ -113,13 +115,17 @@ class TestLinuxMouseConstructs:
     ) -> None:
         # Spec §4.2.1 / §6: when no X11 display is reachable the
         # constructor must raise ``RuntimeError`` (not ``Xlib.error.XError``).
-        # ``open_x11_display`` is a vrcpilot-owned wrapper, so patching it
-        # to return ``None`` is not a 3rd-party-surface mock. ``inputtino``
+        # ``x11_display`` is a vrcpilot-owned context manager, so patching it
+        # to yield ``None`` is not a 3rd-party-surface mock. ``inputtino``
         # opens ``/dev/uinput`` for real *before* the display lookup, hence
         # this runs under the module-level uinput skip gate.
+        @contextlib.contextmanager
+        def _no_display() -> Iterator[None]:
+            yield None
+
         mocker.patch(
-            "vrcpilot.controls.mouse.linux.open_x11_display",
-            return_value=None,
+            "vrcpilot.controls.mouse.linux.x11_display",
+            _no_display,
         )
         with pytest.raises(RuntimeError):
             LinuxMouse()
