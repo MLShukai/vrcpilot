@@ -18,7 +18,23 @@ class _ProcessModule:
     def find_pids() -> list[int]:
         """PIDs of every running VRChat process, newest first."""
 
-class _WindowModule: ...
+class _WindowModule:
+    @staticmethod
+    def focus_window(pid: int, /) -> bool:
+        """Bring the VRChat window owned by ``pid`` to the foreground."""
+
+    @staticmethod
+    def unfocus_window(pid: int, /) -> bool:
+        """Send the VRChat window owned by ``pid`` to the z-order bottom."""
+
+    @staticmethod
+    def is_window_foreground(pid: int, /) -> bool:
+        """Whether the VRChat window owned by ``pid`` owns the foreground."""
+
+    @staticmethod
+    def get_window_rect(pid: int, /) -> tuple[int, int, int, int] | None:
+        """``(x, y, width, height)`` of the VRChat window, or ``None``."""
+
 class _CaptureModule: ...
 class _SpeakerModule: ...
 

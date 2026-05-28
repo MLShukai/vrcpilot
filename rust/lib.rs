@@ -17,6 +17,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyModule;
 
 mod process;
+mod window;
 
 /// Create a child module, attach it to `parent` as an attribute, and
 /// register it in `sys.modules` under its fully-qualified name.
@@ -45,7 +46,8 @@ fn add_submodule<'py>(parent: &Bound<'py, PyModule>, name: &str) -> PyResult<Bou
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let process = add_submodule(m, "process")?;
     process::register(&process)?;
-    add_submodule(m, "window")?;
+    let window = add_submodule(m, "window")?;
+    window::register(&window)?;
     add_submodule(m, "capture")?;
     add_submodule(m, "speaker")?;
     Ok(())

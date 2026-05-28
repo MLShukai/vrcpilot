@@ -204,3 +204,40 @@ class TestUnfocusWindow:
         _ = x11_window
 
         assert unfocus_window(pid=os.getpid()) is True
+
+
+class TestNativeWindowRectMatchesXlib:
+    """The native ``get_window_rect`` must agree with the python-xlib helper
+    that the (still-Python) capture backend uses.
+
+    ``vrcpilot.geometry`` now reads the rect via the native x11rb path
+    while ``vrcpilot.capture.linux`` still reads it via
+    ``vrcpilot.linux.get_window_rect``. If the two disagree, mouse-click
+    translation (geometry) drifts from the captured frame (capture). This
+    pins them to the same value against a real X window -- in particular
+    that the native path reproduces the sign convention of the xlib
+    helper's ``translate_coords`` negation.
+    """
+
+    @pytest.mark.integration_real
+    def test_native_rect_matches_xlib_helper(self):
+        from vrcpilot import _native
+        from vrcpilot.linux import get_window_rect as xlib_get_window_rect
+
+        display = open_x11_display()
+        assert display is not None
+        window = _spawn_x11_window(display, 320, 240, os.getpid())
+        try:
+            xlib_rect = xlib_get_window_rect(display, window)
+            native_rect = _native.window.get_window_rect(os.getpid())
+        finally:
+            try:
+                window.destroy()
+                display.sync()
+            except Exception:
+                pass
+            display.close()
+
+        assert xlib_rect is not None
+        assert native_rect is not None
+        assert tuple(native_rect) == tuple(xlib_rect)
