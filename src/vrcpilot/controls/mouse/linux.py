@@ -16,7 +16,7 @@ from typing import override
 
 import inputtino
 
-from vrcpilot.linux import open_x11_display
+from vrcpilot.linux import x11_display
 
 from .base import Mouse, MouseButton
 
@@ -49,20 +49,17 @@ class LinuxMouse(Mouse):
     def __init__(self) -> None:
         self._imp = inputtino.Mouse()
         time.sleep(_UINPUT_BIND_SETTLE)
-        # open_x11_display() makes the caller responsible for closing the
-        # connection, so probe the root screen size under try/finally.
-        display = open_x11_display()
-        if display is None:
-            raise RuntimeError(
-                "X11 display unavailable; LinuxMouse needs a reachable "
-                "display for absolute moves"
-            )
-        try:
+        # x11_display() owns the connection lifetime and closes it on exit,
+        # so we only need to probe the root screen size inside the block.
+        with x11_display() as display:
+            if display is None:
+                raise RuntimeError(
+                    "X11 display unavailable; LinuxMouse needs a reachable "
+                    "display for absolute moves"
+                )
             screen = display.screen()
             self._screen_w = int(screen.width_in_pixels)
             self._screen_h = int(screen.height_in_pixels)
-        finally:
-            display.close()
 
     @override
     def _do_move(self, x: int, y: int, *, relative: bool) -> None:
