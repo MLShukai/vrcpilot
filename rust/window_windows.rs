@@ -10,7 +10,8 @@
 //! SetForegroundWindow / SetWindowPos(HWND_BOTTOM) / GetForegroundWindow /
 //! GetWindowRect (per-monitor-DPI-aware V2). Soft-fails to false / None.
 
-use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT, TRUE};
+use windows::core::BOOL;
+use windows::Win32::Foundation::{HWND, LPARAM, RECT, TRUE};
 use windows::Win32::UI::HiDpi::{
     SetThreadDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
 };
