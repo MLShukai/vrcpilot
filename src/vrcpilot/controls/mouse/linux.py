@@ -15,7 +15,8 @@ import time
 from typing import override
 
 import inputtino
-import mss
+
+from vrcpilot.linux import open_x11_display
 
 from .base import Mouse, MouseButton
 
@@ -41,22 +42,27 @@ class LinuxMouse(Mouse):
     """``inputtino``-backed :class:`Mouse`.
 
     Opens ``/dev/uinput`` at construction. Screen size for absolute
-    moves is captured once from ``mss.monitors[0]`` (whole desktop).
+    moves is read once from the python-xlib root screen dimensions
+    (``width_in_pixels`` / ``height_in_pixels``).
     """
 
     def __init__(self) -> None:
         self._imp = inputtino.Mouse()
         time.sleep(_UINPUT_BIND_SETTLE)
-        # Match screenshot.py: explicit instantiate / close (not
-        # the context manager) so test fakes can be plain mocks
-        # without implementing __enter__ / __exit__.
-        sct = mss.MSS()
+        # open_x11_display() makes the caller responsible for closing the
+        # connection, so probe the root screen size under try/finally.
+        display = open_x11_display()
+        if display is None:
+            raise RuntimeError(
+                "X11 display unavailable; LinuxMouse needs a reachable "
+                "display for absolute moves"
+            )
         try:
-            bbox = sct.monitors[0]
-            self._screen_w = int(bbox["width"])
-            self._screen_h = int(bbox["height"])
+            screen = display.screen()
+            self._screen_w = int(screen.width_in_pixels)
+            self._screen_h = int(screen.height_in_pixels)
         finally:
-            sct.close()
+            display.close()
 
     @override
     def _do_move(self, x: int, y: int, *, relative: bool) -> None:
