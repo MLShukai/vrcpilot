@@ -640,7 +640,7 @@ class Screenshot:
     y: int
     width: int
     height: int
-    monitor_index: int         # mss.MSS().monitors index
+    monitor_index: int         # 廃止予定。常に 0、0.6.0 で削除
     captured_at: datetime      # UTC
 
     def save(self, png_path: Path | None = None) -> str: ...
@@ -648,21 +648,23 @@ class Screenshot:
     def load(cls, text: str) -> Screenshot: ...
 ```
 
-ピクセルデータに加え、ウィンドウの画面上ジオメトリ（`x` / `y` はウィンドウの左上のデスクトップ絶対ピクセル、`monitor_index` はキャプチャ元の `mss` モニタ）を保持します。OCR / detect の結果はウィンドウローカルであるため、このジオメトリはクリックに必須ではなく参考情報です。`eq=False` なのは、numpy 配列を `__eq__` で要素ごとに比較できないためです。
+ピクセルデータに加え、ウィンドウの画面上ジオメトリ（`x` / `y` はウィンドウの左上のデスクトップ絶対ピクセル、`width` / `height` はキャプチャした画像の寸法）を保持します。OCR / detect の結果はウィンドウローカルであるため、このジオメトリはクリックに必須ではなく参考情報です。`eq=False` なのは、numpy 配列を `__eq__` で要素ごとに比較できないためです。
+
+`monitor_index` は 0.5.x の後方互換のためだけに残されている廃止予定フィールドです — `take_screenshot()` は常に `0` を設定し、0.6.0 で削除されます。非ゼロ値で `Screenshot` を構築する（または非ゼロ値の YAML を `load()` する）と `DeprecationWarning` が送出されます。
 
 `save()` は YAML 文字列を返します。`png_path` が与えられた場合は PNG をそこに書き込み、YAML には `path:` を格納します。さもなければ YAML が PNG を `image:` 下に base64 で埋め込みます。`load()` はいずれの形式も復元します。
 
 ### `vrcpilot.take_screenshot`
 
 ```python
-def take_screenshot(*, settle_seconds: float = 0.05) -> Screenshot | None: ...
+def take_screenshot(*, pid: int | None = None) -> Screenshot | None: ...
 ```
 
-VRChat をフォーカスし、`settle_seconds` だけスリープしたうえで、VRChat ウィンドウのみのワンショットキャプチャを取得します。
+VRChat ウィンドウのみのワンショットキャプチャを取得します。[`Capture`](#vrcpilotcapturecapture) を介してウィンドウのフレームバッファを読むため、事前にフォーカスや前面化は行いません。戻り値の `Screenshot` の `width` / `height` はキャプチャした画像の寸法を反映します。
 
-**Returns**: `Screenshot`、もしくはリカバー可能な失敗（Wayland ネイティブ、フォーカス拒否、ウィンドウ未マップ、mss エラー）の場合は `None`。
+**Returns**: `Screenshot`、もしくはリカバー可能な失敗（Wayland ネイティブセッション、VRChat 未起動、ウィンドウ未マップ、バックエンドの `RuntimeError` / `TimeoutError`）の場合は `None`。
 
-**Raises**: サポート外のプラットフォームでは `NotImplementedError`。`settle_seconds < 0` の場合は `ValueError`。
+**Raises**: サポート外のプラットフォームでは `NotImplementedError`。`pid` を省略しつつ複数の VRChat インスタンスが起動している場合は `VRChatMultipleInstancesError`（握り潰さず伝播）。
 
 ______________________________________________________________________
 
