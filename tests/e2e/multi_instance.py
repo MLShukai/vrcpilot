@@ -31,6 +31,7 @@ desktop windows.
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 import vrcpilot
@@ -49,12 +50,26 @@ import _helpers  # noqa: E402
 # about isolation, so we use slots 1 and 2.
 _LAUNCH_WAIT_TIMEOUT: float = 180.0
 
+# On Windows, VRChat boots EasyAntiCheat as part of every launch. Starting
+# the second instance while the first instance's EAC bootstrap is still in
+# flight makes the second launch fail to spawn its process (EAC serializes /
+# refuses the concurrent start), so ``launch(profile=2)`` never observes a
+# PID before the timeout. Let the first instance settle past its EAC
+# bootstrap before launching the second.
+_INTER_LAUNCH_DELAY: float = 5.0
+
 
 def _scenario() -> None:
     _helpers.log("launching profile=1 (no_vr=True)")
     pid_a = vrcpilot.launch(profile=1, no_vr=True, wait_timeout=_LAUNCH_WAIT_TIMEOUT)
     assert pid_a is not None, "profile=1 launch did not observe a PID before timeout"
     _helpers.log(f"profile=1 PID = {pid_a}")
+
+    _helpers.log(
+        f"waiting {_INTER_LAUNCH_DELAY:.0f}s for profile=1 EasyAntiCheat "
+        "bootstrap to settle before launching profile=2"
+    )
+    time.sleep(_INTER_LAUNCH_DELAY)
 
     _helpers.log("launching profile=2 (no_vr=True)")
     pid_b = vrcpilot.launch(profile=2, no_vr=True, wait_timeout=_LAUNCH_WAIT_TIMEOUT)
