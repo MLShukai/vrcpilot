@@ -11,7 +11,7 @@ use std::ffi::OsStr;
 
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
-use sysinfo::{ProcessesToUpdate, System};
+use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
 
 /// VRChat's process name on every supported OS. Under Proton on Linux the
 /// client still presents itself as `VRChat.exe`.
@@ -28,14 +28,22 @@ fn order_pids(mut pairs: Vec<(u64, i64)>) -> Vec<i64> {
 }
 
 /// Walk the process table for VRChat PIDs. Call with the GIL released.
+///
+/// Only real processes are considered: `sysinfo` also lists threads
+/// (`thread_kind().is_some()`), and under Proton a single `VRChat.exe`
+/// spawns dozens of worker threads that all carry the `VRChat.exe` name.
+/// `psutil.process_iter` (the prior implementation) never saw those, so we
+/// drop them to keep the contract -- one entry per actual VRChat process.
+/// `ProcessRefreshKind::nothing()` skips the per-process cpu/memory/user
+/// gathering we do not need, keeping this lean for the input hot-loop.
 fn scan() -> Vec<i64> {
     let mut sys = System::new();
-    sys.refresh_processes(ProcessesToUpdate::All, true);
+    sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing());
     let target = OsStr::new(VRCHAT_PROCESS_NAME);
     let pairs: Vec<(u64, i64)> = sys
         .processes()
         .values()
-        .filter(|p| p.name() == target)
+        .filter(|p| p.thread_kind().is_none() && p.name() == target)
         .map(|p| (p.start_time(), i64::from(p.pid().as_u32())))
         .collect();
     order_pids(pairs)
