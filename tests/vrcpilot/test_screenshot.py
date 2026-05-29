@@ -1,51 +1,26 @@
 """Unit + integration-real tests for :mod:`vrcpilot.screenshot`.
 
-``take_screenshot()`` no longer focuses the window or sleeps; it asks
-:func:`vrcpilot.geometry.get_vrchat_window_rect` for the desktop rect
-and then grabs a single frame through the in-house
-:class:`vrcpilot.Capture` abstraction. Two test doubles substitute the
-vrcpilot-*own* collaborators (never a 3rd-party surface like ``mss`` /
-``windows_capture`` / ``Xlib``):
-
-* ``mocker.patch("vrcpilot.screenshot.Capture", return_value=FakeCapture(...))``
-  swaps the own-ABC :class:`vrcpilot.Capture` for the shared
-  :class:`tests.fakes.FakeCapture` (default frame ``np.zeros((4, 4, 3),
-  uint8)``; ``read_side_effect`` injects backend failures).
-* ``mocker.patch("vrcpilot.screenshot.get_vrchat_window_rect", ...)``
-  swaps the vrcpilot-own rect helper.
-
 The autouse ``_no_real_vrchat`` fixture in :mod:`tests.conftest` leaves
-:func:`vrcpilot.process.find_pids` returning ``[]``, so the real
-``get_vrchat_window_rect`` resolves no PID and returns ``None`` on every
-host; this lets the "VRChat not running" short-circuit be exercised
-without a real display or backend. The save/load round-trip tests use
-real ``tmp_path`` + real PIL + real YAML, so the on-disk schema is
-verified end-to-end without any mocking.
-
-Note on the ``monitor_index`` deprecation: constructing a
-:class:`Screenshot` with a non-zero ``monitor_index`` emits a
-``DeprecationWarning`` (spec 2.3.3). The global
-``filterwarnings = ["ignore::DeprecationWarning"]`` silently ignores it,
-so helpers that build non-zero shots (e.g. :func:`_make_screenshot`,
-which defaults to ``monitor_index=1``) stay green WITHOUT being wrapped
-in ``pytest.warns`` -- wrapping them would wrongly *require* the warning.
-The warning is asserted explicitly only in
-:class:`TestScreenshotMonitorIndexDeprecation`.
+:func:`vrcpilot.process.find_pids` returning ``[]``, so
+:func:`take_screenshot` short-circuits at the focus step (``focus()``
+returns ``False`` when ``resolve_pid`` raises) and returns ``None``
+without ever opening a display or invoking ``mss``. This lets the
+"VRChat not running" path be exercised on every host. The save/load
+round-trip tests use real ``tmp_path`` + real PIL + real YAML, so the
+on-disk schema is verified end-to-end without any mocking.
 """
 
 from __future__ import annotations
 
 import base64
-import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
 import pytest
 import yaml
-from pytest_mock import MockerFixture
 
-from tests.fakes import FakeCapture, write_screenshot_payload
+from tests.fakes import write_screenshot_payload
 from tests.helpers import only_linux
 from vrcpilot.screenshot import Screenshot, take_screenshot
 
@@ -59,13 +34,7 @@ def _make_screenshot(
     monitor_index: int = 1,
     captured_at: datetime | None = None,
 ) -> Screenshot:
-    """Build a real :class:`Screenshot` with a deterministic ndarray.
-
-    Defaults ``monitor_index=1`` (non-zero). That construction emits a
-    ``DeprecationWarning`` which the global ``filterwarnings`` ignore
-    filter swallows, so callers must NOT wrap this in ``pytest.warns``
-    (see the module docstring).
-    """
+    """Build a real :class:`Screenshot` with a deterministic ndarray."""
     if captured_at is None:
         captured_at = datetime(2026, 5, 3, 12, 34, 56, 789012, tzinfo=timezone.utc)
     return Screenshot(
@@ -79,298 +48,44 @@ def _make_screenshot(
     )
 
 
-class TestTakeScreenshotHappyPath:
-    """Rect + a real frame from ``Capture`` produce a populated Screenshot.
+class TestTakeScreenshotInputValidation:
+    """Pure unit-level validation tests — no platform branching involved."""
 
-    Patches the two vrcpilot-own collaborators only: the rect helper
-    returns ``(100, 200, 800, 600)`` and ``Capture`` yields a
-    :class:`FakeCapture` whose default frame is ``(4, 4, 3)``. The rect
-    width/height (800/600) deliberately differ from the frame's (4/4)
-    so the assertions can pin that ``width``/``height`` are
-    *image-derived*, not rect-derived (spec 2.1).
-    """
-
-    def test_returns_screenshot_with_image_derived_dimensions(
-        self, mocker: MockerFixture
-    ):
-        # Spec 2.1 / 2.2 / D-1: width and height come from the captured
-        # image shape, NOT from the window rect, so the invariant
-        # ``image.shape == (height, width, 3)`` holds unconditionally.
-        mocker.patch(
-            "vrcpilot.screenshot.get_vrchat_window_rect",
-            return_value=(100, 200, 800, 600),
-        )
-        mocker.patch("vrcpilot.screenshot.Capture", return_value=FakeCapture())
-
-        shot = take_screenshot()
-
-        assert shot is not None
-        assert shot.image.shape == (4, 4, 3)
-        assert shot.width == 4  # image-derived, not rect's 800
-        assert shot.height == 4  # image-derived, not rect's 600
-
-    def test_x_and_y_come_from_window_rect(self, mocker: MockerFixture):
-        # Spec 2.1 / D-1: x and y are informational, taken from the
-        # rect helper's first two components.
-        mocker.patch(
-            "vrcpilot.screenshot.get_vrchat_window_rect",
-            return_value=(100, 200, 800, 600),
-        )
-        mocker.patch("vrcpilot.screenshot.Capture", return_value=FakeCapture())
-
-        shot = take_screenshot()
-
-        assert shot is not None
-        assert shot.x == 100
-        assert shot.y == 200
-
-    def test_monitor_index_is_always_zero(self, mocker: MockerFixture):
-        # Spec 2.3 / D-1: take_screenshot() always sets monitor_index to
-        # 0 (the deprecated field's post-removal default), so it never
-        # trips the __post_init__ deprecation warning.
-        mocker.patch(
-            "vrcpilot.screenshot.get_vrchat_window_rect",
-            return_value=(100, 200, 800, 600),
-        )
-        mocker.patch("vrcpilot.screenshot.Capture", return_value=FakeCapture())
-
-        shot = take_screenshot()
-
-        assert shot is not None
-        assert shot.monitor_index == 0
-
-    def test_captured_at_is_utc_aware(self, mocker: MockerFixture):
-        # Spec 3.1 / D-1: the timestamp is taken immediately after the
-        # frame read and must be timezone-aware in UTC (utcoffset == 0).
-        mocker.patch(
-            "vrcpilot.screenshot.get_vrchat_window_rect",
-            return_value=(100, 200, 800, 600),
-        )
-        mocker.patch("vrcpilot.screenshot.Capture", return_value=FakeCapture())
-
-        shot = take_screenshot()
-
-        assert shot is not None
-        assert shot.captured_at.tzinfo is not None
-        assert shot.captured_at.utcoffset() == timezone.utc.utcoffset(None)
-
-    def test_image_is_uint8(self, mocker: MockerFixture):
-        # Spec 2.2 step 6 / D-1: the frame is normalised to a uint8
-        # array before being stored on the Screenshot.
-        mocker.patch(
-            "vrcpilot.screenshot.get_vrchat_window_rect",
-            return_value=(100, 200, 800, 600),
-        )
-        mocker.patch("vrcpilot.screenshot.Capture", return_value=FakeCapture())
-
-        shot = take_screenshot()
-
-        assert shot is not None
-        assert shot.image.dtype == np.uint8
-
-
-class TestTakeScreenshotRecoverableFailures:
-    """Recoverable failures resolve to ``None`` so pollers can retry."""
-
-    def test_returns_none_when_rect_is_none(self, mocker: MockerFixture):
-        # Spec 2.2 step 2 / D-2: get_vrchat_window_rect returning None
-        # (VRChat not running OR window unmapped) short-circuits to
-        # None. Capture must never be constructed in this case.
-        mocker.patch("vrcpilot.screenshot.get_vrchat_window_rect", return_value=None)
-        capture_mock = mocker.patch("vrcpilot.screenshot.Capture")
-
-        assert take_screenshot() is None
-        capture_mock.assert_not_called()
-
-    def test_returns_none_when_capture_read_raises_runtime_error(
-        self, mocker: MockerFixture
-    ):
-        # Spec 2.2 step 4 / D-3: a RuntimeError from the backend
-        # (window unmapped, no display, WGC session failure, ...) is a
-        # recoverable failure that is absorbed into None.
-        mocker.patch(
-            "vrcpilot.screenshot.get_vrchat_window_rect",
-            return_value=(100, 200, 800, 600),
-        )
-        mocker.patch(
-            "vrcpilot.screenshot.Capture",
-            return_value=FakeCapture(read_side_effect=RuntimeError("backend failed")),
-        )
-
-        assert take_screenshot() is None
-
-    def test_returns_none_when_capture_read_times_out(self, mocker: MockerFixture):
-        # Spec 2.2 step 4 / D-4: a TimeoutError (WGC frame-wait timeout)
-        # is the other recoverable failure absorbed into None.
-        mocker.patch(
-            "vrcpilot.screenshot.get_vrchat_window_rect",
-            return_value=(100, 200, 800, 600),
-        )
-        mocker.patch(
-            "vrcpilot.screenshot.Capture",
-            return_value=FakeCapture(read_side_effect=TimeoutError("no frame")),
-        )
-
-        assert take_screenshot() is None
+    @pytest.mark.parametrize("settle_seconds", [-0.001, -1.0])
+    def test_negative_settle_seconds_raises_value_error(self, settle_seconds: float):
+        with pytest.raises(ValueError, match="settle_seconds must be >= 0"):
+            take_screenshot(settle_seconds=settle_seconds)
 
 
 class TestTakeScreenshotShortCircuit:
-    """Short-circuits that need no patched collaborators."""
+    """No-VRChat short-circuit: focus() fails => take_screenshot() returns
+    None.
+
+    Uses the autouse ``_no_real_vrchat`` fixture so ``find_pids() == []``
+    and ``resolve_pid(None)`` raises -> ``focus()`` returns False ->
+    ``take_screenshot()`` returns None on every supported platform
+    without ever needing a real display or ``mss`` grab.
+    """
 
     def test_returns_none_when_vrchat_not_running(self):
-        # Spec 2.2 step 2 / D-6: with the autouse ``_no_real_vrchat``
-        # fixture, ``process_iter`` is empty so ``resolve_pid(None)``
-        # raises ``VRChatNotRunningError``; ``get_vrchat_window_rect``
-        # converts that to ``None`` and ``take_screenshot()`` returns
-        # ``None``. (The reason is now "get_vrchat_window_rect returns
-        # None", not the removed "focus() returns False" path.) Runs on
-        # both Windows and Linux runners without any platform setup.
+        # Cross-platform short-circuit: focus() sees no PID and returns
+        # False, take_screenshot() reflects that as None. Runs on both
+        # Windows and Linux runners without any platform-specific setup.
         assert take_screenshot() is None
 
     @only_linux
     def test_returns_none_and_warns_on_wayland_native(
         self, monkeypatch: pytest.MonkeyPatch
     ):
-        # Spec 2.2 step 1 / D-5: native Wayland (XDG_SESSION_TYPE=wayland
-        # and no DISPLAY) is an explicitly unsupported configuration.
-        # The contract is to emit RuntimeWarning AND return None so
-        # polling callers can keep going rather than crash. This path
-        # short-circuits before get_vrchat_window_rect / Capture, so no
-        # patching is needed.
+        # Native Wayland (XDG_SESSION_TYPE=wayland and no DISPLAY) is
+        # an explicitly unsupported configuration. The contract is to
+        # emit RuntimeWarning AND return None so polling callers can
+        # keep going rather than crash.
         monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
         monkeypatch.delenv("DISPLAY", raising=False)
 
         with pytest.warns(RuntimeWarning, match="Wayland native"):
             assert take_screenshot() is None
-
-
-class TestTakeScreenshotPidPropagation:
-    """``pid`` flows unchanged to both collaborators (subclass-trap safe)."""
-
-    def test_pid_is_forwarded_to_rect_helper_and_capture(self, mocker: MockerFixture):
-        # Spec 2.2 step 2/4 / D-10: take_screenshot must NOT resolve the
-        # pid itself (that would swallow VRChatMultipleInstancesError, a
-        # subclass of VRChatNotRunningError). It passes the same pid
-        # straight through to get_vrchat_window_rect and Capture, which
-        # this test pins by inspecting both call records.
-        rect_mock = mocker.patch(
-            "vrcpilot.screenshot.get_vrchat_window_rect",
-            return_value=(100, 200, 800, 600),
-        )
-        capture_mock = mocker.patch(
-            "vrcpilot.screenshot.Capture", return_value=FakeCapture()
-        )
-
-        take_screenshot(pid=4242)
-
-        assert rect_mock.call_args.kwargs["pid"] == 4242
-        assert capture_mock.call_args.kwargs["pid"] == 4242
-
-
-class TestTakeScreenshotUnsupportedPlatform:
-    """Non-win32/linux platforms raise instead of returning None."""
-
-    def test_raises_not_implemented_error_on_unsupported_platform(
-        self, monkeypatch: pytest.MonkeyPatch, mocker: MockerFixture
-    ):
-        # Spec 2.2 step 1 / D-11: an unsupported sys.platform must raise
-        # NotImplementedError (propagated, never absorbed into None).
-        # The platform check happens first, so neither collaborator is
-        # reached; patch them so the test cannot accidentally hit a real
-        # backend if the implementation order regresses.
-        monkeypatch.setattr("vrcpilot.screenshot.sys.platform", "darwin")
-        mocker.patch("vrcpilot.screenshot.get_vrchat_window_rect")
-        mocker.patch("vrcpilot.screenshot.Capture")
-
-        with pytest.raises(NotImplementedError):
-            take_screenshot()
-
-
-class TestScreenshotMonitorIndexDeprecation:
-    """``monitor_index != 0`` construction emits a ``DeprecationWarning``.
-
-    Spec 2.3.3 (candidate A): ``__post_init__`` warns only when the
-    deprecated field is given a non-zero value -- i.e. when the
-    soon-to-be-removed feature is actually used. Zero (the post-removal
-    default) is silent so the internal serialization paths
-    (``save()`` / ``cli/ocr.py`` / ``cli/detect.py``) never warn.
-    """
-
-    def test_nonzero_monitor_index_warns_about_removal_in_0_6_0(self):
-        # Spec 2.3.3 / D-8: constructing with a non-zero monitor_index
-        # warns, and the message names the 0.6.0 removal milestone.
-        captured_at = datetime(2026, 5, 3, 12, 0, 0, tzinfo=timezone.utc)
-
-        with pytest.warns(DeprecationWarning, match="0.6.0"):
-            Screenshot(
-                image=np.zeros((4, 4, 3), dtype=np.uint8),
-                x=0,
-                y=0,
-                width=4,
-                height=4,
-                monitor_index=1,
-                captured_at=captured_at,
-            )
-
-    def test_nonzero_monitor_index_warning_names_the_field(self):
-        # Spec 2.3.3 / D-8 (MAY): the message also names the deprecated
-        # field so users know what to stop using.
-        captured_at = datetime(2026, 5, 3, 12, 0, 0, tzinfo=timezone.utc)
-
-        with pytest.warns(DeprecationWarning, match="monitor_index"):
-            Screenshot(
-                image=np.zeros((4, 4, 3), dtype=np.uint8),
-                x=0,
-                y=0,
-                width=4,
-                height=4,
-                monitor_index=2,
-                captured_at=captured_at,
-            )
-
-    def test_zero_monitor_index_does_not_warn(self):
-        # Spec 2.3.3 / D-8: monitor_index=0 must be silent. The global
-        # ``ignore::DeprecationWarning`` filter would mask a real
-        # warning, so escalate it to an error locally and assert that
-        # construction does NOT raise.
-        captured_at = datetime(2026, 5, 3, 12, 0, 0, tzinfo=timezone.utc)
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", DeprecationWarning)
-            Screenshot(
-                image=np.zeros((4, 4, 3), dtype=np.uint8),
-                x=0,
-                y=0,
-                width=4,
-                height=4,
-                monitor_index=0,
-                captured_at=captured_at,
-            )
-
-    def test_load_of_nonzero_monitor_index_warns(self, tmp_path: Path):
-        # Spec 2.3.3 table / D-8: restoring a YAML payload whose
-        # monitor_index is non-zero reconstructs a Screenshot with that
-        # value, so the construction warning fires through load().
-        _, yaml_text = write_screenshot_payload(tmp_path)
-        payload = yaml.safe_load(yaml_text)
-        payload["monitor_index"] = 1
-        text = yaml.safe_dump(payload, sort_keys=False)
-
-        with pytest.warns(DeprecationWarning, match="0.6.0"):
-            Screenshot.load(text)
-
-    def test_load_of_zero_monitor_index_does_not_warn(self, tmp_path: Path):
-        # Spec 2.3.3 table / D-8: restoring monitor_index=0 is silent.
-        # Escalate DeprecationWarning to an error to bypass the global
-        # ignore filter and assert load() does not raise.
-        _, yaml_text = write_screenshot_payload(tmp_path)
-        payload = yaml.safe_load(yaml_text)
-        payload["monitor_index"] = 0
-        text = yaml.safe_dump(payload, sort_keys=False)
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", DeprecationWarning)
-            Screenshot.load(text)
 
 
 class TestScreenshotSavePathMode:

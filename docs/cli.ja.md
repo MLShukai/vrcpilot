@@ -30,7 +30,7 @@ OCR と detect はマッチごとに 1 つの座標空間を出力します:
 
 `vrcpilot mouse move X Y` は `(X, Y)` を **同じウィンドウローカル座標系** で解釈するため、OCR / detect の出力と `mouse move` は変換なしでラウンドトリップします。デスクトップ絶対座標のビューは別途用意されていません — 以前あった `display_pos.{polygon,bbox}` フィールドは削除されました。
 
-ウィンドウ自体のデスクトップ絶対位置が必要な場合、`screenshot` YAML が依然としてウィンドウの左上を `x` / `y` に記録しています。（YAML には `monitor_index` キーも依然として出力されますが、これは廃止予定で — 常に `0`、0.6.0 で削除 — 依存しないでください。）
+ウィンドウ自体のデスクトップ絶対位置が必要な場合、`screenshot` YAML が依然としてウィンドウの左上を `x` / `y`（モニタインデックスを `monitor_index`）に記録しています。
 
 ______________________________________________________________________
 
@@ -145,7 +145,7 @@ vrcpilot screenshot [-o PATH]
 
 - `path`（ファイルモード）または `image`（インラインモード）
 - `x`, `y`, `width`, `height`
-- `monitor_index`（廃止予定。常に `0`、0.6.0 で削除）
+- `monitor_index`
 - `captured_at`（ISO-8601 UTC）
 
 **終了コード**: 成功時 `0`、キャプチャ失敗時 `1`。
@@ -448,7 +448,7 @@ vrcpilot ocr [-s YAML | --screenshot YAML] [--viz [PATH]]
 **出力**: 以下を含む YAML ドキュメントを stdout に出力します:
 
 - `captured_at`（ISO-8601 UTC）
-- `window` — `x`, `y`, `width`, `height`, `monitor_index`（廃止予定。常に `0`、0.6.0 で削除）
+- `window` — `x`, `y`, `width`, `height`, `monitor_index`
 - `words[]` — 各要素は `text`, `confidence`, `pos.{polygon,bbox}`（ウィンドウローカルピクセル）を持ちます
 - `viz_path` — `--viz` を使用した場合のみ存在します
 
@@ -480,7 +480,7 @@ vrcpilot detect -q QUERY_PATH [-s YAML | --screenshot YAML]
 **出力**: 以下を含む YAML ドキュメントを stdout に出力します:
 
 - `captured_at`（ISO-8601 UTC）
-- `window` — `x`, `y`, `width`, `height`, `monitor_index`（廃止予定。常に `0`、0.6.0 で削除）
+- `window` — `x`, `y`, `width`, `height`, `monitor_index`
 - `query` — `path`, `width`, `height`
 - `detections[]` — 各要素は `confidence`, `scale`, `rotation`, `pos.{polygon,bbox}`（ウィンドウローカルピクセル）を持ちます
 - `viz_path` — `--viz` を使用した場合のみ存在します

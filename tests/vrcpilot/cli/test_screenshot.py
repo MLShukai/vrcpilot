@@ -2,8 +2,7 @@
 
 ``vrcpilot screenshot`` orchestrates :func:`vrcpilot.screenshot.take_screenshot`
 plus :meth:`vrcpilot.screenshot.Screenshot.save`. The actual capture
-requires a running VRChat plus a graphical session (WGC on Win32 /
-X11 Composite),
+requires a running VRChat plus a graphical session (Win32 mss / X11),
 so the only contract we can lock in here without e2e infrastructure is
 the failure-path behaviour:
 

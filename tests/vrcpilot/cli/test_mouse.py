@@ -7,8 +7,7 @@ VRChat the guard raises :class:`VRChatNotRunningError`, the CLI
 catches it, prints ``vrcpilot: ...`` to stderr, and exits 1.
 
 The Linux backend's constructor (``LinuxMouse.__init__``) eagerly
-requires a reachable X11 display (it reads the root-screen dimensions
-via python-xlib to size absolute moves), so even the failure path
+calls ``mss.MSS()`` to size the desktop, so even the failure path
 needs a real X11 display to reach ``ensure_target``. The "no VRChat"
 tests below therefore skip when no X server is reachable; the
 Windows backend (``Win32Mouse``) has no equivalent eager dependency.
@@ -27,10 +26,9 @@ from vrcpilot.cli import build_parser, main
 
 #: Skip the focus-guard tests when the platform backend's eager
 #: dependencies cannot be initialised. On Linux without an X display
-#: ``LinuxMouse.__init__`` raises ``RuntimeError`` (``open_x11_display``
-#: returns ``None``) before ``ensure_target`` ever runs; on Windows
-#: ``Win32Mouse`` has no equivalent eager dependency so the marker is a
-#: no-op there.
+#: ``LinuxMouse.__init__`` raises ``XError`` from ``mss.MSS()`` before
+#: ``ensure_target`` ever runs; on Windows ``Win32Mouse`` has no
+#: equivalent eager dependency so the marker is a no-op there.
 _requires_real_backend = pytest.mark.skipif(
     sys.platform == "linux" and not has_x11_display(),
     reason="LinuxMouse needs an X11 display to construct",

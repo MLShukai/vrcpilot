@@ -14,7 +14,6 @@ import time
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import cast
 
 # E2E scenarios run as scripts (``python tests/e2e/foo.py``) rather
 # than via pytest, so the repo root is not on ``sys.path`` -- ``uv run``
@@ -24,7 +23,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-import pyscreenshot as ImageGrab  # noqa: E402
+import mss  # noqa: E402
+import mss.tools  # noqa: E402
 from PIL import Image  # noqa: E402
 
 import vrcpilot  # noqa: E402
@@ -144,7 +144,7 @@ def warmup(seconds: float = WARMUP_SECONDS) -> None:
 
 
 def save_monitor_screenshot(scenario: str, label: str) -> Path:
-    """Capture the whole desktop and save under ``_e2e_artifacts/``.
+    """Capture all monitors and save under ``_e2e_artifacts/``.
 
     For a VRChat-window-only screenshot, use :func:`vrcpilot.take_screenshot`
     instead; this helper is for whole-desktop visual records.
@@ -166,11 +166,9 @@ def save_monitor_screenshot(scenario: str, label: str) -> Path:
         the same scenario run (see :func:`scenario_dir`).
     """
     path = scenario_dir(scenario) / f"{label}.png"
-    # ``pyscreenshot.grab`` is annotated ``-> 'Image'`` where ``Image`` is the
-    # PIL *module*, not :class:`PIL.Image.Image`; cast to the real runtime type
-    # so pyright resolves ``.save``.
-    img = cast(Image.Image, ImageGrab.grab())
-    img.save(path)
+    with mss.mss() as sct:
+        img = sct.grab(sct.monitors[0])
+    mss.tools.to_png(img.rgb, img.size, output=str(path))
     log(f"screenshot saved: {path}")
     return path
 
@@ -179,7 +177,7 @@ def save_image(scenario: str, label: str, image: Image.Image) -> Path:
     """Save a :class:`PIL.Image.Image` under :data:`ARTIFACT_DIR`.
 
     Companion to :func:`save_monitor_screenshot`: the latter grabs the
-    whole desktop with pyscreenshot, while this one persists an image the
+    whole desktop with mss, while this one persists an image the
     scenario already has in hand (e.g. a ``vrcpilot.Capture`` frame
     converted via ``Image.fromarray``, or a
     ``vrcpilot.take_screenshot()`` result). Both share the same

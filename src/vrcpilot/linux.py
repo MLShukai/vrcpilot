@@ -102,7 +102,7 @@ def get_window_rect(
 
     Coordinates are sign-inverted from the ``translate_coords`` reply
     because python-xlib empirically returns the negation of the window
-    origin; the resulting rect aligns with the region ``Capture`` grabs
+    origin; this matches the rect the prior mss-based capture grabbed
     (see commit ``77a6422``).
 
     Returns:

@@ -271,24 +271,6 @@ wheels = [
 ]
 
 [[package]]
-name = "easyprocess"
-version = "1.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/86/e5/1071ad7de469bf3baae5b04d6c8019876c819c2d428cc1b0f15b4b31fc89/EasyProcess-1.1.tar.gz", hash = "sha256:885898302a57aab948973e8b5d32a4229392b9fb2d986ab1d4ffd590e5ba90ec", size = 11829, upload-time = "2022-01-15T10:58:56.146Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/9c/cf/27d1f4b3bae5e566f94fc716e048120128cf603d5163638d22bcd0fc92d8/EasyProcess-1.1-py3-none-any.whl", hash = "sha256:82eed523a0a5eb12a81fa4eacd9f342caeb3f900eb4b798740e6696ad07e63f9", size = 8660, upload-time = "2022-01-15T10:58:54.473Z" },
-]
-
-[[package]]
-name = "entrypoint2"
-version = "1.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/41/2b/513088059a4bfe89acd8ddb74f9350b399507a0fe6676c3346d54449a5b1/entrypoint2-1.1.tar.gz", hash = "sha256:fc0b7fe7b21acdab47a585ab9407ca7e5c4f96cb6888575db6b0ceb91f0e105a", size = 13393, upload-time = "2022-06-11T06:28:21.619Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/42/ee/84c8990b08efa0265bd10fc8781ef26e3157715bf0dfa47ee3c056b513d4/entrypoint2-1.1-py2.py3-none-any.whl", hash = "sha256:eeb8c327bdb65cdd1668c023a6b110b7e3d1a046fb05e043861ebd9264b3a257", size = 9864, upload-time = "2022-06-11T06:28:19.529Z" },
-]
-
-[[package]]
 name = "filelock"
 version = "3.18.0"
 source = { registry = "https://pypi.org/simple" }
@@ -338,15 +320,6 @@ version = "0.1.0"
 source = { git = "https://github.com/games-on-whales/inputtino.git?subdirectory=bindings%2Fpython#f4ce2b0df536ef309e9ff318f75b460f7097d7c1" }
 dependencies = [
     { name = "typing-extensions" },
-]
-
-[[package]]
-name = "jeepney"
-version = "0.9.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/7b/6f/357efd7602486741aa73ffc0617fb310a29b588ed0fd69c2399acbb85b0c/jeepney-0.9.0.tar.gz", hash = "sha256:cf0e9e845622b81e4a28df94c40345400256ec608d0e55bb8a3feaa9163f5732", size = 106758, upload-time = "2025-02-27T18:51:01.684Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b2/a3/e137168c9c44d18eff0376253da9f1e9234d0239e0ee230d2fee6cea8e55/jeepney-0.9.0-py3-none-any.whl", hash = "sha256:97e5714520c16fc0a45695e5365a2e11b81ea79bba796e26f9f1d178cb182683", size = 49010, upload-time = "2025-02-27T18:51:00.104Z" },
 ]
 
 [[package]]
@@ -742,21 +715,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pyscreenshot"
-version = "3.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "easyprocess" },
-    { name = "entrypoint2" },
-    { name = "jeepney", marker = "sys_platform == 'linux'" },
-    { name = "mss" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/f0/bf/a051bea0ad0fb9877684d0f8b87e0e55970b53b117db80c5f729d6dda762/pyscreenshot-3.1.tar.gz", hash = "sha256:8c0e93f0aef66a6bfe55a86abfced6bd396ae4b4f6cc1e36f04a28ad2625594d", size = 29238, upload-time = "2023-03-12T06:34:24.652Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c6/fb/acc0b5a7251682cd11c67c40a1532ffb1dda71626e9ad7e7ba1e55cc3ae2/pyscreenshot-3.1-py3-none-any.whl", hash = "sha256:73d406d41a0977125bdfd2f6488f0caf1394e84d1d4c1065d5e8b1400b307096", size = 28796, upload-time = "2023-03-12T06:34:22.549Z" },
-]
-
-[[package]]
 name = "pytest"
 version = "8.3.5"
 source = { registry = "https://pypi.org/simple" }
@@ -1068,6 +1026,7 @@ dependencies = [
     { name = "argcomplete" },
     { name = "av" },
     { name = "inputtino-python", marker = "sys_platform == 'linux'" },
+    { name = "mss" },
     { name = "numpy" },
     { name = "opencv-python" },
     { name = "pillow" },
@@ -1094,7 +1053,6 @@ ocr = [
 dev = [
     { name = "pre-commit" },
     { name = "pyright" },
-    { name = "pyscreenshot" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pytest-mock" },
@@ -1108,6 +1066,7 @@ requires-dist = [
     { name = "argcomplete", specifier = ">=3.5,<4" },
     { name = "av", specifier = ">=12,<16" },
     { name = "inputtino-python", marker = "sys_platform == 'linux'", git = "https://github.com/games-on-whales/inputtino.git?subdirectory=bindings%2Fpython" },
+    { name = "mss", specifier = ">=10.2.0" },
     { name = "numpy", specifier = ">=2.1" },
     { name = "onnxruntime", marker = "extra == 'ocr'", specifier = ">=1.18" },
     { name = "opencv-python", specifier = ">=4.10" },
@@ -1131,7 +1090,6 @@ provides-extras = ["ocr"]
 dev = [
     { name = "pre-commit", specifier = ">=4.2.0" },
     { name = "pyright", specifier = ">=1.1.398" },
-    { name = "pyscreenshot", specifier = ">=3.1" },
     { name = "pytest", specifier = ">=8.3.5" },
     { name = "pytest-cov", specifier = ">=6.1.1" },
     { name = "pytest-mock", specifier = ">=3.14.0" },
