@@ -2,6 +2,8 @@
 
 [English](README.md) | **日本語**
 
+**倫理規定:** [利用者およびAIエージェントが守るべき規範](CODE_OF_ETHICS.ja.md)
+
 [![PyPI](https://img.shields.io/pypi/v/vrcpilot?color=blue)](https://pypi.org/project/vrcpilot/)
 [![Python](https://img.shields.io/pypi/pyversions/vrcpilot)](https://pypi.org/project/vrcpilot/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)

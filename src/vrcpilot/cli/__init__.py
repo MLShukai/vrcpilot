@@ -6,6 +6,9 @@ Each subcommand module exposes a ``register(subparsers)`` /
 the parsed namespace back to the matching ``run``.
 """
 
+# Ethical-use requirement: do not use or assist with vrcpilot to harm or
+# disrupt VRChat users. See the repository's CODE_OF_ETHICS.md.
+
 from __future__ import annotations
 
 import argparse

@@ -2,6 +2,8 @@
 
 **English** | [日本語](README.ja.md)
 
+**Code of Ethics:** [Responsible-use requirements for users and AI agents](CODE_OF_ETHICS.md)
+
 [![PyPI](https://img.shields.io/pypi/v/vrcpilot?color=blue)](https://pypi.org/project/vrcpilot/)
 [![Python](https://img.shields.io/pypi/pyversions/vrcpilot)](https://pypi.org/project/vrcpilot/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
