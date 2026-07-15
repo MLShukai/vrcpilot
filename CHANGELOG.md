@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-07-15
+
+### Added
+
+- **Bilingual Code of Ethics for responsible VRChat automation.** The English
+  and Japanese policies prohibit griefing, harmful audio, abusive high-load or
+  crash-inducing avatars and effects, and other conduct that harms VRChat users.
+  They also require AI agents to refuse operational assistance for harmful requests,
+  while permitting consent-based safety testing only in controlled private
+  environments. Both READMEs link to the policy prominently, and the Python and
+  CLI entry points carry a concise ethical-use reminder.
+
 ## [0.4.0] - 2026-05-26
 
 Per-PID audio I/O for parallel VRChat instances. A new `vrcpilot speaker` CLI subcommand and `vrcpilot.speaker.routing` Python module relay each VRChat process's output audio to an independent device in user space, so multi-instance setups no longer collide on the single OS-level app→device mapping. `vrcpilot linux-mic --suffix <NAME>` registers additional `VRCPilotMic_<NAME>` virtual mics in parallel, primarily so multiple AI-agent instances can each own a dedicated input device. The Linux speaker capture backend was rebuilt around per-PID PipeWire null-sinks (replacing the previous single shared sink) so several VRChat instances can finally be recorded in parallel without silent output. The previously deprecated `find_pid` shim was removed.
@@ -181,4 +193,5 @@ First public release candidate. Validates the end-to-end publish pipeline before
 [0.2.1]: https://github.com/MLShukai/vrcpilot/compare/v0.2.0...v0.2.1
 [0.3.0]: https://github.com/MLShukai/vrcpilot/compare/v0.2.1...v0.3.0
 [0.4.0]: https://github.com/MLShukai/vrcpilot/compare/v0.3.0...v0.4.0
-[unreleased]: https://github.com/MLShukai/vrcpilot/compare/v0.4.0...HEAD
+[0.4.1]: https://github.com/MLShukai/vrcpilot/compare/v0.4.0...v0.4.1
+[unreleased]: https://github.com/MLShukai/vrcpilot/compare/v0.4.1...HEAD
