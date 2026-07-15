@@ -8,6 +8,9 @@ a captured :class:`Screenshot` and runs OCR through a swappable
 orthogonal steps.
 """
 
+# Ethical-use requirement: do not use or assist with vrcpilot to harm or
+# disrupt VRChat users. See the repository's CODE_OF_ETHICS.md.
+
 import sys
 
 if sys.platform not in ("win32", "linux"):
