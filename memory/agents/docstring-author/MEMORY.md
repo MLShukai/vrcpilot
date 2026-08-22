@@ -4,7 +4,6 @@ docstring / コメント記述専任エージェントが Google-style docstring
 
 ## feedback（記述ルール）
 
-- [No shell tool in docstring-author agent](feedback_environment_no_shell.md) — `just` や `git` は実行できないので検証はユーザーに戻す
 - [Don't restate Returns in the docstring summary paragraph](feedback_docstring_returns.md) — 戻り値の契約は `Returns:` ブロックだけに書き、summary に重複させない
 
 ## project（vrcpilot サブシステムを文書化する観点）
