@@ -18,6 +18,7 @@
 
 ## feedback（規約・ガイドライン）
 
+- [Claude 設定は Opus 5 前提で書く](feedback_claude_config_opus5.md) — `model: inherit`、harness の memory prompt をコピペしない、自己チェックリストを書かない、詳細は skill へ progressive disclosure
 - [private モジュール規約](feedback_private_module_convention.md) — `_` prefix はテスト無しの真 private 限定。テストするなら prefix を外す
 - [import スタイル](feedback_import_style.md) — 同じサブパッケージ内は相対 import、サブパッケージ境界を跨ぐなら絶対 import。迷ったら絶対
 - [tests ミラーレイアウト](feedback_test_layout_mirror.md) — `tests/` は `src/vrcpilot/` を 1 対 1 でミラーリングする
